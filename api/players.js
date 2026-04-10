@@ -1,6 +1,8 @@
+const SheetsClient = require('../services/sheets');
+
 module.exports = async (req, res) => {
 
-  // 🔥 CORS FORZADO (CLAVE)
+  // CORS (NO TOCAR)
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -10,16 +12,18 @@ module.exports = async (req, res) => {
   }
 
   try {
+    const sheetsClient = new SheetsClient();
+
+    const data = await sheetsClient.getAllRows('JUGADORES');
+
     return res.status(200).json({
       success: true,
-      message: 'API funcionando correctamente 🚀',
-      data: [
-        { nombre: 'Jugador 1' },
-        { nombre: 'Jugador 2' }
-      ]
+      data
     });
 
   } catch (error) {
+    console.error('PLAYERS ERROR:', error);
+
     return res.status(500).json({
       success: false,
       error: error.message
