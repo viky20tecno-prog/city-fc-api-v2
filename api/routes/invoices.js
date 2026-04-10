@@ -2,6 +2,19 @@ const express = require('express');
 const SheetsClient = require('../services/sheets');
 
 const router = express.Router();
+
+router.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  next();
+});
+
 const sheetsClient = new SheetsClient();
 
 /**
