@@ -12,11 +12,7 @@ const inscripcionRouter = require('./routes/inscripcion');
 const app = express();
 
 // Middleware
-app.use(cors({
-  origin: 'https://city-fc-dashboard-theta.vercel.app',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
+app.use(cors());
 
 app.options('*', cors());
 app.use(express.json());
