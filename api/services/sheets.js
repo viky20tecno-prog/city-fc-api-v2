@@ -7,7 +7,7 @@ class SheetsClient {
   }
 
   async initializeAuth() {
-    if (this.sheets) return; // ✅ evitar reinicializar
+    if (this.sheets) return;
 
     try {
       if (!process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
@@ -16,19 +16,16 @@ class SheetsClient {
 
       let keyData;
 
-      try {
-        // Base64
-        const decoded = Buffer.from(
-          process.env.GOOGLE_SERVICE_ACCOUNT_KEY,
-          'base64'
-        ).toString('utf-8');
+      const raw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
 
-        keyData = JSON.parse(decoded);
-      } catch {
+      // 🔥 DETECCIÓN INTELIGENTE (ARREGLA TODO)
+      if (raw.trim().startsWith('{')) {
         // JSON directo
-        keyData = JSON.parse(
-          process.env.GOOGLE_SERVICE_ACCOUNT_KEY.replace(/\\n/g, '\n')
-        );
+        keyData = JSON.parse(raw);
+      } else {
+        // Base64
+        const decoded = Buffer.from(raw, 'base64').toString('utf-8');
+        keyData = JSON.parse(decoded);
       }
 
       const auth = new google.auth.GoogleAuth({
@@ -43,13 +40,13 @@ class SheetsClient {
 
       console.log('✅ Sheets listo');
     } catch (error) {
-      console.error('❌ Error init sheets:', error.message);
+      console.error('❌ Error init sheets:', error);
       throw error;
     }
   }
 
   async getRange(sheetName, range = 'A:Z') {
-    await this.initializeAuth(); // ✅ CLAVE
+    await this.initializeAuth();
 
     const response = await this.sheets.spreadsheets.values.get({
       spreadsheetId: this.spreadsheetId,
