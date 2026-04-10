@@ -14,7 +14,7 @@ module.exports = async (req, res) => {
   try {
     const sheetsClient = new SheetsClient();
 
-    const data = await sheetsClient.getAllRows('JUGADORES');
+    const data = await sheetsClient.getRange('JUGADORES', 'A1:B2');
 
     return res.status(200).json({
       success: true,
