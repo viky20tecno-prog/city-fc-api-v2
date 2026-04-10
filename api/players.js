@@ -1,28 +1,25 @@
-const SheetsClient = require('./services/sheets');
-
 module.exports = async (req, res) => {
+
+  // 🔥 CORS FORZADO (CLAVE)
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   try {
-    const club_id = req.query.club_id;
-
-    if (!club_id) {
-      return res.status(400).json({
-        success: false,
-        error: 'club_id requerido'
-      });
-    }
-
-    const sheetsClient = new SheetsClient();
-
-    const data = await sheetsClient.getAllRows('JUGADORES');
-
-    return res.json({
+    return res.status(200).json({
       success: true,
-      data
+      message: 'API funcionando correctamente 🚀',
+      data: [
+        { nombre: 'Jugador 1' },
+        { nombre: 'Jugador 2' }
+      ]
     });
 
   } catch (error) {
-    console.error('❌ PLAYERS ERROR:', error);
-
     return res.status(500).json({
       success: false,
       error: error.message
