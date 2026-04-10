@@ -5,15 +5,28 @@ const router = express.Router();
 const sheetsClient = new SheetsClient();
 
 /**
+ * 🟢 CORS GLOBAL PARA ESTE ROUTER
+ */
+router.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  next();
+});
+
+/**
  * GET /api/players?club_id=city-fc
  * Lista todos los jugadores activos del club
  */
 router.get('/', async (req, res) => {
   try {
     console.log('🔥 /players endpoint hit');
-    console.log('club_id:', req.club_id);
-
-    const sheetsClient = new SheetsClient();
+    console.log('club_id:', req.query.club_id);
 
     const data = await sheetsClient.getAllRows('JUGADORES');
 
@@ -30,6 +43,7 @@ router.get('/', async (req, res) => {
     });
   }
 });
+
 /**
  * GET /api/players/:cedula?club_id=city-fc
  * Detalle de un jugador específico
@@ -37,11 +51,10 @@ router.get('/', async (req, res) => {
 router.get('/:cedula', async (req, res) => {
   try {
     const { cedula } = req.params;
-    const club_id = req.club_id || 'city-fc';
-    
-    // Buscar jugador por cédula
+    const club_id = req.query.club_id || 'city-fc';
+
     const player = await sheetsClient.searchRow('JUGADORES', 'cedula', cedula);
-    
+
     if (!player) {
       return res.status(404).json({
         success: false,
@@ -49,28 +62,22 @@ router.get('/:cedula', async (req, res) => {
         cedula,
       });
     }
-    
-    // Obtener estado de mensualidades
+
     const invoices = await sheetsClient.searchRows('ESTADO_MENSUALIDADES', 'cedula', cedula);
-    
-    // Obtener estado de uniformes
     const uniforms = await sheetsClient.searchRows('ESTADO_UNIFORMES', 'cedula', cedula);
-    
-    // Obtener estado de torneos
     const tournaments = await sheetsClient.searchRows('ESTADO_TORNEOS', 'cedula', cedula);
-    
-    // Obtener nombre/apellido con variantes
+
     const nombre = player['nombre(s)'] || player.nombre || player.Nombre || player['Nombre(s)'] || '';
     const apellido = player['apellido(s)'] || player.apellido || player.Apellido || player['Apellido(s)'] || '';
-    
+
     res.json({
       success: true,
       club_id,
       player: {
         cedula: player.cedula,
         nombre_completo: `${nombre} ${apellido}`.trim(),
-        nombre: nombre,
-        apellido: apellido,
+        nombre,
+        apellido,
         celular: player.celular,
         email: player.email,
         fecha_nacimiento: player.fecha_nacimiento,
@@ -91,7 +98,6 @@ router.get('/:cedula', async (req, res) => {
         invoices: invoices.length,
         uniforms: uniforms.length,
         tournaments: tournaments.length,
-        // ✅ FIX: era this.calculateTotalDebt (this no existe aquí, es función suelta)
         total_debt: calculateTotalDebt(invoices, uniforms, tournaments),
       },
       invoices: invoices.map(inv => ({
@@ -119,6 +125,7 @@ router.get('/:cedula', async (req, res) => {
         estado: torn.estado,
       })),
     });
+
   } catch (error) {
     console.error('Error in GET /players/:cedula:', error);
     res.status(500).json({
