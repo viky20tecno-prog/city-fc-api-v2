@@ -27,7 +27,7 @@ const sheetsClient = new SheetsClient();
  */
 router.get('/', async (req, res) => {
   try {
-    const club_id = req.club_id || 'city-fc';
+    const club_id = req.query.club_id || 'city-fc';
     const { status, mes, anio = 2026 } = req.query;
     
     // Obtener todas las mensualidades
