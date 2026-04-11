@@ -10,26 +10,11 @@ class SheetsClient {
     if (this.sheets) return;
 
     try {
-      if (!process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
-        throw new Error('Falta GOOGLE_SERVICE_ACCOUNT_KEY');
-      }
-
-      let keyData;
-
-      const raw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
-
-      // 🔥 DETECCIÓN INTELIGENTE (ARREGLA TODO)
-      if (raw.trim().startsWith('{')) {
-        // JSON directo
-        keyData = JSON.parse(raw);
-      } else {
-        // Base64
-        const decoded = Buffer.from(raw, 'base64').toString('utf-8');
-        keyData = JSON.parse(decoded);
-      }
-
       const auth = new google.auth.GoogleAuth({
-        credentials: keyData,
+        credentials: {
+          client_email: process.env.GOOGLE_CLIENT_EMAIL,
+          private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+        },
         scopes: ['https://www.googleapis.com/auth/spreadsheets'],
       });
 
@@ -38,9 +23,10 @@ class SheetsClient {
         auth,
       });
 
-      console.log('✅ Sheets listo');
+      console.log('✅ Sheets conectado');
+
     } catch (error) {
-      console.error('❌ Error init sheets:', error);
+      console.error('❌ ERROR AUTH:', error);
       throw error;
     }
   }
@@ -58,21 +44,8 @@ class SheetsClient {
 
   async getAllRows(sheetName) {
     const rows = await this.getRange(sheetName);
-    return this.parseRows(rows);
-  }
 
-  async searchRow(sheetName, column, value) {
-    const rows = await this.getAllRows(sheetName);
-    return rows.find(r => r[column] === String(value)) || null;
-  }
-
-  async searchRows(sheetName, column, value) {
-    const rows = await this.getAllRows(sheetName);
-    return rows.filter(r => r[column] === String(value));
-  }
-
-  parseRows(rows) {
-    if (!rows || rows.length === 0) return [];
+    if (!rows.length) return [];
 
     const [headers, ...data] = rows;
 
