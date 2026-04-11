@@ -1,24 +1,74 @@
-module.exports = async (req, res) => {
+const { google } = require('googleapis');
 
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+class SheetsClient {
+  constructor() {
+    this.spreadsheetId = process.env.GOOGLE_SHEETS_ID;
+    this.sheets = null;
   }
 
-  try {
+  async initializeAuth() {
+    if (this.sheets) return;
 
-    return res.status(200).json({
-      success: true,
-      test: 'API viva'
+    if (!process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+      throw new Error('Falta GOOGLE_SERVICE_ACCOUNT_KEY');
+    }
+
+    try {
+      const raw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+
+      let keyData;
+
+      if (raw.trim().startsWith('{')) {
+        keyData = JSON.parse(raw);
+      } else {
+        const decoded = Buffer.from(raw, 'base64').toString('utf-8');
+        keyData = JSON.parse(decoded);
+      }
+
+      const auth = new google.auth.GoogleAuth({
+        credentials: keyData,
+        scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+      });
+
+      this.sheets = google.sheets({
+        version: 'v4',
+        auth,
+      });
+
+      console.log('✅ Sheets listo');
+
+    } catch (error) {
+      console.error('❌ ERROR GOOGLE AUTH:', error);
+      throw error;
+    }
+  }
+
+  async getRange(sheetName, range = 'A:Z') {
+    await this.initializeAuth();
+
+    const response = await this.sheets.spreadsheets.values.get({
+      spreadsheetId: this.spreadsheetId,
+      range: `${sheetName}!${range}`,
     });
 
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      error: error.message
+    return response.data.values || [];
+  }
+
+  async getAllRows(sheetName) {
+    const rows = await this.getRange(sheetName);
+
+    if (!rows.length) return [];
+
+    const [headers, ...data] = rows;
+
+    return data.map(row => {
+      const obj = {};
+      headers.forEach((h, i) => {
+        obj[h] = row[i] || '';
+      });
+      return obj;
     });
   }
-};
+}
+
+module.exports = SheetsClient;
