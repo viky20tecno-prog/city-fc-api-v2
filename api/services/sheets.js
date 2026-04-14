@@ -14,21 +14,38 @@ class SheetsClient {
   }
 
   initializeAuth() {
-    if (!process.env.GOOGLE_CLIENT_EMAIL || !process.env.GOOGLE_PRIVATE_KEY) {
-      throw new Error('Faltan variables: GOOGLE_CLIENT_EMAIL o GOOGLE_PRIVATE_KEY');
+  try {
+    if (!process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+      throw new Error('Falta GOOGLE_SERVICE_ACCOUNT_KEY');
+    }
+
+    let keyData;
+    try {
+      // Intentar como base64
+      const decoded = Buffer.from(
+        process.env.GOOGLE_SERVICE_ACCOUNT_KEY, 'base64'
+      ).toString('utf-8');
+      keyData = JSON.parse(decoded);
+    } catch {
+      // Si falla, intentar como JSON directo
+      keyData = JSON.parse(
+        process.env.GOOGLE_SERVICE_ACCOUNT_KEY.replace(/\\n/g, '\n')
+      );
     }
 
     this.auth = new google.auth.GoogleAuth({
-      credentials: {
-        client_email: process.env.GOOGLE_CLIENT_EMAIL,
-        private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-      },
+      credentials: keyData,
       scopes: ['https://www.googleapis.com/auth/spreadsheets'],
     });
 
     this.sheets = google.sheets({ version: 'v4', auth: this.auth });
     console.log('Google Sheets client initialized');
+  } catch (error) {
+    console.error('Error initializing Google Sheets:', error.message);
+    throw error;
   }
+}
+
 
   async getRange(sheetName, range = 'A:Z') {
     try {
