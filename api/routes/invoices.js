@@ -181,4 +181,33 @@ router.get('/player/:cedula', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/invoices/uniformes?club_id=city-fc
+ * Estado de pagos de uniformes por jugador (ESTADO_UNIFORMES)
+ */
+router.get('/uniformes', async (req, res) => {
+  try {
+    const data = await sheetsClient.getAllRows('ESTADO_UNIFORMES');
+    res.json({ success: true, total: data.length, data });
+  } catch (error) {
+    console.error('Error in GET /invoices/uniformes:', error);
+    res.status(500).json({ success: false, error: 'Error fetching uniform status', message: error.message });
+  }
+});
+
+/**
+ * GET /api/invoices/torneos?club_id=city-fc
+ * Estado de pagos de torneos por jugador (ESTADO_TORNEOS)
+ */
+router.get('/torneos', async (req, res) => {
+  try {
+    const data = await sheetsClient.getAllRows('ESTADO_TORNEOS');
+    res.json({ success: true, total: data.length, data });
+  } catch (error) {
+    console.error('Error in GET /invoices/torneos:', error);
+    res.status(500).json({ success: false, error: 'Error fetching tournament status', message: error.message });
+  }
+});
+
+
 module.exports = router;
