@@ -96,23 +96,24 @@ router.post('/', async (req, res) => {
     // conceptos_json | suma_conceptos | validacion_monto | estado_revision |
     // mensaje_alerta | url_comprobante
     await sheetsClient.appendRow('REGISTRO_PAGOS', [
-      club_id,                                          // club_id
-      id_transaccion,                                   // id_transaccion
-      hoy,                                              // fecha_proceso
-      player.celular || '',                             // telefono
-      nombre_detectado || player['nombre(s)'] || '',    // nombre_detectado
-      String(montoNum),                                 // monto_imagen
-      fecha_comprobante || hoy,                         // fecha_comprobante
-      anioActual,                                       // anio_sistema ← string no número
-      banco,                                            // banco
-      referencia || '',                                 // referencia
-      JSON.stringify(conceptos),                        // conceptos_json
-      String(sumaConceptos),                            // suma_conceptos
-      montoNum >= sumaConceptos ? 'correcto' : 'discrepancia', // validacion_monto
-      'aprobado_manual',                                // estado_revision
-      conceptoTipo === 'otro' ? observacion : '',       // mensaje_alerta
-      url_comprobante,                                  // url_comprobante
+      club_id,
+      id_transaccion,
+      hoy,
+      String(cedula),           // ← ANTES era player.celular (error)
+      nombre_detectado || player['nombre(s)'] || '',
+      String(montoNum),
+      fecha_comprobante || hoy,
+      anioActual,
+      banco,
+      referencia || '',
+      JSON.stringify(conceptos),
+      String(sumaConceptos),
+      montoNum >= sumaConceptos ? 'correcto' : 'discrepancia',
+      'aprobado_manual',
+      conceptoTipo === 'otro' ? observacion : '',
+      url_comprobante,
     ]);
+
 
     // ✅ Actualizar hoja de estado según concepto
     if (conceptoTipo === 'mensualidad') {
