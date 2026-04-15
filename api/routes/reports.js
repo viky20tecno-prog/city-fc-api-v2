@@ -39,7 +39,9 @@ router.get('/summary', async (req, res) => {
       invoiceStats.valor_oficial_mes   += parseFloat(inv.valor_oficial)   || 0;
       invoiceStats.valor_pagado_mes    += parseFloat(inv.valor_pagado)     || 0;
       invoiceStats.valor_pendiente_mes += parseFloat(inv.saldo_pendiente)  || 0;
-      invoiceStats.por_estado[inv.estado] = (invoiceStats.por_estado[inv.estado] || 0) + 1;
+      // Si ya pasó el día de gracia, PENDIENTE se cuenta como MORA
+      const estadoReal = (inv.estado === 'PENDIENTE' && pastGracePeriod) ? 'MORA' : inv.estado;
+      invoiceStats.por_estado[estadoReal] = (invoiceStats.por_estado[estadoReal] || 0) + 1;
     });
 
     if (invoiceStats.valor_oficial_mes > 0) {
