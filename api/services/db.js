@@ -230,15 +230,121 @@ async function createArbitrajePago(pagoData) {
   return data;
 }
 
+/**
+ * Mensualidades pendientes de un jugador (para procesar pagos)
+ */
+async function getMensualidadesPendientes(club_id, cedula) {
+  const { data, error } = await supabase
+    .from('mensualidades')
+    .select('*')
+    .eq('club_id', club_id)
+    .eq('cedula', String(cedula))
+    .in('estado', ['PENDIENTE', 'PARCIAL', 'MORA'])
+    .order('numero_mes', { ascending: true });
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Uniformes pendientes de un jugador
+ */
+async function getUniformesPendientes(club_id, cedula) {
+  const { data, error } = await supabase
+    .from('uniformes')
+    .select('*')
+    .eq('club_id', club_id)
+    .eq('cedula', String(cedula))
+    .neq('estado', 'AL_DIA');
+  if (error) throw error;
+  return data;
+}
+
+async function updateUniforme(id, updates) {
+  const { data, error } = await supabase
+    .from('uniformes')
+    .update({ ...updates, fecha_ultima_actualizacion: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Torneos pendientes de un jugador
+ */
+async function getTorneosPendientes(club_id, cedula) {
+  const { data, error } = await supabase
+    .from('torneos')
+    .select('*')
+    .eq('club_id', club_id)
+    .eq('cedula', String(cedula))
+    .neq('estado', 'AL_DIA');
+  if (error) throw error;
+  return data;
+}
+
+async function updateTorneo(id, updates) {
+  const { data, error } = await supabase
+    .from('torneos')
+    .update({ ...updates, fecha_ultima_actualizacion: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Pedidos de uniformes
+ */
+async function getPedidoUniformes(club_id) {
+  const { data, error } = await supabase
+    .from('pedido_uniformes')
+    .select('*')
+    .eq('club_id', club_id);
+  if (error) throw error;
+  return data;
+}
+
+async function createPedidoUniforme(pedidoData) {
+  const { data, error } = await supabase
+    .from('pedido_uniformes')
+    .insert([pedidoData])
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Actualizar pago de arbitraje por id
+ */
+async function updateArbitrajePago(id, updates) {
+  const { data, error } = await supabase
+    .from('arbitraje_pagos')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 module.exports = {
   supabase,
   getClubBySlug,
   getPlayers,
   getPlayerByCedula,
   getMensualidades,
+  getMensualidadesPendientes,
   updateMensualidad,
   getUniformes,
+  getUniformesPendientes,
+  updateUniforme,
   getTorneos,
+  getTorneosPendientes,
+  updateTorneo,
   createPago,
   getPagos,
   createPlayer,
@@ -247,4 +353,7 @@ module.exports = {
   createPartido,
   getArbitrajePagos,
   createArbitrajePago,
+  updateArbitrajePago,
+  getPedidoUniformes,
+  createPedidoUniforme,
 };

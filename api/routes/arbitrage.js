@@ -1,148 +1,140 @@
 const express = require('express');
-const SheetsClient = require('../services/sheets');
+const db = require('../services/db');
 
 const router = express.Router();
-const sheetsClient = new SheetsClient();
-
-// CORS permisivo igual que las otras rutas
-router.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') return res.status(200).end();
-  next();
-});
 
 // GET /api/arbitrage/partidos?club_id=
 router.get('/partidos', async (req, res) => {
   try {
-    const club_id = req.club_id || req.query.club_id;
-    const rows = await sheetsClient.getAllRows('PARTIDOS');
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
-    const partidos = rows
-      .filter(p => p.club_id === club_id)
-      .sort((a, b) => new Date(b.fecha) - new Date(a.fecha))
-      .map(p => ({
-        id: p.id,
-        titulo: p.titulo,
-        fecha: p.fecha,
-        hora: p.hora,
-        equipoA: p.equipo_a,
-        equipoB: p.equipo_b,
-        montoTotal: Number(p.monto_total) || 0,
-      }));
-
-    res.json({ success: true, data: partidos });
+    const partidos = await db.getPartidos(club.id);
+    res.json({
+      success: true,
+      data: partidos.map(p => ({
+        id:         p.id,
+        titulo:     p.titulo,
+        fecha:      p.fecha,
+        equipoA:    p.equipo_a,
+        equipoB:    p.equipo_b,
+        montoTotal: parseFloat(p.monto_total) || 0,
+      })),
+    });
   } catch (err) {
     console.error('Error GET /arbitrage/partidos:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// POST /api/arbitrage/partidos?club_id=
+// POST /api/arbitrage/partidos
 router.post('/partidos', async (req, res) => {
   try {
-    const club_id = req.club_id || req.query.club_id;
     const { titulo, fecha, hora, equipoA, equipoB, montoPorJugador, jugadoresCedulas } = req.body;
 
-    if (!titulo || !fecha || !hora || !equipoA || !equipoB || !montoPorJugador) {
+    if (!titulo || !fecha || !equipoA || !equipoB || !montoPorJugador) {
       return res.status(400).json({ success: false, error: 'Todos los campos son requeridos' });
     }
     if (!jugadoresCedulas || jugadoresCedulas.length === 0) {
       return res.status(400).json({ success: false, error: 'Selecciona al menos un jugador' });
     }
 
-    const partidoId = `partido_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const now = new Date().toISOString();
-    const valorPorJugador = parseInt(montoPorJugador);
-    const montoTotal = valorPorJugador * jugadoresCedulas.length;
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
-    // Guardar partido
-    await sheetsClient.appendRow('PARTIDOS', [
-      club_id, partidoId, titulo, fecha, hora, equipoA, equipoB, montoTotal, now,
-    ]);
+    const valorPorJugador = parseInt(montoPorJugador);
+    const montoTotal      = valorPorJugador * jugadoresCedulas.length;
+    const fechaCompleta   = hora ? `${fecha}T${hora}:00` : fecha;
+
+    const partido = await db.createPartido({
+      club_id:          club.id,
+      titulo,
+      equipo_a:         equipoA,
+      equipo_b:         equipoB,
+      fecha:            fechaCompleta,
+      monto_por_jugador: valorPorJugador,
+      monto_total:      montoTotal,
+    });
 
     // Obtener nombres de jugadores
-    const jugadoresRows = await sheetsClient.getAllRows('JUGADORES');
+    const jugadores = await db.getPlayers(club.id);
     const jugadoresMap = {};
-    jugadoresRows.forEach(j => { jugadoresMap[j.cedula] = j; });
+    jugadores.forEach(j => { jugadoresMap[j.cedula] = j; });
 
-    // Crear un registro de pago por cada jugador seleccionado
-    for (const cedula of jugadoresCedulas) {
+    // Crear registro de pago por cada jugador
+    const pagos = jugadoresCedulas.map(cedula => {
       const jugador = jugadoresMap[cedula];
-      const nombre = jugador
-        ? `${jugador['nombre(s)'] || jugador.nombre || ''} ${jugador.apellidos || ''}`.trim()
-        : cedula;
+      const nombre  = jugador ? `${jugador.nombre || ''} ${jugador.apellidos || ''}`.trim() : cedula;
+      return {
+        club_id:    club.id,
+        partido_id: partido.id,
+        player_id:  jugador ? jugador.id : null,
+        cedula:     String(cedula),
+        nombre,
+        monto:      valorPorJugador,
+        estado:     'PENDIENTE',
+      };
+    });
+    await db.bulkInsert('arbitraje_pagos', pagos);
 
-      await sheetsClient.appendRow('ARBITRAJE_PAGOS', [
-        partidoId, club_id, cedula, nombre, valorPorJugador, 'FALSE', '', now,
-      ]);
-    }
-
-    res.json({ success: true, data: { id: partidoId } });
+    res.json({ success: true, data: { id: partido.id } });
   } catch (err) {
     console.error('Error POST /arbitrage/partidos:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// GET /api/arbitrage/pagos/:partidoId?club_id=
+// GET /api/arbitrage/pagos/:partidoId
 router.get('/pagos/:partidoId', async (req, res) => {
   try {
-    const club_id = req.club_id || req.query.club_id;
-    const { partidoId } = req.params;
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
-    const rows = await sheetsClient.getAllRows('ARBITRAJE_PAGOS');
-    const pagos = rows
-      .filter(p => p.partido_id === partidoId && p.club_id === club_id)
-      .map(p => ({
-        id: `${p.partido_id}_${p.cedula}`,
-        nombre: p.nombre,
-        cedula: p.cedula,
-        valor: Number(p.valor) || 0,
-        estadoPago: p.estado_pago === 'TRUE',
-        metodoPago: p.metodo_pago || '',
-      }));
-
-    res.json({ success: true, pagos });
+    const pagos = await db.getArbitrajePagos(club.id, req.params.partidoId);
+    res.json({
+      success: true,
+      pagos: pagos.map(p => ({
+        id:          p.id,
+        nombre:      p.nombre,
+        cedula:      p.cedula,
+        valor:       parseFloat(p.monto) || 0,
+        estadoPago:  p.estado === 'PAGADO',
+        metodoPago:  p.metodo_pago || '',
+      })),
+    });
   } catch (err) {
     console.error('Error GET /arbitrage/pagos:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// GET /api/arbitrage/resumen/:partidoId?club_id=
+// GET /api/arbitrage/resumen/:partidoId
 router.get('/resumen/:partidoId', async (req, res) => {
   try {
-    const club_id = req.club_id || req.query.club_id;
-    const { partidoId } = req.params;
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
-    const [partidosRows, pagosRows] = await Promise.all([
-      sheetsClient.getAllRows('PARTIDOS'),
-      sheetsClient.getAllRows('ARBITRAJE_PAGOS'),
-    ]);
+    const partidos = await db.getPartidos(club.id);
+    const partido  = partidos.find(p => p.id === req.params.partidoId);
+    const pagos    = await db.getArbitrajePagos(club.id, req.params.partidoId);
 
-    const partido = partidosRows.find(p => p.id === partidoId && p.club_id === club_id);
-    const pagos = pagosRows.filter(p => p.partido_id === partidoId && p.club_id === club_id);
-
-    const montoTotal = partido ? Number(partido.monto_total) : 0;
-    const pagados = pagos.filter(p => p.estado_pago === 'TRUE');
-    const totalRecaudado = pagados.reduce((sum, p) => sum + Number(p.valor), 0);
-    const cantidadPendiente = pagos.length - pagados.length;
+    const montoTotal      = partido ? parseFloat(partido.monto_total) : 0;
+    const pagados         = pagos.filter(p => p.estado === 'PAGADO');
+    const totalRecaudado  = pagados.reduce((sum, p) => sum + (parseFloat(p.monto) || 0), 0);
     const porcentajePagado = montoTotal > 0 ? Math.round((totalRecaudado / montoTotal) * 100) : 0;
 
     res.json({
       success: true,
-      titulo: partido ? partido.titulo : '',
-      fecha: partido ? partido.fecha : '',
-      equipoA: partido ? partido.equipo_a : '',
-      equipoB: partido ? partido.equipo_b : '',
+      titulo:            partido ? partido.titulo : '',
+      fecha:             partido ? partido.fecha : '',
+      equipoA:           partido ? partido.equipo_a : '',
+      equipoB:           partido ? partido.equipo_b : '',
       montoTotal,
       totalRecaudado,
       porcentajePagado,
-      faltante: montoTotal - totalRecaudado,
-      cantidadPendiente,
-      cantidadTotal: pagos.length,
+      faltante:          montoTotal - totalRecaudado,
+      cantidadPendiente: pagos.length - pagados.length,
+      cantidadTotal:     pagos.length,
     });
   } catch (err) {
     console.error('Error GET /arbitrage/resumen:', err.message);
@@ -150,37 +142,26 @@ router.get('/resumen/:partidoId', async (req, res) => {
   }
 });
 
-// POST /api/arbitrage/pagos?club_id= — registrar pago individual
+// POST /api/arbitrage/pagos — registrar pago individual
 router.post('/pagos', async (req, res) => {
   try {
-    const club_id = req.club_id || req.query.club_id;
     const { partidoId, cedula, metodoPago, estadoPago } = req.body;
 
     if (!partidoId || !cedula || !metodoPago) {
       return res.status(400).json({ success: false, error: 'partidoId, cedula y metodoPago son requeridos' });
     }
 
-    const rows = await sheetsClient.getAllRows('ARBITRAJE_PAGOS');
-    const rowsConIdx = rows.map((r, idx) => ({ ...r, _idx: idx }));
-    const target = rowsConIdx.find(
-      r => r.partido_id === partidoId && r.cedula === String(cedula) && r.club_id === club_id
-    );
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
-    if (!target) {
-      return res.status(404).json({ success: false, error: 'Registro no encontrado' });
-    }
+    const pagos  = await db.getArbitrajePagos(club.id, partidoId);
+    const target = pagos.find(p => p.cedula === String(cedula));
+    if (!target) return res.status(404).json({ success: false, error: 'Registro no encontrado' });
 
-    const rowNumber = target._idx + 2;
-    await sheetsClient.updateRow('ARBITRAJE_PAGOS', rowNumber, [
-      target.partido_id,
-      target.club_id,
-      target.cedula,
-      target.nombre,
-      target.valor,
-      estadoPago ? 'TRUE' : 'FALSE',
-      metodoPago,
-      new Date().toISOString(),
-    ]);
+    await db.updateArbitrajePago(target.id, {
+      estado:      estadoPago ? 'PAGADO' : 'PENDIENTE',
+      metodo_pago: metodoPago,
+    });
 
     res.json({ success: true });
   } catch (err) {
