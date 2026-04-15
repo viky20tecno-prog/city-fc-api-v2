@@ -43,22 +43,23 @@ router.get('/partidos', async (req, res) => {
 router.post('/partidos', async (req, res) => {
   try {
     const club_id = req.club_id || req.query.club_id;
-    const { titulo, fecha, hora, equipoA, equipoB, montoTotal, jugadoresCedulas } = req.body;
+    const { titulo, fecha, hora, equipoA, equipoB, montoPorJugador, jugadoresCedulas } = req.body;
 
-    if (!titulo || !fecha || !hora || !equipoA || !equipoB || !montoTotal) {
+    if (!titulo || !fecha || !hora || !equipoA || !equipoB || !montoPorJugador) {
       return res.status(400).json({ success: false, error: 'Todos los campos son requeridos' });
     }
     if (!jugadoresCedulas || jugadoresCedulas.length === 0) {
       return res.status(400).json({ success: false, error: 'Selecciona al menos un jugador' });
     }
 
-    const partidoId = `partido_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    const partidoId = `partido_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const now = new Date().toISOString();
-    const valorPorJugador = Math.round(parseInt(montoTotal) / jugadoresCedulas.length);
+    const valorPorJugador = parseInt(montoPorJugador);
+    const montoTotal = valorPorJugador * jugadoresCedulas.length;
 
     // Guardar partido
     await sheetsClient.appendRow('PARTIDOS', [
-      club_id, partidoId, titulo, fecha, hora, equipoA, equipoB, parseInt(montoTotal), now,
+      club_id, partidoId, titulo, fecha, hora, equipoA, equipoB, montoTotal, now,
     ]);
 
     // Obtener nombres de jugadores
