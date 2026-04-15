@@ -15,7 +15,18 @@ const arbitrageRouter   = require('./routes/arbitrage');
 const app = express();
 
 app.use(cors({
-  origin: 'https://city-fc-dashboard-theta.vercel.app',
+  origin: (origin, callback) => {
+    const allowed = [
+      'https://city-fc-dashboard-theta.vercel.app',
+      'https://city-fc-dashboard-pi.vercel.app',
+    ];
+    // Permitir requests sin origin (Postman, server-to-server) y dominios *.vercel.app del proyecto
+    if (!origin || allowed.includes(origin) || /^https:\/\/city-fc-dashboard[^.]*\.vercel\.app$/.test(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
