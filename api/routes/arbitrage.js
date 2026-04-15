@@ -133,6 +133,10 @@ router.get('/resumen/:partidoId', async (req, res) => {
 
     res.json({
       success: true,
+      titulo: partido ? partido.titulo : '',
+      fecha: partido ? partido.fecha : '',
+      equipoA: partido ? partido.equipo_a : '',
+      equipoB: partido ? partido.equipo_b : '',
       montoTotal,
       totalRecaudado,
       porcentajePagado,
