@@ -318,6 +318,52 @@ async function createPedidoUniforme(pedidoData) {
 }
 
 /**
+ * Suspensiones de mensualidades
+ */
+async function getSuspensiones(club_id) {
+  const { data, error } = await supabase
+    .from('suspensiones')
+    .select('*')
+    .eq('club_id', club_id)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+async function getSuspensionesJugador(club_id, cedula) {
+  const { data, error } = await supabase
+    .from('suspensiones')
+    .select('*')
+    .eq('club_id', club_id)
+    .eq('cedula', String(cedula))
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+async function createSuspension(suspensionData) {
+  const { data, error } = await supabase
+    .from('suspensiones')
+    .insert([suspensionData])
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function deactivateSuspension(id, club_id) {
+  const { data, error } = await supabase
+    .from('suspensiones')
+    .update({ activa: false })
+    .eq('id', id)
+    .eq('club_id', club_id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/**
  * Actualizar pago de arbitraje por id
  */
 async function updateArbitrajePago(id, updates) {
@@ -356,4 +402,8 @@ module.exports = {
   updateArbitrajePago,
   getPedidoUniformes,
   createPedidoUniforme,
+  getSuspensiones,
+  getSuspensionesJugador,
+  createSuspension,
+  deactivateSuspension,
 };

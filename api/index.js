@@ -10,7 +10,8 @@ const reportsRouter     = require('./routes/reports');
 const uniformsRouter    = require('./routes/uniforms');
 const debugRouter       = require('./routes/debug');
 const inscripcionRouter = require('./routes/inscripcion');
-const arbitrageRouter   = require('./routes/arbitrage');
+const arbitrageRouter      = require('./routes/arbitrage');
+const suspensionesRouter   = require('./routes/suspensiones');
 
 const app = express();
 
@@ -78,7 +79,8 @@ app.use('/api/reports',     reportsRouter);
 app.use('/api/uniforms',    uniformsRouter);
 app.use('/api/debug',       debugRouter);
 app.use('/api/inscripcion', inscripcionRouter);
-app.use('/api/arbitrage',  arbitrageRouter);
+app.use('/api/arbitrage',    arbitrageRouter);
+app.use('/api/suspensiones', suspensionesRouter);
 
 // Error handler
 app.use((err, req, res, next) => {

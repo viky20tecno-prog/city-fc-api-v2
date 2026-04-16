@@ -12,12 +12,22 @@ router.get('/summary', async (req, res) => {
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
-    const [jugadores, allInvoices, uniforms, tournaments] = await Promise.all([
+    const [jugadores, allInvoices, uniforms, tournaments, suspensiones] = await Promise.all([
       db.getPlayers(club.id),
       db.getMensualidades(club.id),
       db.getUniformes(club.id),
       db.getTorneos(club.id),
+      db.getSuspensiones(club.id),
     ]);
+
+    const isSuspendido = (cedula, mesNum, anioCheck) =>
+      suspensiones.some(s =>
+        s.activa &&
+        s.cedula === String(cedula) &&
+        parseInt(s.anio) === parseInt(anioCheck) &&
+        s.mes_inicio <= mesNum &&
+        mesNum <= s.mes_fin
+      );
 
     // Filtrar mensualidades del año
     const invoicesAnio = allInvoices.filter(inv => String(inv.anio) === String(anio));
@@ -56,6 +66,7 @@ router.get('/summary', async (req, res) => {
       const mesNum = parseInt(inv.numero_mes);
       const saldo  = parseFloat(inv.saldo_pendiente) || 0;
       if (inv.estado === 'AL_DIA' || saldo <= 0) return;
+      if (isSuspendido(inv.cedula, mesNum, anio)) return;
 
       const esMesAnterior = mesNum < currentMonth;
       const esMesActual   = mesNum === currentMonth;
@@ -144,10 +155,20 @@ router.get('/defaulters', async (req, res) => {
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
-    const [jugadores, allInvoices] = await Promise.all([
+    const [jugadores, allInvoices, suspensiones] = await Promise.all([
       db.getPlayers(club.id),
       db.getMensualidades(club.id),
+      db.getSuspensiones(club.id),
     ]);
+
+    const isSuspendido = (cedula, mesNum) =>
+      suspensiones.some(s =>
+        s.activa &&
+        s.cedula === String(cedula) &&
+        parseInt(s.anio) === parseInt(anio) &&
+        s.mes_inicio <= mesNum &&
+        mesNum <= s.mes_fin
+      );
 
     const playersMap = {};
     jugadores.forEach(p => { playersMap[p.cedula] = p; });
@@ -156,6 +177,7 @@ router.get('/defaulters', async (req, res) => {
       if (String(inv.anio) !== String(anio)) return false;
       if (inv.estado === 'AL_DIA') return false;
       const mesNum = parseInt(inv.numero_mes);
+      if (isSuspendido(inv.cedula, mesNum)) return false;
       if (mesNum < currentMonth) return true;
       if (mesNum === currentMonth && pastGracePeriod) return true;
       return false;
