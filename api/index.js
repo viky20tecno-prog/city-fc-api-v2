@@ -12,6 +12,7 @@ const debugRouter       = require('./routes/debug');
 const inscripcionRouter = require('./routes/inscripcion');
 const arbitrageRouter      = require('./routes/arbitrage');
 const suspensionesRouter   = require('./routes/suspensiones');
+const requireAuth          = require('./middleware/auth');
 
 const app = express();
 
@@ -70,15 +71,20 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-// Rutas
-app.use('/api/players',     playersRouter);
-app.use('/api/invoices',    invoicesRouter);
-app.use('/api/payments',    paymentsRouter);
-app.use('/api/config',      configRouter);
-app.use('/api/reports',     reportsRouter);
-app.use('/api/uniforms',    uniformsRouter);
-app.use('/api/debug',       debugRouter);
+// Rutas públicas (sin auth)
 app.use('/api/inscripcion', inscripcionRouter);
+app.use('/api/debug',       debugRouter);
+
+// Middleware de autenticación para todas las rutas protegidas
+app.use('/api', requireAuth);
+
+// Rutas protegidas
+app.use('/api/players',      playersRouter);
+app.use('/api/invoices',     invoicesRouter);
+app.use('/api/payments',     paymentsRouter);
+app.use('/api/config',       configRouter);
+app.use('/api/reports',      reportsRouter);
+app.use('/api/uniforms',     uniformsRouter);
 app.use('/api/arbitrage',    arbitrageRouter);
 app.use('/api/suspensiones', suspensionesRouter);
 
