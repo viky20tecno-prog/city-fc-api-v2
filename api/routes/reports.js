@@ -20,9 +20,10 @@ router.get('/summary', async (req, res) => {
       db.getSuspensiones(club.id),
     ]);
 
+    // Suspensiones excluyen meses de mora independientemente de si están activas o canceladas
+    // (el jugador no estuvo presente — hecho histórico inmutable)
     const isSuspendido = (cedula, mesNum, anioCheck) =>
       suspensiones.some(s =>
-        s.activa &&
         s.cedula === String(cedula) &&
         parseInt(s.anio) === parseInt(anioCheck) &&
         s.mes_inicio <= mesNum &&
@@ -163,7 +164,6 @@ router.get('/defaulters', async (req, res) => {
 
     const isSuspendido = (cedula, mesNum) =>
       suspensiones.some(s =>
-        s.activa &&
         s.cedula === String(cedula) &&
         parseInt(s.anio) === parseInt(anio) &&
         s.mes_inicio <= mesNum &&
