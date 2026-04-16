@@ -68,6 +68,8 @@ router.get('/summary', async (req, res) => {
       const saldo  = parseFloat(inv.saldo_pendiente) || 0;
       if (inv.estado === 'AL_DIA' || saldo <= 0) return;
       if (isSuspendido(inv.cedula, mesNum, anio)) return;
+      // Abono parcial en el mes actual → no es mora, se muestra como PARCIAL en el dashboard
+      if (inv.estado === 'PARCIAL' && mesNum === currentMonth) return;
 
       const esMesAnterior = mesNum < currentMonth;
       const esMesActual   = mesNum === currentMonth;
@@ -178,6 +180,8 @@ router.get('/defaulters', async (req, res) => {
       if (inv.estado === 'AL_DIA') return false;
       const mesNum = parseInt(inv.numero_mes);
       if (isSuspendido(inv.cedula, mesNum)) return false;
+      // Abono parcial en el mes actual no cuenta como mora
+      if (inv.estado === 'PARCIAL' && mesNum === currentMonth) return false;
       if (mesNum < currentMonth) return true;
       if (mesNum === currentMonth && pastGracePeriod) return true;
       return false;
