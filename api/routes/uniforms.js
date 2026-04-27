@@ -86,4 +86,39 @@ router.post('/', async (req, res) => {
   }
 });
 
+// PUT /api/uniforms/:id
+router.put('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { prendas, talla, numero, nombre_estampar, total } = req.body;
+
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    // Verificar que el pedido pertenece a este club
+    const pedidos = await db.getPedidoUniformes(club.id);
+    const pedido = pedidos.find(p => String(p.id) === String(id));
+    if (!pedido) return res.status(404).json({ success: false, error: 'Pedido no encontrado' });
+
+    // Si el número cambió, verificar que no esté ocupado
+    if (numero && numero !== pedido.numero_estampar) {
+      const ocupado = pedidos.some(p => String(p.id) !== String(id) && p.numero_estampar === String(numero));
+      if (ocupado) return res.status(409).json({ success: false, error: `El número ${numero} ya está asignado a otro jugador` });
+    }
+
+    const updated = await db.updatePedidoUniforme(id, {
+      ...(prendas        !== undefined && { prendas }),
+      ...(talla          !== undefined && { talla }),
+      ...(numero         !== undefined && { numero_estampar: String(numero) }),
+      ...(nombre_estampar !== undefined && { nombre_estampar }),
+      ...(total          !== undefined && { total: Number(total) }),
+    });
+
+    res.json({ success: true, message: 'Pedido actualizado', data: updated });
+  } catch (error) {
+    console.error('Error in PUT /uniforms/:id:', error);
+    res.status(500).json({ success: false, error: 'Error actualizando pedido', message: error.message });
+  }
+});
+
 module.exports = router;

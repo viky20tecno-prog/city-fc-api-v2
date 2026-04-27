@@ -24,6 +24,21 @@ async function getPlayers(club_id) {
 }
 
 /**
+ * Buscar un jugador por número de celular (usado por flujo WhatsApp)
+ */
+async function getPlayerByCelular(club_id, celular) {
+  const { data, error } = await supabase
+    .from('players')
+    .select('*')
+    .eq('club_id', club_id)
+    .eq('celular', String(celular))
+    .single();
+
+  if (error && error.code !== 'PGRST116') throw error;
+  return data || null;
+}
+
+/**
  * Buscar un jugador por cédula dentro de un club
  */
 async function getPlayerByCedula(club_id, cedula) {
@@ -317,6 +332,17 @@ async function createPedidoUniforme(pedidoData) {
   return data;
 }
 
+async function updatePedidoUniforme(id, fields) {
+  const { data, error } = await supabase
+    .from('pedido_uniformes')
+    .update(fields)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 /**
  * Suspensiones de mensualidades
  */
@@ -382,6 +408,7 @@ module.exports = {
   getClubBySlug,
   getPlayers,
   getPlayerByCedula,
+  getPlayerByCelular,
   getMensualidades,
   getMensualidadesPendientes,
   updateMensualidad,
@@ -402,6 +429,7 @@ module.exports = {
   updateArbitrajePago,
   getPedidoUniformes,
   createPedidoUniforme,
+  updatePedidoUniforme,
   getSuspensiones,
   getSuspensionesJugador,
   createSuspension,
