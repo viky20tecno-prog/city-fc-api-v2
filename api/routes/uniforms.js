@@ -90,7 +90,12 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { prendas, talla, numero, nombre_estampar, total } = req.body;
+    const { prendas, talla, numero, nombre_estampar, total, estado } = req.body;
+
+    const ESTADOS_VALIDOS = ['PENDIENTE', 'PAGADO', 'ENTREGADO'];
+    if (estado !== undefined && !ESTADOS_VALIDOS.includes(estado)) {
+      return res.status(400).json({ success: false, error: `Estado inválido. Debe ser uno de: ${ESTADOS_VALIDOS.join(', ')}` });
+    }
 
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
@@ -107,11 +112,12 @@ router.put('/:id', async (req, res) => {
     }
 
     const updated = await db.updatePedidoUniforme(id, {
-      ...(prendas        !== undefined && { prendas }),
-      ...(talla          !== undefined && { talla }),
-      ...(numero         !== undefined && { numero_estampar: String(numero) }),
+      ...(prendas         !== undefined && { prendas }),
+      ...(talla           !== undefined && { talla }),
+      ...(numero          !== undefined && { numero_estampar: String(numero) }),
       ...(nombre_estampar !== undefined && { nombre_estampar }),
-      ...(total          !== undefined && { total: Number(total) }),
+      ...(total           !== undefined && { total: Number(total) }),
+      ...(estado          !== undefined && { estado }),
     });
 
     res.json({ success: true, message: 'Pedido actualizado', data: updated });
