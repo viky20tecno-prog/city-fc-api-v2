@@ -33,9 +33,9 @@ router.get('/numeros', async (req, res) => {
 // POST /api/uniforms
 router.post('/', async (req, res) => {
   try {
-    const { cedula, nombre, tipo, campeon, nombre_estampar, talla, numero } = req.body;
+    const { cedula, nombre, tipo, campeon, nombre_estampar, talla, numero, prendas, total } = req.body;
 
-    if (!cedula || !nombre || !tipo || !talla || !numero) {
+    if (!cedula || !nombre || !talla || !numero) {
       return res.status(400).json({ success: false, error: 'Faltan campos obligatorios' });
     }
 
@@ -65,11 +65,13 @@ router.post('/', async (req, res) => {
       player_id:       player.id,
       cedula:          String(cedula),
       nombre,
-      tipo,
+      tipo:            tipo || 'Jugador',
       campeon:         !!campeon,
       talla,
       nombre_estampar: nombre_estampar || '',
       numero_estampar: String(numero),
+      prendas:         prendas || '',
+      total:           total ? Number(total) : 0,
       estado:          'PENDIENTE',
     });
 
