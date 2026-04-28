@@ -12,6 +12,7 @@ const debugRouter       = require('./routes/debug');
 const inscripcionRouter = require('./routes/inscripcion');
 const arbitrageRouter      = require('./routes/arbitrage');
 const suspensionesRouter   = require('./routes/suspensiones');
+const whatsappRouter       = require('./routes/whatsapp');
 const requireAuth          = require('./middleware/auth');
 
 const app = express();
@@ -71,9 +72,10 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-// Rutas públicas (sin auth)
+// Rutas públicas (sin auth Supabase — whatsapp usa su propio webhook secret)
 app.use('/api/inscripcion', inscripcionRouter);
 app.use('/api/debug',       debugRouter);
+app.use('/api/whatsapp',    whatsappRouter);
 
 // Middleware de autenticación para todas las rutas protegidas
 app.use('/api', requireAuth);
