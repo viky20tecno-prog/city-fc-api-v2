@@ -2,16 +2,17 @@ const express = require('express');
 const db = require('../services/db');
 const router = express.Router();
 
-// GET /api/payments?club_id=city-fc
+// GET /api/payments?club_id=city-fc&estado=pendiente
 router.get('/', async (req, res) => {
   try {
-    const { limit = 50, cedula } = req.query;
+    const { limit = 100, cedula, estado } = req.query;
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
     const pagos = await db.getPagos(club.id, {
       cedula,
-      limit: Math.min(parseInt(limit) || 50, 500),
+      estado_revision: estado || undefined,
+      limit: Math.min(parseInt(limit) || 100, 500),
     });
 
     res.json({
@@ -89,6 +90,60 @@ router.post('/', async (req, res) => {
   } catch (error) {
     console.error('Error in POST /payments:', error);
     res.status(500).json({ success: false, error: 'Error registering payment', message: error.message });
+  }
+});
+
+// PUT /api/payments/:id  — editar, aprobar o rechazar un pago
+router.put('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { accion, monto, banco, referencia, concepto } = req.body;
+
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const pago = await db.getPagoById(id);
+    if (!pago || pago.club_id !== club.id)
+      return res.status(404).json({ success: false, error: 'Pago no encontrado' });
+
+    // ── Solo edición de campos ────────────────────────────────────────────────
+    if (!accion) {
+      const updated = await db.updatePago(id, {
+        ...(monto     !== undefined && { monto: parseInt(monto) }),
+        ...(banco     !== undefined && { banco }),
+        ...(referencia !== undefined && { referencia }),
+        ...(concepto  !== undefined && { concepto }),
+      });
+      return res.json({ success: true, data: updated });
+    }
+
+    // ── Rechazar ──────────────────────────────────────────────────────────────
+    if (accion === 'rechazar') {
+      const updated = await db.updatePago(id, { estado_revision: 'rechazado' });
+      return res.json({ success: true, data: updated });
+    }
+
+    // ── Aprobar ───────────────────────────────────────────────────────────────
+    if (accion === 'aprobar') {
+      if (pago.estado_revision === 'aprobado_manual')
+        return res.status(400).json({ success: false, error: 'Este pago ya fue aprobado' });
+
+      const montoFinal   = parseInt(monto ?? pago.monto);
+      const conceptoFinal = concepto ?? pago.concepto;
+      const cedulaFinal  = pago.cedula;
+
+      if (conceptoFinal === 'mensualidad') await actualizarMensualidad(club.id, cedulaFinal, montoFinal);
+      else if (conceptoFinal === 'uniforme') await actualizarUniforme(club.id, cedulaFinal, montoFinal);
+      else if (conceptoFinal === 'torneo')   await actualizarTorneo(club.id, cedulaFinal, montoFinal, '');
+
+      const updated = await db.updatePago(id, { estado_revision: 'aprobado_manual' });
+      return res.json({ success: true, data: updated });
+    }
+
+    return res.status(400).json({ success: false, error: 'Acción no reconocida' });
+  } catch (error) {
+    console.error('Error in PUT /payments/:id:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

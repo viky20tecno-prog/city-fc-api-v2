@@ -145,19 +145,47 @@ async function createPago(pagoData) {
 }
 
 /**
- * Obtener pagos de un club
+ * Obtener pagos de un club (con datos del jugador)
  */
-async function getPagos(club_id, { cedula, limit = 50 } = {}) {
+async function getPagos(club_id, { cedula, estado_revision, limit = 100 } = {}) {
   let query = supabase
     .from('pagos')
-    .select('*')
+    .select('*, players(nombre, apellidos, celular)')
     .eq('club_id', club_id)
     .order('created_at', { ascending: false })
     .limit(limit);
 
-  if (cedula) query = query.eq('cedula', String(cedula));
+  if (cedula)           query = query.eq('cedula', String(cedula));
+  if (estado_revision)  query = query.eq('estado_revision', estado_revision);
 
   const { data, error } = await query;
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Obtener un pago por id
+ */
+async function getPagoById(id) {
+  const { data, error } = await supabase
+    .from('pagos')
+    .select('*, players(nombre, apellidos, celular)')
+    .eq('id', id)
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Actualizar un pago
+ */
+async function updatePago(id, updates) {
+  const { data, error } = await supabase
+    .from('pagos')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
   if (error) throw error;
   return data;
 }
@@ -420,6 +448,8 @@ module.exports = {
   updateTorneo,
   createPago,
   getPagos,
+  getPagoById,
+  updatePago,
   createPlayer,
   bulkInsert,
   getPartidos,
