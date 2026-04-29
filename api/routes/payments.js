@@ -128,16 +128,46 @@ router.put('/:id', async (req, res) => {
       if (pago.estado_revision === 'aprobado_manual')
         return res.status(400).json({ success: false, error: 'Este pago ya fue aprobado' });
 
-      const montoFinal   = parseInt(monto ?? pago.monto);
+      const montoFinal    = parseInt(monto ?? pago.monto);
       const conceptoFinal = concepto ?? pago.concepto;
-      const cedulaFinal  = pago.cedula;
+      const cedulaFinal   = pago.cedula;
 
-      if (conceptoFinal === 'mensualidad') await actualizarMensualidad(club.id, cedulaFinal, montoFinal);
-      else if (conceptoFinal === 'uniforme') await actualizarUniforme(club.id, cedulaFinal, montoFinal);
-      else if (conceptoFinal === 'torneo')   await actualizarTorneo(club.id, cedulaFinal, montoFinal, '');
+      let resultado = { excedente: 0 };
+      if (conceptoFinal === 'mensualidad') resultado = await actualizarMensualidad(club.id, cedulaFinal, montoFinal);
+      else if (conceptoFinal === 'uniforme') resultado = await actualizarUniforme(club.id, cedulaFinal, montoFinal);
+      else if (conceptoFinal === 'torneo')   resultado = await actualizarTorneo(club.id, cedulaFinal, montoFinal, '');
 
       const updated = await db.updatePago(id, { estado_revision: 'aprobado_manual' });
-      return res.json({ success: true, data: updated });
+
+      // Si hay excedente, guardar registro y notificar al jugador
+      const excedente = resultado?.excedente || 0;
+      if (excedente > 0) {
+        try {
+          const player = await db.getPlayerByCedula(club.id, cedulaFinal);
+          await db.createPago({
+            club_id:         club.id,
+            player_id:       pago.player_id,
+            cedula:          cedulaFinal,
+            monto:           excedente,
+            banco:           'Excedente',
+            concepto:        'otro',
+            referencia:      `excedente-de-${id}`,
+            url_comprobante: '',
+            estado_revision: 'excedente_pendiente',
+          });
+          if (player?.celular) {
+            await sendWhatsAppMessage(player.celular,
+              `💰 Hola ${player.nombre}, tu pago tiene un saldo a favor de *$${excedente.toLocaleString('es-CO')}*.\n\n` +
+              `¿A qué concepto lo abonamos? Responde con:\n` +
+              `• *mensualidad*\n• *uniforme*\n• *torneo*`,
+            );
+          }
+        } catch (e) {
+          console.error('[excedente] error procesando excedente:', e.message);
+        }
+      }
+
+      return res.json({ success: true, data: updated, excedente });
     }
 
     return res.status(400).json({ success: false, error: 'Acción no reconocida' });
@@ -149,11 +179,12 @@ router.put('/:id', async (req, res) => {
 
 async function actualizarMensualidad(club_id, cedula, monto) {
   const pendientes = await db.getMensualidadesPendientes(club_id, cedula);
-  if (pendientes.length === 0) return;
+  if (pendientes.length === 0) return { excedente: monto };
 
   const target      = pendientes[0];
   const nuevoPagado = (parseFloat(target.valor_pagado) || 0) + monto;
   const oficial     = parseFloat(target.valor_oficial) || 0;
+  const excedente   = Math.max(0, nuevoPagado - oficial);
   const nuevoSaldo  = Math.max(0, oficial - nuevoPagado);
   const nuevoEstado = nuevoPagado >= oficial ? 'AL_DIA' : 'PARCIAL';
 
@@ -162,15 +193,17 @@ async function actualizarMensualidad(club_id, cedula, monto) {
     saldo_pendiente: nuevoSaldo,
     estado:          nuevoEstado,
   });
+  return { excedente };
 }
 
 async function actualizarUniforme(club_id, cedula, monto) {
   const pendientes = await db.getUniformesPendientes(club_id, cedula);
-  if (pendientes.length === 0) return;
+  if (pendientes.length === 0) return { excedente: monto };
 
   const target      = pendientes[0];
   const nuevoPagado = (parseFloat(target.valor_pagado) || 0) + monto;
   const oficial     = parseFloat(target.valor_oficial) || 0;
+  const excedente   = Math.max(0, nuevoPagado - oficial);
   const nuevoSaldo  = Math.max(0, oficial - nuevoPagado);
   const nuevoEstado = nuevoPagado >= oficial ? 'AL_DIA' : 'PARCIAL';
 
@@ -179,6 +212,7 @@ async function actualizarUniforme(club_id, cedula, monto) {
     saldo_pendiente: nuevoSaldo,
     estado:          nuevoEstado,
   });
+  return { excedente };
 }
 
 async function actualizarTorneo(club_id, cedula, monto, filtroTorneo) {
@@ -188,11 +222,12 @@ async function actualizarTorneo(club_id, cedula, monto, filtroTorneo) {
       t.nombre_torneo.toLowerCase().includes(filtroTorneo.toLowerCase())
     );
   }
-  if (pendientes.length === 0) return;
+  if (pendientes.length === 0) return { excedente: monto };
 
   const target      = pendientes[0];
   const nuevoPagado = (parseFloat(target.valor_pagado) || 0) + monto;
   const oficial     = parseFloat(target.valor_oficial) || 0;
+  const excedente   = Math.max(0, nuevoPagado - oficial);
   const nuevoSaldo  = Math.max(0, oficial - nuevoPagado);
   const nuevoEstado = nuevoPagado >= oficial ? 'AL_DIA' : 'PARCIAL';
 
@@ -201,6 +236,29 @@ async function actualizarTorneo(club_id, cedula, monto, filtroTorneo) {
     saldo_pendiente: nuevoSaldo,
     estado:          nuevoEstado,
   });
+  return { excedente };
+}
+
+async function sendWhatsAppMessage(celular, body) {
+  const sid   = process.env.TWILIO_ACCOUNT_SID;
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  const from  = process.env.TWILIO_WHATSAPP_FROM || 'whatsapp:+14155238886';
+  if (!sid || !token) {
+    console.warn('[whatsapp] TWILIO_ACCOUNT_SID/AUTH_TOKEN no configurados en Vercel');
+    return;
+  }
+  const to = celular.startsWith('whatsapp:') ? celular : `whatsapp:+57${celular}`;
+  const url = `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${sid}:${token}`).toString('base64')}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({ From: from, To: to, Body: body }).toString(),
+  });
+  if (!res.ok) console.error('[whatsapp] error enviando:', await res.text());
+  else console.log('[whatsapp] mensaje enviado a', to);
 }
 
 module.exports = router;
