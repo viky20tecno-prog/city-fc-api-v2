@@ -51,15 +51,16 @@ router.post('/', async (req, res) => {
 
     // Registrar el pago
     const pago = await db.createPago({
-      club_id:        club.id,
-      player_id:      player.id,
-      cedula:         String(cedula),
-      monto:          montoNum,
+      club_id:         club.id,
+      player_id:       player.id,
+      cedula:          String(cedula),
+      monto:           montoNum,
       banco,
-      concepto:       conceptoTipo,
-      referencia:     referencia || '',
+      concepto:        conceptoTipo,
+      referencia:      referencia || '',
       estado_revision: 'aprobado_manual',
       url_comprobante,
+      tipo_origen:     'MANUAL',
     });
 
     // Actualizar estado según concepto
@@ -154,6 +155,7 @@ router.put('/:id', async (req, res) => {
             referencia:      `excedente-de-${id}`,
             url_comprobante: '',
             estado_revision: 'excedente_pendiente',
+            tipo_origen:     'TRANSFERENCIA_EXCEDENTE',
           });
           if (player?.celular) {
             await sendWhatsAppMessage(player.celular,
@@ -182,10 +184,13 @@ async function actualizarMensualidad(club_id, cedula, monto) {
   if (pendientes.length === 0) return { excedente: monto };
 
   const target      = pendientes[0];
-  const nuevoPagado = (parseFloat(target.valor_pagado) || 0) + monto;
+  const yaPageado   = parseFloat(target.valor_pagado) || 0;
   const oficial     = parseFloat(target.valor_oficial) || 0;
-  const excedente   = Math.max(0, nuevoPagado - oficial);
-  const nuevoSaldo  = Math.max(0, oficial - nuevoPagado);
+  const porPagar    = Math.max(0, oficial - yaPageado);
+  const pagoAplicar = Math.min(monto, porPagar);
+  const excedente   = monto - pagoAplicar;
+  const nuevoPagado = yaPageado + pagoAplicar;
+  const nuevoSaldo  = oficial - nuevoPagado;
   const nuevoEstado = nuevoPagado >= oficial ? 'AL_DIA' : 'PARCIAL';
 
   await db.updateMensualidad(target.id, {
@@ -201,10 +206,13 @@ async function actualizarUniforme(club_id, cedula, monto) {
   if (pendientes.length === 0) return { excedente: monto };
 
   const target      = pendientes[0];
-  const nuevoPagado = (parseFloat(target.valor_pagado) || 0) + monto;
+  const yaPageado   = parseFloat(target.valor_pagado) || 0;
   const oficial     = parseFloat(target.valor_oficial) || 0;
-  const excedente   = Math.max(0, nuevoPagado - oficial);
-  const nuevoSaldo  = Math.max(0, oficial - nuevoPagado);
+  const porPagar    = Math.max(0, oficial - yaPageado);
+  const pagoAplicar = Math.min(monto, porPagar);
+  const excedente   = monto - pagoAplicar;
+  const nuevoPagado = yaPageado + pagoAplicar;
+  const nuevoSaldo  = oficial - nuevoPagado;
   const nuevoEstado = nuevoPagado >= oficial ? 'AL_DIA' : 'PARCIAL';
 
   await db.updateUniforme(target.id, {
@@ -225,10 +233,13 @@ async function actualizarTorneo(club_id, cedula, monto, filtroTorneo) {
   if (pendientes.length === 0) return { excedente: monto };
 
   const target      = pendientes[0];
-  const nuevoPagado = (parseFloat(target.valor_pagado) || 0) + monto;
+  const yaPageado   = parseFloat(target.valor_pagado) || 0;
   const oficial     = parseFloat(target.valor_oficial) || 0;
-  const excedente   = Math.max(0, nuevoPagado - oficial);
-  const nuevoSaldo  = Math.max(0, oficial - nuevoPagado);
+  const porPagar    = Math.max(0, oficial - yaPageado);
+  const pagoAplicar = Math.min(monto, porPagar);
+  const excedente   = monto - pagoAplicar;
+  const nuevoPagado = yaPageado + pagoAplicar;
+  const nuevoSaldo  = oficial - nuevoPagado;
   const nuevoEstado = nuevoPagado >= oficial ? 'AL_DIA' : 'PARCIAL';
 
   await db.updateTorneo(target.id, {
