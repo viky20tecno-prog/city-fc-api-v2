@@ -173,25 +173,29 @@ async function actualizarMensualidad(clubId: string, cedula: string, monto: numb
     .eq('club_id', clubId)
     .eq('cedula', String(cedula))
     .in('estado', ['PENDIENTE', 'PARCIAL', 'MORA'])
+    .gt('valor_oficial', 0)
     .order('numero_mes', { ascending: true });
 
   if (error) { console.error('[mensualidad] select error:', error.message); return null; }
   if (!pendientes?.length) { console.log('[mensualidad] sin pendientes para cedula', cedula); return null; }
 
   const target      = pendientes[0];
-  const nuevoPagado = (parseFloat(target.valor_pagado) || 0) + monto;
+  const yaPageado   = parseFloat(target.valor_pagado) || 0;
   const oficial     = parseFloat(target.valor_oficial) || 0;
-  const nuevoSaldo  = Math.max(0, oficial - nuevoPagado);
+  const porPagar    = Math.max(0, oficial - yaPageado);
+  const pagoAplicar = Math.min(monto, porPagar);
+  const nuevoPagado = yaPageado + pagoAplicar;
+  const nuevoSaldo  = oficial - nuevoPagado;
   const nuevoEstado = nuevoPagado >= oficial ? 'AL_DIA' : 'PARCIAL';
 
-  console.log('[mensualidad] actualizando mes:', target.mes, '| pagado:', nuevoPagado, '| estado:', nuevoEstado);
+  console.log('[mensualidad] mes:', target.mes, '| aplicar:', pagoAplicar, '| nuevo pagado:', nuevoPagado, '| estado:', nuevoEstado);
 
   const { data: updated, error: updateErr } = await supabase
     .from('mensualidades')
     .update({
-      valor_pagado:              nuevoPagado,
-      saldo_pendiente:           nuevoSaldo,
-      estado:                    nuevoEstado,
+      valor_pagado:               nuevoPagado,
+      saldo_pendiente:            nuevoSaldo,
+      estado:                     nuevoEstado,
       fecha_ultima_actualizacion: new Date().toISOString(),
     })
     .eq('id', target.id)
@@ -215,19 +219,22 @@ async function actualizarUniforme(clubId: string, cedula: string, monto: number)
   if (!pendientes?.length) { console.log('[uniforme] sin pendientes para cedula', cedula); return null; }
 
   const target      = pendientes[0];
-  const nuevoPagado = (parseFloat(target.valor_pagado) || 0) + monto;
+  const yaPageado   = parseFloat(target.valor_pagado) || 0;
   const oficial     = parseFloat(target.valor_oficial) || 0;
-  const nuevoSaldo  = Math.max(0, oficial - nuevoPagado);
+  const porPagar    = Math.max(0, oficial - yaPageado);
+  const pagoAplicar = Math.min(monto, porPagar);
+  const nuevoPagado = yaPageado + pagoAplicar;
+  const nuevoSaldo  = oficial - nuevoPagado;
   const nuevoEstado = nuevoPagado >= oficial ? 'AL_DIA' : 'PARCIAL';
 
-  console.log('[uniforme] actualizando | pagado:', nuevoPagado, '| estado:', nuevoEstado);
+  console.log('[uniforme] actualizando | aplicar:', pagoAplicar, '| nuevo pagado:', nuevoPagado, '| estado:', nuevoEstado);
 
   const { data: updated } = await supabase
     .from('uniformes')
     .update({
-      valor_pagado:              nuevoPagado,
-      saldo_pendiente:           nuevoSaldo,
-      estado:                    nuevoEstado,
+      valor_pagado:               nuevoPagado,
+      saldo_pendiente:            nuevoSaldo,
+      estado:                     nuevoEstado,
       fecha_ultima_actualizacion: new Date().toISOString(),
     })
     .eq('id', target.id)
@@ -249,19 +256,22 @@ async function actualizarTorneo(clubId: string, cedula: string, monto: number) {
   if (!pendientes?.length) { console.log('[torneo] sin pendientes para cedula', cedula); return null; }
 
   const target      = pendientes[0];
-  const nuevoPagado = (parseFloat(target.valor_pagado) || 0) + monto;
+  const yaPageado   = parseFloat(target.valor_pagado) || 0;
   const oficial     = parseFloat(target.valor_oficial) || 0;
-  const nuevoSaldo  = Math.max(0, oficial - nuevoPagado);
+  const porPagar    = Math.max(0, oficial - yaPageado);
+  const pagoAplicar = Math.min(monto, porPagar);
+  const nuevoPagado = yaPageado + pagoAplicar;
+  const nuevoSaldo  = oficial - nuevoPagado;
   const nuevoEstado = nuevoPagado >= oficial ? 'AL_DIA' : 'PARCIAL';
 
-  console.log('[torneo] actualizando | pagado:', nuevoPagado, '| estado:', nuevoEstado);
+  console.log('[torneo] actualizando | aplicar:', pagoAplicar, '| nuevo pagado:', nuevoPagado, '| estado:', nuevoEstado);
 
   const { data: updated } = await supabase
     .from('torneos')
     .update({
-      valor_pagado:              nuevoPagado,
-      saldo_pendiente:           nuevoSaldo,
-      estado:                    nuevoEstado,
+      valor_pagado:               nuevoPagado,
+      saldo_pendiente:            nuevoSaldo,
+      estado:                     nuevoEstado,
       fecha_ultima_actualizacion: new Date().toISOString(),
     })
     .eq('id', target.id)
@@ -335,14 +345,129 @@ Deno.serve(async (req: Request) => {
     let urlComprobanteStorage = '';
     const tieneImagen = numMedia > 0 && !!mediaUrl;
 
-    // Sin imagen → pedir foto, no intentar procesar texto
+    // Sin imagen → verificar si el jugador tiene una sesión esperando concepto
     if (!tieneImagen) {
+      const bodyTrimLower = body.trim().toLowerCase();
+      const conceptoRespuesta = bodyTrimLower.includes('uniforme') ? 'uniforme'
+        : bodyTrimLower.includes('torneo') ? 'torneo'
+        : bodyTrimLower.includes('mensualidad') ? 'mensualidad'
+        : null;
+
+      if (conceptoRespuesta) {
+        const hace30min = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+
+        // ── Verificar sesión esperando concepto (imagen sin concepto) ──────────
+        const { data: sesion } = await supabase
+          .from('pagos')
+          .select('*')
+          .eq('player_id', player.id)
+          .eq('estado_revision', 'esperando_concepto')
+          .gte('created_at', hace30min)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (sesion) {
+          const { error: updateErr } = await supabase
+            .from('pagos')
+            .update({ concepto: conceptoRespuesta, estado_revision: 'pendiente' })
+            .eq('id', sesion.id);
+
+          if (updateErr) {
+            console.error('[sesion] update error:', updateErr.message);
+            await sendWhatsAppMessage(from, 'Ocurrió un error al registrar el concepto. Por favor intenta de nuevo.');
+            return twilioOk();
+          }
+
+          console.log(`[sesion] concepto "${conceptoRespuesta}" aplicado a pago id=${sesion.id}`);
+
+          const nombre        = `${player.nombre || ''} ${player.apellidos || ''}`.trim();
+          const conceptoLabel = conceptoRespuesta === 'uniforme' ? 'Uniforme'
+            : conceptoRespuesta === 'torneo' ? 'Torneo'
+            : 'Mensualidad';
+
+          await sendWhatsAppMessage(from,
+            `📋 *Comprobante recibido*\n\n` +
+            `Hola ${nombre}, recibimos tu comprobante:\n` +
+            `• Concepto: *${conceptoLabel}*\n` +
+            `• Monto: *$${sesion.monto.toLocaleString('es-CO')}*\n` +
+            `• Banco: ${sesion.banco}` +
+            (sesion.referencia ? `\n• Referencia: ${sesion.referencia}` : '') +
+            '\n\n⏳ _Será validado con el banco y confirmado pronto. ¡Gracias!_',
+          );
+          return twilioOk();
+        }
+
+        // ── Verificar saldo a favor pendiente de asignar ───────────────────────
+        const { data: excedente } = await supabase
+          .from('pagos')
+          .select('*')
+          .eq('player_id', player.id)
+          .eq('estado_revision', 'excedente_pendiente')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (excedente) {
+          // Aplicar excedente al concepto indicado — validar que exista deuda antes de aplicar
+          let aplicado = false;
+          if (conceptoRespuesta === 'mensualidad') {
+            const resultado = await actualizarMensualidad(club.id, player.cedula, excedente.monto);
+            if (!resultado) {
+              await sendWhatsAppMessage(from,
+                '⚠️ No tienes mensualidades pendientes.\n\n¿A qué otro concepto lo abonamos?\n• *uniforme*\n• *torneo*',
+              );
+              return twilioOk();
+            }
+            aplicado = true;
+          } else if (conceptoRespuesta === 'uniforme') {
+            const resultado = await actualizarUniforme(club.id, player.cedula, excedente.monto);
+            if (!resultado) {
+              await sendWhatsAppMessage(from,
+                '⚠️ No tienes pedidos activos de uniforme.\n\n¿A qué otro concepto lo abonamos?\n• *mensualidad*\n• *torneo*',
+              );
+              return twilioOk();
+            }
+            aplicado = true;
+          } else if (conceptoRespuesta === 'torneo') {
+            const resultado = await actualizarTorneo(club.id, player.cedula, excedente.monto);
+            if (!resultado) {
+              await sendWhatsAppMessage(from,
+                '⚠️ No tienes torneos pendientes.\n\n¿A qué otro concepto lo abonamos?\n• *mensualidad*\n• *uniforme*',
+              );
+              return twilioOk();
+            }
+            aplicado = true;
+          }
+
+          if (aplicado) {
+            await supabase.from('pagos').update({
+              concepto:        conceptoRespuesta,
+              estado_revision: 'aprobado_manual',
+            }).eq('id', excedente.id);
+
+            console.log(`[excedente] $${excedente.monto} aplicado a ${conceptoRespuesta} para cedula ${player.cedula}`);
+
+            const nombre        = `${player.nombre || ''} ${player.apellidos || ''}`.trim();
+            const conceptoLabel = conceptoRespuesta === 'uniforme' ? 'Uniforme'
+              : conceptoRespuesta === 'torneo' ? 'Torneo'
+              : 'Mensualidad';
+
+            await sendWhatsAppMessage(from,
+              `✅ *Saldo a favor aplicado*\n\n` +
+              `Hola ${nombre}, tu saldo de *$${excedente.monto.toLocaleString('es-CO')}* fue abonado a *${conceptoLabel}*. ¡Gracias!`,
+            );
+          }
+          return twilioOk();
+        }
+      }
+
+      // Sin sesión pendiente → pedir foto con concepto
       await sendWhatsAppMessage(from,
-        '📸 Para registrar tu pago envía una *foto del comprobante*.\n\n' +
-        'Puedes agregar en el mensaje:\n' +
-        '• _uniforme_ — si el pago es para uniforme\n' +
-        '• _torneo_ — si el pago es para torneo\n' +
-        '• Sin texto — se registra como mensualidad',
+        '📸 Para registrar tu pago envía una *foto del comprobante* indicando el concepto en el mismo mensaje:\n\n' +
+        '• *mensualidad*\n' +
+        '• *uniforme*\n' +
+        '• *torneo*',
       );
       return twilioOk();
     }
@@ -378,15 +503,34 @@ Deno.serve(async (req: Request) => {
       return twilioOk();
     }
 
-    // ── Detectar concepto — si no viene en el body, pedir al jugador ─────────
+    // ── Detectar concepto — si no viene en el body, guardar sesión y pedir ─────
     const bodyTrim = body.trim().toLowerCase();
     const tieneConcepto = bodyTrim.includes('uniforme') || bodyTrim.includes('torneo') || bodyTrim.includes('mensualidad');
 
     if (!tieneConcepto) {
-      console.log('[concepto] no especificado, pidiendo al jugador');
+      console.log('[concepto] no especificado, guardando sesión esperando_concepto');
+      const { error: sesionErr } = await supabase.from('pagos').insert([{
+        club_id:         club.id,
+        player_id:       player.id,
+        cedula:          player.cedula,
+        monto,
+        banco,
+        referencia,
+        concepto:        'mensualidad',
+        url_comprobante: urlComprobanteStorage,
+        estado_revision: 'esperando_concepto',
+        tipo_origen:     'TRANSFERENCIA',
+      }]);
+
+      if (sesionErr) {
+        console.error('[sesion] insert error:', sesionErr.message);
+        await sendWhatsAppMessage(from, 'Ocurrió un error. Por favor intenta de nuevo.');
+        return twilioOk();
+      }
+
       await sendWhatsAppMessage(from,
         '¿A qué concepto corresponde este pago?\n\n' +
-        'Responde reenviando la imagen con una de estas palabras:\n' +
+        'Responde con una de estas palabras:\n' +
         '• *mensualidad*\n' +
         '• *uniforme*\n' +
         '• *torneo*',
@@ -408,6 +552,7 @@ Deno.serve(async (req: Request) => {
       concepto,
       url_comprobante: urlComprobanteStorage,
       estado_revision: 'pendiente',
+      tipo_origen:     'TRANSFERENCIA',
     }]);
 
     if (pagoError) {
