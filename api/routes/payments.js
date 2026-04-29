@@ -148,71 +148,59 @@ router.put('/:id', async (req, res) => {
 });
 
 async function actualizarMensualidad(club_id, cedula, monto) {
-  try {
-    const pendientes = await db.getMensualidadesPendientes(club_id, cedula);
-    if (pendientes.length === 0) return;
+  const pendientes = await db.getMensualidadesPendientes(club_id, cedula);
+  if (pendientes.length === 0) return;
 
-    const target      = pendientes[0];
-    const nuevoPagado = (parseFloat(target.valor_pagado) || 0) + monto;
-    const oficial     = parseFloat(target.valor_oficial) || 0;
-    const nuevoSaldo  = Math.max(0, oficial - nuevoPagado);
-    const nuevoEstado = nuevoPagado >= oficial ? 'AL_DIA' : 'PARCIAL';
+  const target      = pendientes[0];
+  const nuevoPagado = (parseFloat(target.valor_pagado) || 0) + monto;
+  const oficial     = parseFloat(target.valor_oficial) || 0;
+  const nuevoSaldo  = Math.max(0, oficial - nuevoPagado);
+  const nuevoEstado = nuevoPagado >= oficial ? 'AL_DIA' : 'PARCIAL';
 
-    await db.updateMensualidad(target.id, {
-      valor_pagado:    nuevoPagado,
-      saldo_pendiente: nuevoSaldo,
-      estado:          nuevoEstado,
-    });
-  } catch (err) {
-    console.error('Error actualizarMensualidad:', err.message);
-  }
+  await db.updateMensualidad(target.id, {
+    valor_pagado:    nuevoPagado,
+    saldo_pendiente: nuevoSaldo,
+    estado:          nuevoEstado,
+  });
 }
 
 async function actualizarUniforme(club_id, cedula, monto) {
-  try {
-    const pendientes = await db.getUniformesPendientes(club_id, cedula);
-    if (pendientes.length === 0) return;
+  const pendientes = await db.getUniformesPendientes(club_id, cedula);
+  if (pendientes.length === 0) return;
 
-    const target      = pendientes[0];
-    const nuevoPagado = (parseFloat(target.valor_pagado) || 0) + monto;
-    const oficial     = parseFloat(target.valor_oficial) || 0;
-    const nuevoSaldo  = Math.max(0, oficial - nuevoPagado);
-    const nuevoEstado = nuevoPagado >= oficial ? 'AL_DIA' : 'PARCIAL';
+  const target      = pendientes[0];
+  const nuevoPagado = (parseFloat(target.valor_pagado) || 0) + monto;
+  const oficial     = parseFloat(target.valor_oficial) || 0;
+  const nuevoSaldo  = Math.max(0, oficial - nuevoPagado);
+  const nuevoEstado = nuevoPagado >= oficial ? 'AL_DIA' : 'PARCIAL';
 
-    await db.updateUniforme(target.id, {
-      valor_pagado:    nuevoPagado,
-      saldo_pendiente: nuevoSaldo,
-      estado:          nuevoEstado,
-    });
-  } catch (err) {
-    console.error('Error actualizarUniforme:', err.message);
-  }
+  await db.updateUniforme(target.id, {
+    valor_pagado:    nuevoPagado,
+    saldo_pendiente: nuevoSaldo,
+    estado:          nuevoEstado,
+  });
 }
 
 async function actualizarTorneo(club_id, cedula, monto, filtroTorneo) {
-  try {
-    let pendientes = await db.getTorneosPendientes(club_id, cedula);
-    if (filtroTorneo) {
-      pendientes = pendientes.filter(t =>
-        t.nombre_torneo.toLowerCase().includes(filtroTorneo.toLowerCase())
-      );
-    }
-    if (pendientes.length === 0) return;
-
-    const target      = pendientes[0];
-    const nuevoPagado = (parseFloat(target.valor_pagado) || 0) + monto;
-    const oficial     = parseFloat(target.valor_oficial) || 0;
-    const nuevoSaldo  = Math.max(0, oficial - nuevoPagado);
-    const nuevoEstado = nuevoPagado >= oficial ? 'AL_DIA' : 'PARCIAL';
-
-    await db.updateTorneo(target.id, {
-      valor_pagado:    nuevoPagado,
-      saldo_pendiente: nuevoSaldo,
-      estado:          nuevoEstado,
-    });
-  } catch (err) {
-    console.error('Error actualizarTorneo:', err.message);
+  let pendientes = await db.getTorneosPendientes(club_id, cedula);
+  if (filtroTorneo) {
+    pendientes = pendientes.filter(t =>
+      t.nombre_torneo.toLowerCase().includes(filtroTorneo.toLowerCase())
+    );
   }
+  if (pendientes.length === 0) return;
+
+  const target      = pendientes[0];
+  const nuevoPagado = (parseFloat(target.valor_pagado) || 0) + monto;
+  const oficial     = parseFloat(target.valor_oficial) || 0;
+  const nuevoSaldo  = Math.max(0, oficial - nuevoPagado);
+  const nuevoEstado = nuevoPagado >= oficial ? 'AL_DIA' : 'PARCIAL';
+
+  await db.updateTorneo(target.id, {
+    valor_pagado:    nuevoPagado,
+    saldo_pendiente: nuevoSaldo,
+    estado:          nuevoEstado,
+  });
 }
 
 module.exports = router;
