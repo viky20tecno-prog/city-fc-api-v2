@@ -56,12 +56,25 @@ async function sendWhatsAppMessage(to: string, body: string): Promise<void> {
 }
 
 // ─── Descargar imagen de Twilio ───────────────────────────────────────────────
-async function downloadTwilioImage(mediaUrl: string): Promise<string> {
+async function downloadTwilioImage(mediaUrl: string): Promise<{ base64: string; buffer: ArrayBuffer }> {
   const creds = btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`);
   const res = await fetch(mediaUrl, { headers: { Authorization: `Basic ${creds}` } });
   if (!res.ok) throw new Error(`Media download failed: ${res.status}`);
   const buffer = await res.arrayBuffer();
-  return btoa(String.fromCharCode(...new Uint8Array(buffer)));
+  return { base64: btoa(String.fromCharCode(...new Uint8Array(buffer))), buffer };
+}
+
+// ─── Subir imagen a Supabase Storage ─────────────────────────────────────────
+async function uploadComprobante(buffer: ArrayBuffer, mimeType: string): Promise<string> {
+  await supabase.storage.createBucket('comprobantes', { public: true }).catch(() => {});
+  const ext = mimeType.includes('png') ? 'png' : mimeType.includes('gif') ? 'gif' : 'jpg';
+  const filename = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+  const { error } = await supabase.storage
+    .from('comprobantes')
+    .upload(filename, buffer, { contentType: mimeType, upsert: false });
+  if (error) throw new Error(`Storage upload failed: ${error.message}`);
+  const { data } = supabase.storage.from('comprobantes').getPublicUrl(filename);
+  return data.publicUrl;
 }
 
 // ─── Validar que el banco sea una entidad financiera real ─────────────────────
@@ -319,6 +332,7 @@ Deno.serve(async (req: Request) => {
     let monto: number | null = null;
     let banco = 'No especificado';
     let referencia = '';
+    let urlComprobanteStorage = '';
     const tieneImagen = numMedia > 0 && !!mediaUrl;
 
     // Sin imagen → pedir foto, no intentar procesar texto
@@ -335,11 +349,17 @@ Deno.serve(async (req: Request) => {
 
     try {
       console.log('[image] descargando desde Twilio:', mediaUrl);
-      const imageBase64 = await downloadTwilioImage(mediaUrl!);
-      const extracted   = await extractPaymentFromImage(imageBase64, mimeType);
+      const { base64, buffer } = await downloadTwilioImage(mediaUrl!);
+      const extracted          = await extractPaymentFromImage(base64, mimeType);
       monto      = extracted.monto || null;
       banco      = extracted.banco;
       referencia = extracted.referencia;
+      try {
+        urlComprobanteStorage = await uploadComprobante(buffer, mimeType);
+        console.log('[storage] imagen subida:', urlComprobanteStorage);
+      } catch (uploadErr) {
+        console.error('[storage] upload failed (sin imagen):', uploadErr);
+      }
     } catch (err) {
       console.error('[image] error procesando imagen:', err);
       await sendWhatsAppMessage(from,
@@ -386,7 +406,7 @@ Deno.serve(async (req: Request) => {
       banco,
       referencia,
       concepto,
-      url_comprobante: mediaUrl || '',
+      url_comprobante: urlComprobanteStorage,
       estado_revision: 'pendiente',
     }]);
 
