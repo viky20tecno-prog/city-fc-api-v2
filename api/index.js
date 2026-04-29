@@ -8,7 +8,6 @@ const paymentsRouter    = require('./routes/payments');
 const configRouter      = require('./routes/config');
 const reportsRouter     = require('./routes/reports');
 const uniformsRouter    = require('./routes/uniforms');
-const debugRouter       = require('./routes/debug');
 const inscripcionRouter = require('./routes/inscripcion');
 const arbitrageRouter      = require('./routes/arbitrage');
 const suspensionesRouter   = require('./routes/suspensiones');
@@ -55,7 +54,6 @@ app.get('/api/health', (req, res) => {
 app.use('/api', (req, res, next) => {
   if (
     req.path === '/health' ||
-    req.path.startsWith('/debug') ||
     req.path.startsWith('/inscripcion')
   ) {
     return next();
@@ -74,7 +72,6 @@ app.use('/api', (req, res, next) => {
 
 // Rutas públicas (sin auth Supabase — whatsapp usa su propio webhook secret)
 app.use('/api/inscripcion', inscripcionRouter);
-app.use('/api/debug',       debugRouter);
 app.use('/api/whatsapp',    whatsappRouter);
 
 // Middleware de autenticación para todas las rutas protegidas
