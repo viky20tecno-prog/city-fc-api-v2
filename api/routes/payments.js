@@ -151,7 +151,7 @@ router.put('/:id', async (req, res) => {
           player_id:       pago.player_id,
           cedula:          cedulaFinal,
           monto:           excedente,
-          banco:           'Excedente',
+          banco:           'Saldo a Favor',
           concepto:        'otro',
           referencia:      `excedente-de-${id}`,
           url_comprobante: '',
