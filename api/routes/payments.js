@@ -121,7 +121,25 @@ router.put('/:id', async (req, res) => {
     // ── Rechazar ──────────────────────────────────────────────────────────────
     if (accion === 'rechazar') {
       const updated = await db.updatePago(id, { estado_revision: 'rechazado' });
-      return res.json({ success: true, data: updated });
+
+      let waEnviado = false;
+      try {
+        const player = await db.getPlayerByCedula(club.id, pago.cedula);
+        if (player?.celular) {
+          const nombre = `${player.nombre || ''} ${player.apellidos || ''}`.trim();
+          const montoFmt = Number(pago.monto).toLocaleString('es-CO');
+          await sendWhatsAppMessage(player.celular,
+            `❌ *Pago no verificado*\n\n` +
+            `Hola ${nombre}, no pudimos verificar tu comprobante de *$${montoFmt}*.\n\n` +
+            `Por favor comunícate con el administrador del club.`,
+          );
+          waEnviado = true;
+        }
+      } catch (waErr) {
+        console.error('[rechazar] WhatsApp no enviado:', waErr.message);
+      }
+
+      return res.json({ success: true, data: updated, wa_enviado: waEnviado });
     }
 
     // ── Aprobar ───────────────────────────────────────────────────────────────
@@ -140,12 +158,11 @@ router.put('/:id', async (req, res) => {
 
       const updated = await db.updatePago(id, { estado_revision: 'aprobado_manual' });
 
-      // Si hay excedente, guardar registro en DB (obligatorio) y notificar por WA (best-effort)
       const excedente = resultado?.excedente || 0;
       let waEnviado = false;
+      const player = await db.getPlayerByCedula(club.id, cedulaFinal);
 
       if (excedente > 0) {
-        const player = await db.getPlayerByCedula(club.id, cedulaFinal);
         await db.createPago({
           club_id:         club.id,
           player_id:       pago.player_id,
@@ -170,6 +187,22 @@ router.put('/:id', async (req, res) => {
           } catch (waErr) {
             console.error('[excedente] WhatsApp no enviado:', waErr.message);
           }
+        }
+      } else if (player?.celular) {
+        // Pago exacto o parcial — confirmar al jugador
+        try {
+          const nombre      = `${player.nombre || ''} ${player.apellidos || ''}`.trim();
+          const montoFmt    = montoFinal.toLocaleString('es-CO');
+          const conceptoLabel = conceptoFinal === 'uniforme' ? 'Uniforme'
+            : conceptoFinal === 'torneo' ? 'Torneo'
+            : 'Mensualidad';
+          await sendWhatsAppMessage(player.celular,
+            `✅ *Pago confirmado*\n\n` +
+            `Hola ${nombre}, tu pago de *$${montoFmt}* fue verificado y aplicado a *${conceptoLabel}*. ¡Gracias!`,
+          );
+          waEnviado = true;
+        } catch (waErr) {
+          console.error('[aprobar] WhatsApp no enviado:', waErr.message);
         }
       }
 

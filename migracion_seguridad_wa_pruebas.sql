@@ -57,7 +57,7 @@ BEGIN
     'PRUEBA001',                  -- cédula de prueba (puede ser cualquier texto único)
     'Jugador',                    -- nombre
     'Prueba WhatsApp',            -- apellidos
-    '3XXXXXXXXX',                 -- ← CAMBIAR: número de 10 dígitos (sin +57)
+    '3023903192',                 -- número de prueba WA9/WA10/WA11
     'Medellín',
     true
   )
@@ -106,7 +106,7 @@ END $$;
 -- Si no tienes su número nuevo, usa '0000000000' como placeholder temporal.
 
 UPDATE players
-SET celular = '0000000000'   -- ← CAMBIAR al número real de Diego
+SET celular = '0000000000'   -- placeholder — Diego ya no es el número de prueba
 WHERE cedula = '1032401947';
 
 
