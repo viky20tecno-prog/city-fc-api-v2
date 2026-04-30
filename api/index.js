@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
 const playersRouter     = require('./routes/players');
@@ -16,13 +17,18 @@ const requireAuth          = require('./middleware/auth');
 
 const app = express();
 
+// Supabase admin client (service role) — usado para validación de club
+const supabaseAdmin = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+
 app.use(cors({
   origin: (origin, callback) => {
     const allowed = [
       'https://city-fc-dashboard-theta.vercel.app',
       'https://city-fc-dashboard-pi.vercel.app',
     ];
-    // Permitir requests sin origin (Postman, server-to-server) y dominios *.vercel.app del proyecto
     if (!origin || allowed.includes(origin) || /^https:\/\/city-fc-dashboard[^.]*\.vercel\.app$/.test(origin)) {
       callback(null, true);
     } else {
@@ -35,8 +41,13 @@ app.use(cors({
 app.options('*', cors());
 app.use(express.json());
 
-// Sin caché — datos siempre frescos desde Google Sheets
+// Security headers
 app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   next();
 });
@@ -50,7 +61,7 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Validación de club_id
+// Validación de club_id (requerido en todas las rutas excepto /health e /inscripcion)
 app.use('/api', (req, res, next) => {
   if (
     req.path === '/health' ||
@@ -70,12 +81,45 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-// Rutas públicas (sin auth Supabase — whatsapp usa su propio webhook secret)
+// Rutas públicas (sin JWT — whatsapp usa su propio webhook secret)
 app.use('/api/inscripcion', inscripcionRouter);
 app.use('/api/whatsapp',    whatsappRouter);
 
-// Middleware de autenticación para todas las rutas protegidas
+// Middleware de autenticación JWT para todas las rutas protegidas
 app.use('/api', requireAuth);
+
+// Validación de pertenencia al club (post-auth)
+// Si el club tiene owner_user_id configurado, valida que el usuario sea el dueño.
+// Si owner_user_id es NULL (migración pendiente), permite el acceso (retrocompatible).
+app.use('/api', async (req, res, next) => {
+  if (!req.user || !req.club_id) return next();
+
+  try {
+    const { data: club, error } = await supabaseAdmin
+      .from('clubs')
+      .select('id, owner_user_id, is_active')
+      .eq('slug', req.club_id)
+      .single();
+
+    if (error || !club) {
+      return res.status(404).json({ success: false, error: 'Club no encontrado' });
+    }
+
+    if (club.is_active === false) {
+      return res.status(403).json({ success: false, error: 'Club inactivo' });
+    }
+
+    if (club.owner_user_id && club.owner_user_id !== req.user.id) {
+      return res.status(403).json({ success: false, error: 'No tienes acceso a este club' });
+    }
+
+    req.club_uuid = club.id;
+    next();
+  } catch (err) {
+    console.error('Club access validation error:', err.message);
+    return res.status(500).json({ success: false, error: 'Error validando acceso al club' });
+  }
+});
 
 // Rutas protegidas
 app.use('/api/players',      playersRouter);

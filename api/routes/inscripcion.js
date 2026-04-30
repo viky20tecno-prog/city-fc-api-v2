@@ -1,4 +1,5 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const db = require('../services/db');
 
 const router = express.Router();
@@ -12,8 +13,18 @@ const TORNEOS = [
 ];
 const CUOTA = 65000;
 
+// Rate limiting: máx 5 inscripciones por IP en 15 minutos
+const inscripcionLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: { success: false, error: 'Demasiadas solicitudes. Por favor intenta en 15 minutos.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip,
+});
+
 // POST /api/inscripcion
-router.post('/', async (req, res) => {
+router.post('/', inscripcionLimiter, async (req, res) => {
   try {
     const {
       cedula, nombre, apellidos, tipo_id,
@@ -22,10 +33,24 @@ router.post('/', async (req, res) => {
       estatura, peso, direccion, municipio, barrio,
       familiar_emergencia, celular_contacto,
       tipo_descuento = 'NA',
+      website = '',           // honeypot — bots lo rellenan, humanos no lo ven
     } = req.body;
+
+    // Honeypot anti-spam: si viene relleno, es un bot
+    if (website) {
+      return res.status(200).json({ success: true, message: '¡Bienvenido a City FC! ⚽' });
+    }
 
     if (!cedula || !nombre || !apellidos || !celular || !municipio || !familiar_emergencia || !celular_contacto) {
       return res.status(400).json({ success: false, error: 'Faltan campos obligatorios' });
+    }
+
+    // Validaciones básicas de formato
+    if (!/^\d{7,15}$/.test(String(cedula))) {
+      return res.status(400).json({ success: false, error: 'Cédula inválida (7-15 dígitos)' });
+    }
+    if (!/^\d{10}$/.test(String(celular))) {
+      return res.status(400).json({ success: false, error: 'Celular inválido (10 dígitos)' });
     }
 
     // Obtener club
