@@ -360,7 +360,8 @@ Deno.serve(async (req: Request) => {
         const { data: sesion } = await supabase
           .from('pagos')
           .select('*')
-          .eq('player_id', player.id)
+          .eq('club_id', club.id)
+          .eq('cedula', player.cedula)
           .eq('estado_revision', 'esperando_concepto')
           .gte('created_at', hace30min)
           .order('created_at', { ascending: false })
@@ -402,7 +403,8 @@ Deno.serve(async (req: Request) => {
         const { data: excedente } = await supabase
           .from('pagos')
           .select('*')
-          .eq('player_id', player.id)
+          .eq('club_id', club.id)
+          .eq('cedula', player.cedula)
           .eq('estado_revision', 'excedente_pendiente')
           .order('created_at', { ascending: false })
           .limit(1)

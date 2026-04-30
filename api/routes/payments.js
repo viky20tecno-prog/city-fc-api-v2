@@ -140,36 +140,40 @@ router.put('/:id', async (req, res) => {
 
       const updated = await db.updatePago(id, { estado_revision: 'aprobado_manual' });
 
-      // Si hay excedente, guardar registro y notificar al jugador
+      // Si hay excedente, guardar registro en DB (obligatorio) y notificar por WA (best-effort)
       const excedente = resultado?.excedente || 0;
+      let waEnviado = false;
+
       if (excedente > 0) {
-        try {
-          const player = await db.getPlayerByCedula(club.id, cedulaFinal);
-          await db.createPago({
-            club_id:         club.id,
-            player_id:       pago.player_id,
-            cedula:          cedulaFinal,
-            monto:           excedente,
-            banco:           'Excedente',
-            concepto:        'otro',
-            referencia:      `excedente-de-${id}`,
-            url_comprobante: '',
-            estado_revision: 'excedente_pendiente',
-            tipo_origen:     'TRANSFERENCIA_EXCEDENTE',
-          });
-          if (player?.celular) {
+        const player = await db.getPlayerByCedula(club.id, cedulaFinal);
+        await db.createPago({
+          club_id:         club.id,
+          player_id:       pago.player_id,
+          cedula:          cedulaFinal,
+          monto:           excedente,
+          banco:           'Excedente',
+          concepto:        'otro',
+          referencia:      `excedente-de-${id}`,
+          url_comprobante: '',
+          estado_revision: 'excedente_pendiente',
+          tipo_origen:     'TRANSFERENCIA_EXCEDENTE',
+        });
+
+        if (player?.celular) {
+          try {
             await sendWhatsAppMessage(player.celular,
               `💰 Hola ${player.nombre}, tu pago tiene un saldo a favor de *$${excedente.toLocaleString('es-CO')}*.\n\n` +
               `¿A qué concepto lo abonamos? Responde con:\n` +
               `• *mensualidad*\n• *uniforme*\n• *torneo*`,
             );
+            waEnviado = true;
+          } catch (waErr) {
+            console.error('[excedente] WhatsApp no enviado:', waErr.message);
           }
-        } catch (e) {
-          console.error('[excedente] error procesando excedente:', e.message);
         }
       }
 
-      return res.json({ success: true, data: updated, excedente });
+      return res.json({ success: true, data: updated, excedente, wa_enviado: waEnviado });
     }
 
     return res.status(400).json({ success: false, error: 'Acción no reconocida' });
@@ -255,8 +259,7 @@ async function sendWhatsAppMessage(celular, body) {
   const token = process.env.TWILIO_AUTH_TOKEN;
   const from  = process.env.TWILIO_WHATSAPP_FROM || 'whatsapp:+14155238886';
   if (!sid || !token) {
-    console.warn('[whatsapp] TWILIO_ACCOUNT_SID/AUTH_TOKEN no configurados en Vercel');
-    return;
+    throw new Error('TWILIO_ACCOUNT_SID/AUTH_TOKEN no configurados en Vercel env');
   }
   const to = celular.startsWith('whatsapp:') ? celular : `whatsapp:+57${celular}`;
   const url = `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`;
@@ -268,8 +271,11 @@ async function sendWhatsAppMessage(celular, body) {
     },
     body: new URLSearchParams({ From: from, To: to, Body: body }).toString(),
   });
-  if (!res.ok) console.error('[whatsapp] error enviando:', await res.text());
-  else console.log('[whatsapp] mensaje enviado a', to);
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Twilio ${res.status}: ${errText}`);
+  }
+  console.log('[whatsapp] mensaje enviado a', to);
 }
 
 module.exports = router;
