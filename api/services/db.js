@@ -191,6 +191,25 @@ async function updatePago(id, updates) {
 }
 
 /**
+ * Actualizar campos del perfil de un jugador (foto_url, posicion, numero_camiseta)
+ */
+async function updatePlayer(club_id, cedula, updates) {
+  const allowed = ['foto_url', 'posicion', 'numero_camiseta'];
+  const fields = Object.fromEntries(
+    Object.entries(updates).filter(([k]) => allowed.includes(k))
+  );
+  const { data, error } = await supabase
+    .from('players')
+    .update(fields)
+    .eq('club_id', club_id)
+    .eq('cedula', String(cedula))
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/**
  * Insertar un jugador nuevo
  */
 async function createPlayer(playerData) {
@@ -438,6 +457,7 @@ module.exports = {
   getPlayers,
   getPlayerByCedula,
   getPlayerByCelular,
+  updatePlayer,
   getMensualidades,
   getMensualidadesPendientes,
   updateMensualidad,

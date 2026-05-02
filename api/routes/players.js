@@ -42,4 +42,19 @@ router.get('/:cedula', async (req, res) => {
   }
 });
 
+// PATCH /api/players/:cedula?club_id=city-fc
+// Actualiza foto_url, posicion, numero_camiseta
+router.patch('/:cedula', async (req, res) => {
+  try {
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const updated = await db.updatePlayer(club.id, req.params.cedula, req.body);
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    console.error('Error in PATCH /players/:cedula:', error);
+    res.status(500).json({ success: false, error: 'Error updating player', message: error.message });
+  }
+});
+
 module.exports = router;
