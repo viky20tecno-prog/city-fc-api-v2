@@ -582,6 +582,65 @@ Deno.serve(async (req: Request) => {
 
     await sendWhatsAppMessage(from, acuseRecibo);
 
+    // ── Detectar excedente potencial e informar al jugador de inmediato ───────
+    try {
+      let porPagar = 0;
+
+      if (concepto === 'mensualidad') {
+        const { data: pendientes } = await supabase
+          .from('mensualidades')
+          .select('valor_oficial, valor_pagado')
+          .eq('club_id', club.id)
+          .eq('cedula', player.cedula)
+          .in('estado', ['PENDIENTE', 'PARCIAL', 'MORA'])
+          .gt('valor_oficial', 0)
+          .order('numero_mes', { ascending: true })
+          .limit(1);
+        if (pendientes?.length) {
+          const t = pendientes[0];
+          porPagar = Math.max(0, parseFloat(t.valor_oficial) - (parseFloat(t.valor_pagado) || 0));
+        }
+      } else if (concepto === 'uniforme') {
+        const { data: pendientes } = await supabase
+          .from('uniformes')
+          .select('valor_oficial, valor_pagado')
+          .eq('club_id', club.id)
+          .eq('cedula', player.cedula)
+          .neq('estado', 'AL_DIA')
+          .limit(1);
+        if (pendientes?.length) {
+          const t = pendientes[0];
+          porPagar = Math.max(0, parseFloat(t.valor_oficial) - (parseFloat(t.valor_pagado) || 0));
+        }
+      } else if (concepto === 'torneo') {
+        const { data: pendientes } = await supabase
+          .from('torneos')
+          .select('valor_oficial, valor_pagado')
+          .eq('club_id', club.id)
+          .eq('cedula', player.cedula)
+          .neq('estado', 'AL_DIA')
+          .limit(1);
+        if (pendientes?.length) {
+          const t = pendientes[0];
+          porPagar = Math.max(0, parseFloat(t.valor_oficial) - (parseFloat(t.valor_pagado) || 0));
+        }
+      }
+
+      const excedente = porPagar > 0 ? monto! - porPagar : 0;
+      if (excedente > 0) {
+        console.log(`[excedente] detectado: monto=${monto} porPagar=${porPagar} excedente=${excedente}`);
+        await sendWhatsAppMessage(from,
+          `💰 *Saldo a favor detectado*\n\n` +
+          `Tu comprobante es por *$${monto!.toLocaleString('es-CO')}* y el valor de *${conceptoLabel}* es *$${porPagar.toLocaleString('es-CO')}*.\n\n` +
+          `Tendrás un saldo a favor de *$${excedente.toLocaleString('es-CO')}*.\n\n` +
+          `Una vez validado el pago, te preguntaremos a qué concepto aplicarlo:\n` +
+          `• *mensualidad*\n• *uniforme*\n• *torneo*`,
+        );
+      }
+    } catch (excErr) {
+      console.error('[excedente-check] error:', excErr);
+    }
+
   } catch (err) {
     console.error('[webhook] error general:', err);
     try {
