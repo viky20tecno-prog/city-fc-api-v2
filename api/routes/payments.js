@@ -175,31 +175,27 @@ router.put('/:id', async (req, res) => {
           estado_revision: 'excedente_pendiente',
           tipo_origen:     'TRANSFERENCIA_EXCEDENTE',
         });
+      }
 
-        if (player?.celular) {
-          try {
-            await sendWhatsAppMessage(player.celular,
-              `💰 Hola ${player.nombre}, tu pago tiene un saldo a favor de *$${excedente.toLocaleString('es-CO')}*.\n\n` +
-              `¿A qué concepto lo abonamos? Responde con:\n` +
-              `• *mensualidad*\n• *uniforme*\n• *torneo*`,
-            );
-            waEnviado = true;
-          } catch (waErr) {
-            console.error('[excedente] WhatsApp no enviado:', waErr.message);
-          }
-        }
-      } else if (player?.celular) {
-        // Pago exacto o parcial — confirmar al jugador
+      if (player?.celular) {
         try {
-          const nombre      = `${player.nombre || ''} ${player.apellidos || ''}`.trim();
-          const montoFmt    = montoFinal.toLocaleString('es-CO');
+          const nombre        = `${player.nombre || ''} ${player.apellidos || ''}`.trim();
+          const montoFmt      = montoFinal.toLocaleString('es-CO');
+          const excedenteFmt  = excedente.toLocaleString('es-CO');
           const conceptoLabel = conceptoFinal === 'uniforme' ? 'Uniforme'
             : conceptoFinal === 'torneo' ? 'Torneo'
             : 'Mensualidad';
-          await sendWhatsAppMessage(player.celular,
-            `✅ *Pago confirmado*\n\n` +
-            `Hola ${nombre}, tu pago de *$${montoFmt}* fue verificado y aplicado a *${conceptoLabel}*. ¡Gracias!`,
-          );
+
+          const mensaje = excedente > 0
+            ? `✅ *Pago confirmado*\n\n` +
+              `Hola ${nombre}, tu pago de *$${montoFmt}* fue verificado y aplicado a *${conceptoLabel}*.\n\n` +
+              `💰 Tienes un saldo a favor de *$${excedenteFmt}*.\n\n` +
+              `¿A qué concepto lo abonamos? Responde con:\n` +
+              `• *mensualidad*\n• *uniforme*\n• *torneo*`
+            : `✅ *Pago confirmado*\n\n` +
+              `Hola ${nombre}, tu pago de *$${montoFmt}* fue verificado y aplicado a *${conceptoLabel}*. ¡Gracias!`;
+
+          await sendWhatsAppMessage(player.celular, mensaje);
           waEnviado = true;
         } catch (waErr) {
           console.error('[aprobar] WhatsApp no enviado:', waErr.message);
