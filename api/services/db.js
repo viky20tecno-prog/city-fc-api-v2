@@ -191,10 +191,18 @@ async function updatePago(id, updates) {
 }
 
 /**
- * Actualizar campos del perfil de un jugador (foto_url, posicion, numero_camiseta)
+ * Actualizar campos del perfil de un jugador
  */
 async function updatePlayer(club_id, cedula, updates) {
-  const allowed = ['foto_url', 'posicion', 'numero_camiseta'];
+  const allowed = [
+    'foto_url', 'posicion', 'numero_camiseta',
+    'tipo_id', 'nombre', 'apellidos', 'celular',
+    'correo_electronico', 'instagram',
+    'lugar_de_nacimiento', 'fecha_nacimiento', 'tipo_sangre', 'eps',
+    'estatura', 'peso',
+    'municipio', 'barrio', 'direccion',
+    'familiar_emergencia', 'celular_contacto',
+  ];
   const fields = Object.fromEntries(
     Object.entries(updates).filter(([k]) => allowed.includes(k))
   );
