@@ -69,13 +69,26 @@ router.post('/', inscripcionLimiter, async (req, res) => {
 
     // Crear jugador
     const player = await db.createPlayer({
-      club_id:    club.id,
-      cedula:     String(cedula),
+      club_id:             club.id,
+      cedula:              String(cedula),
       nombre,
       apellidos,
-      celular:    String(celular),
+      tipo_id:             tipo_id             || null,
+      celular:             String(celular),
+      correo_electronico:  correo_electronico  || null,
+      instagram:           instagram           || null,
+      lugar_de_nacimiento: lugar_de_nacimiento || null,
+      fecha_nacimiento:    fecha_nacimiento    || null,
+      tipo_sangre:         tipo_sangre         || null,
+      eps:                 eps                 || null,
+      estatura:            estatura            ? parseFloat(estatura)  : null,
+      peso:                peso                ? parseFloat(peso)      : null,
       municipio,
-      activo:     true,
+      barrio:              barrio              || null,
+      direccion:           direccion           || null,
+      familiar_emergencia: familiar_emergencia || null,
+      celular_contacto:    celular_contacto    || null,
+      activo:              true,
     });
 
     // Crear 12 mensualidades
