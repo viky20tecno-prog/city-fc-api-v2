@@ -57,4 +57,21 @@ router.patch('/:cedula', async (req, res) => {
   }
 });
 
+// DELETE /api/players/:cedula?club_id=city-fc  — desactiva el jugador (soft delete)
+router.delete('/:cedula', async (req, res) => {
+  try {
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const player = await db.getPlayerByCedula(club.id, req.params.cedula);
+    if (!player) return res.status(404).json({ success: false, error: 'Jugador no encontrado' });
+
+    await db.deletePlayer(club.id, req.params.cedula);
+    res.json({ success: true, mensaje: 'Jugador eliminado correctamente' });
+  } catch (error) {
+    console.error('Error in DELETE /players/:cedula:', error);
+    res.status(500).json({ success: false, error: 'Error eliminando jugador', message: error.message });
+  }
+});
+
 module.exports = router;

@@ -459,6 +459,15 @@ async function updateArbitrajePago(id, updates) {
   return data;
 }
 
+async function deletePlayer(club_id, cedula) {
+  const { error } = await supabase
+    .from('players')
+    .update({ activo: false })
+    .eq('club_id', club_id)
+    .eq('cedula', String(cedula));
+  if (error) throw error;
+}
+
 module.exports = {
   supabase,
   getClubBySlug,
@@ -466,6 +475,7 @@ module.exports = {
   getPlayerByCedula,
   getPlayerByCelular,
   updatePlayer,
+  deletePlayer,
   getMensualidades,
   getMensualidadesPendientes,
   updateMensualidad,
