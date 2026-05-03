@@ -15,7 +15,7 @@ jobs:
             "https://olcevdnhmexaahymfzii.supabase.co/functions/v1/cobro-automatico" \
             -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
             -H "Content-Type: application/json" \
-            -d '{}' \
+            -d '{"dia_override": 8}' \
             --fail \
             --silent \
             --show-error
