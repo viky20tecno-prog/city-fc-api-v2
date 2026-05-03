@@ -455,9 +455,13 @@ Deno.serve(async (req: Request) => {
               : conceptoRespuesta === 'torneo' ? 'Torneo'
               : 'Mensualidad';
 
+            const montoFmt = Number(excedente.monto).toLocaleString('es-CO');
             await sendWhatsAppMessage(from,
-              `✅ *Saldo a favor aplicado*\n\n` +
-              `Hola ${nombre}, tu saldo de *$${excedente.monto.toLocaleString('es-CO')}* fue abonado a *${conceptoLabel}*. ¡Gracias!`,
+              `✅ *Saldo aplicado correctamente*\n\n` +
+              `Hola ${nombre}, tu saldo de *$${montoFmt}* fue abonado exitosamente a *${conceptoLabel}*. ✔️\n\n` +
+              `🏆 *¡Gracias por tu cultura de pago oportuno!*\n\n` +
+              `Jugadores como tú son los que hacen grande a *City F.C.* Mantener los pagos al día nos permite seguir creciendo, mejorar servicios y competir en más torneos.\n\n` +
+              `¡Nos vemos en la cancha! ⚽`,
             );
           }
           return twilioOk();
@@ -630,11 +634,9 @@ Deno.serve(async (req: Request) => {
       if (excedente > 0) {
         console.log(`[excedente] detectado: monto=${monto} porPagar=${porPagar} excedente=${excedente}`);
         await sendWhatsAppMessage(from,
-          `💰 *Saldo a favor detectado*\n\n` +
+          `💰 *Posible saldo a favor: $${excedente.toLocaleString('es-CO')}*\n\n` +
           `Tu comprobante es por *$${monto!.toLocaleString('es-CO')}* y el valor de *${conceptoLabel}* es *$${porPagar.toLocaleString('es-CO')}*.\n\n` +
-          `Tendrás un saldo a favor de *$${excedente.toLocaleString('es-CO')}*.\n\n` +
-          `Una vez validado el pago, te preguntaremos a qué concepto aplicarlo:\n` +
-          `• *mensualidad*\n• *uniforme*\n• *torneo*`,
+          `⏳ _Aún no respondas. Una vez validemos el pago, te preguntaremos el destino del saldo._`,
         );
       }
     } catch (excErr) {
