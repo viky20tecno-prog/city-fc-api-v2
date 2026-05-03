@@ -8,7 +8,8 @@ const TWILIO_AUTH_TOKEN         = Deno.env.get('TWILIO_AUTH_TOKEN')!;
 const TWILIO_WHATSAPP_FROM      = Deno.env.get('TWILIO_WHATSAPP_FROM') || 'whatsapp:+14155238886';
 
 const PENALIDAD_MORA    = 10_000;
-const VALOR_MENSUALIDAD = 65_000; // fallback si el club no tiene config
+const VALOR_MENSUALIDAD = 65_000;
+const LLAVE_PAGO        = '0087276387';
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
 serve(async (req) => {
@@ -22,9 +23,11 @@ serve(async (req) => {
   const body = await req.json().catch(() => ({}));
 
   // dia_override permite simular cualquier día para pruebas (ej: {"dia_override": 8})
-  const dia  = body.dia_override ?? hoy.getDate();
-  const mes  = body.mes_override  ?? (hoy.getMonth() + 1);
-  const anio = body.anio_override ?? hoy.getFullYear();
+  // test_cedula filtra a un solo jugador — solo para pruebas, nunca en producción
+  const dia         = body.dia_override  ?? hoy.getDate();
+  const mes         = body.mes_override  ?? (hoy.getMonth() + 1);
+  const anio        = body.anio_override ?? hoy.getFullYear();
+  const testCedula  = body.test_cedula   ?? null;
 
   try {
     const { data: clubs, error: clubsErr } = await supabase
@@ -38,7 +41,7 @@ serve(async (req) => {
     }
 
     const resultados = await Promise.allSettled(
-      clubs.map(club => procesarClub(supabase, club, dia, mes, anio))
+      clubs.map(club => procesarClub(supabase, club, dia, mes, anio, testCedula))
     );
 
     const resumen = resultados.map((r, i) => ({
@@ -60,18 +63,21 @@ async function procesarClub(
   dia: number,
   mes: number,
   anio: number,
+  testCedula: string | null = null,
 ) {
   const valorMensual = Number(club.config?.valor_mensualidad ?? VALOR_MENSUALIDAD);
   const nombreClub   = String(club.config?.nombre ?? 'City FC');
   const stats        = { mensajes: 0, mora_aplicada: 0, mensualidades_creadas: 0 };
 
-  // Jugadores activos con celular
-  const { data: jugadores } = await supabase
+  // Jugadores activos con celular (test_cedula restringe a uno solo en pruebas)
+  let query = supabase
     .from('players')
     .select('id, cedula, nombre, apellidos, celular')
     .eq('club_id', club.id)
     .eq('activo', true)
     .not('celular', 'is', null);
+  if (testCedula) query = query.eq('cedula', testCedula);
+  const { data: jugadores } = await query;
 
   if (!jugadores?.length) return stats;
 
@@ -85,10 +91,11 @@ async function procesarClub(
       if (await yaEnviado(supabase, club.id, j.cedula, 'preventivo', mesDest, anioDest)) continue;
       const nombre = nombreCompleto(j);
       await enviarWA(j.celular,
-        `🔔 *Recordatorio de pago — ${nombreClub}*\n\n` +
-        `Hola ${nombre}, tu cuota de *${nombreM} ${anioDest}* estará activa el 1 de ${nombreM}.\n\n` +
-        `Monto: *$${valorMensual.toLocaleString('es-CO')}*\n\n` +
-        `¡Prepárate para pagar a tiempo y evitar penalidades! ⚽`,
+        `⚽ *${nombreClub} te avisa con tiempo*\n\n` +
+        `Hola ${nombre}, tu cuota de *${nombreM} ${anioDest}* se activará pronto.\n\n` +
+        `💰 Valor: *$${valorMensual.toLocaleString('es-CO')}*\n\n` +
+        `⏳ Organízate desde ya y evita recargos innecesarios.\n\n` +
+        `En ${nombreClub} jugamos en equipo… y estar al día es parte del juego 💙⚽`,
       );
       await logEnvio(supabase, club.id, j.cedula, 'preventivo', mesDest, anioDest);
       stats.mensajes++;
@@ -100,7 +107,6 @@ async function procesarClub(
     const nombreM = mesTexto(mes);
 
     for (const j of jugadores) {
-      // Crear mensualidad solo si no existe aún
       const { data: existente } = await supabase
         .from('mensualidades')
         .select('id')
@@ -129,10 +135,13 @@ async function procesarClub(
       if (await yaEnviado(supabase, club.id, j.cedula, 'activacion', mes, anio)) continue;
       const nombre = nombreCompleto(j);
       await enviarWA(j.celular,
-        `⚽ *${nombreClub} — Cuota ${nombreM} ${anio}*\n\n` +
-        `Hola ${nombre}, tu cuota mensual ya está activa.\n\n` +
-        `Monto: *$${valorMensual.toLocaleString('es-CO')}*\n\n` +
-        `Tienes hasta el *día 7* para pagar sin penalidad. ¡Gracias por tu compromiso! 💪`,
+        `📢⚽ *${nombreClub} — Cuota activa*\n\n` +
+        `Hola ${nombre}, tu cuota de *${nombreM}* ya está activa.\n\n` +
+        `💰 Valor: *$${valorMensual.toLocaleString('es-CO')}*\n` +
+        `📅 Tienes hasta el *día 7* para pagar sin penalidad\n\n` +
+        `📲 Escanea el QR o usa la llave:\n` +
+        `🔑 ${LLAVE_PAGO}\n\n` +
+        `💪 Paga hoy y juega tranquilo todo el mes ⚽🔥`,
         true,
       );
       await logEnvio(supabase, club.id, j.cedula, 'activacion', mes, anio);
@@ -149,10 +158,13 @@ async function procesarClub(
       if (await yaEnviado(supabase, club.id, j.cedula, 'recordatorio', mes, anio)) continue;
       const nombre = nombreCompleto(j);
       await enviarWA(j.celular,
-        `⏰ *Recordatorio — ${nombreClub}*\n\n` +
+        `⏰⚽ *${nombreClub} te recuerda*\n\n` +
         `Hola ${nombre}, te quedan *3 días* para pagar tu cuota de *${nombreM}*.\n\n` +
-        `Monto: *$${valorMensual.toLocaleString('es-CO')}*\n\n` +
-        `Paga antes del día 7 para evitar una penalidad de *$${PENALIDAD_MORA.toLocaleString('es-CO')}*. 🙏`,
+        `💰 Valor: *$${valorMensual.toLocaleString('es-CO')}*\n` +
+        `⚠️ Evita una penalidad de *$${PENALIDAD_MORA.toLocaleString('es-CO')}*\n\n` +
+        `📲 Escanea el QR o paga con la llave:\n` +
+        `🔑 ${LLAVE_PAGO}\n\n` +
+        `🔥 No lo dejes para el último minuto… el equipo cuenta contigo ⚽💪`,
         true,
       );
       await logEnvio(supabase, club.id, j.cedula, 'recordatorio', mes, anio);
@@ -169,10 +181,13 @@ async function procesarClub(
       if (await yaEnviado(supabase, club.id, j.cedula, 'vencimiento', mes, anio)) continue;
       const nombre = nombreCompleto(j);
       await enviarWA(j.celular,
-        `⚠️ *HOY vence el plazo — ${nombreClub}*\n\n` +
-        `Hola ${nombre}, hoy es el último día para pagar tu cuota de *${nombreM}* sin penalidad.\n\n` +
-        `Monto: *$${valorMensual.toLocaleString('es-CO')}*\n\n` +
-        `A partir de mañana se aplicará una penalidad de *$${PENALIDAD_MORA.toLocaleString('es-CO')}*. ¡No te quedes en mora! 🚨`,
+        `🚨⚽ *HOY es el último día — ${nombreClub}*\n\n` +
+        `Hola ${nombre}, hoy vence tu cuota de *${nombreM}*.\n\n` +
+        `💰 Valor: *$${valorMensual.toLocaleString('es-CO')}*\n` +
+        `⚠️ Mañana tendrás penalidad de *$${PENALIDAD_MORA.toLocaleString('es-CO')}*\n\n` +
+        `📲 Escanea el QR o usa la llave:\n` +
+        `🔑 ${LLAVE_PAGO}\n\n` +
+        `⏳ Estás a una jugada de seguir al día… no pierdas este partido ⚽🔥`,
         true,
       );
       await logEnvio(supabase, club.id, j.cedula, 'vencimiento', mes, anio);
@@ -198,16 +213,15 @@ async function procesarClub(
 
       if (!mens || mens.estado === 'AL_DIA') continue;
 
-      // Aplicar penalidad una sola vez (guard en aplicarMoraConPenalidad)
       const penActual = parseFloat(mens.penalidad) || 0;
       if (penActual === 0) {
         const oficial    = parseFloat(mens.valor_oficial) || 0;
         const yaPageado  = parseFloat(mens.valor_pagado)  || 0;
         const nuevoSaldo = Math.max(0, oficial + PENALIDAD_MORA - yaPageado);
         await supabase.from('mensualidades').update({
-          estado:                    'MORA',
-          penalidad:                 PENALIDAD_MORA,
-          saldo_pendiente:           nuevoSaldo,
+          estado:                     'MORA',
+          penalidad:                  PENALIDAD_MORA,
+          saldo_pendiente:            nuevoSaldo,
           fecha_ultima_actualizacion: new Date().toISOString(),
         }).eq('id', mens.id);
         stats.mora_aplicada++;
@@ -220,17 +234,19 @@ async function procesarClub(
       const oficial    = parseFloat(mens.valor_oficial) || 0;
       const totalDeuda = (oficial + PENALIDAD_MORA).toLocaleString('es-CO');
       await enviarWA(j.celular,
-        `🚨 *Tu cuota está vencida — ${nombreClub}*\n\n` +
-        `Hola ${nombre}, tu cuota de *${nombreM} ${anio}* ha entrado en mora.\n\n` +
-        `Total a pagar (incluye penalidad $${PENALIDAD_MORA.toLocaleString('es-CO')}): *$${totalDeuda}*\n\n` +
-        `Comunícate con el administrador para regularizar tu situación. 📞`,
+        `🚫⚽ *${nombreClub} — Estado en mora*\n\n` +
+        `Hola ${nombre}, tu cuota de *${nombreM} ${anio}* ya está vencida.\n\n` +
+        `💰 Total a pagar: *$${totalDeuda}*\n` +
+        `(incluye penalidad de $${PENALIDAD_MORA.toLocaleString('es-CO')})\n\n` +
+        `📲 Escanea el QR o paga con la llave:\n` +
+        `🔑 ${LLAVE_PAGO}\n\n` +
+        `🔁 Entre más pronto pagues, más rápido vuelves al juego ⚽`,
         true,
       );
       await logEnvio(supabase, club.id, j.cedula, 'mora', mes, anio);
       stats.mensajes++;
     }
 
-    // Notificar al admin del club si hay morosos
     if (morosos.length > 0) {
       const { data: clubData } = await supabase
         .from('clubs')
@@ -247,6 +263,29 @@ async function procesarClub(
         );
         stats.mensajes++;
       }
+    }
+  }
+
+  // ── DÍA 9 — Reenganche: 24h después de mora, solo quienes siguen en mora ─
+  if (dia === 9) {
+    const enMora  = await jugadoresEnMora(supabase, club.id, jugadores, mes, anio);
+    const nombreM = mesTexto(mes);
+
+    for (const j of enMora) {
+      if (await yaEnviado(supabase, club.id, j.cedula, 'reenganche', mes, anio)) continue;
+      const nombre = nombreCompleto(j);
+      await enviarWA(j.celular,
+        `⚽🔥 *${nombre}, vuelve al juego con ${nombreClub}*\n\n` +
+        `Eres parte del equipo y te queremos en la cancha 💙\n\n` +
+        `No dejes que una cuota te saque del partido.\n\n` +
+        `📲 Escanea el QR o paga con la llave:\n` +
+        `🔑 ${LLAVE_PAGO}\n\n` +
+        `🚀 Un pago hoy, cero preocupaciones mañana\n\n` +
+        `💪 ${nombreClub} sigue contando contigo ⚽🔥💯`,
+        true,
+      );
+      await logEnvio(supabase, club.id, j.cedula, 'reenganche', mes, anio);
+      stats.mensajes++;
     }
   }
 
@@ -272,6 +311,25 @@ async function jugadoresConDeuda(
 
   const cedulasDeuda = new Set((mens || []).map((m: { cedula: string }) => m.cedula));
   return jugadores.filter(j => cedulasDeuda.has(j.cedula));
+}
+
+async function jugadoresEnMora(
+  supabase: ReturnType<typeof createClient>,
+  club_id: string,
+  jugadores: { cedula: string }[],
+  mes: number,
+  anio: number,
+) {
+  const { data: mens } = await supabase
+    .from('mensualidades')
+    .select('cedula')
+    .eq('club_id', club_id)
+    .eq('numero_mes', mes)
+    .eq('anio', anio)
+    .eq('estado', 'MORA');
+
+  const cedulasMora = new Set((mens || []).map((m: { cedula: string }) => m.cedula));
+  return jugadores.filter(j => cedulasMora.has(j.cedula));
 }
 
 async function yaEnviado(
