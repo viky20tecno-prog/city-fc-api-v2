@@ -133,6 +133,7 @@ async function procesarClub(
         `Hola ${nombre}, tu cuota mensual ya está activa.\n\n` +
         `Monto: *$${valorMensual.toLocaleString('es-CO')}*\n\n` +
         `Tienes hasta el *día 7* para pagar sin penalidad. ¡Gracias por tu compromiso! 💪`,
+        true,
       );
       await logEnvio(supabase, club.id, j.cedula, 'activacion', mes, anio);
       stats.mensajes++;
@@ -152,6 +153,7 @@ async function procesarClub(
         `Hola ${nombre}, te quedan *3 días* para pagar tu cuota de *${nombreM}*.\n\n` +
         `Monto: *$${valorMensual.toLocaleString('es-CO')}*\n\n` +
         `Paga antes del día 7 para evitar una penalidad de *$${PENALIDAD_MORA.toLocaleString('es-CO')}*. 🙏`,
+        true,
       );
       await logEnvio(supabase, club.id, j.cedula, 'recordatorio', mes, anio);
       stats.mensajes++;
@@ -171,6 +173,7 @@ async function procesarClub(
         `Hola ${nombre}, hoy es el último día para pagar tu cuota de *${nombreM}* sin penalidad.\n\n` +
         `Monto: *$${valorMensual.toLocaleString('es-CO')}*\n\n` +
         `A partir de mañana se aplicará una penalidad de *$${PENALIDAD_MORA.toLocaleString('es-CO')}*. ¡No te quedes en mora! 🚨`,
+        true,
       );
       await logEnvio(supabase, club.id, j.cedula, 'vencimiento', mes, anio);
       stats.mensajes++;
@@ -221,6 +224,7 @@ async function procesarClub(
         `Hola ${nombre}, tu cuota de *${nombreM} ${anio}* ha entrado en mora.\n\n` +
         `Total a pagar (incluye penalidad $${PENALIDAD_MORA.toLocaleString('es-CO')}): *$${totalDeuda}*\n\n` +
         `Comunícate con el administrador para regularizar tu situación. 📞`,
+        true,
       );
       await logEnvio(supabase, club.id, j.cedula, 'mora', mes, anio);
       stats.mensajes++;
@@ -301,7 +305,9 @@ async function logEnvio(
   await supabase.from('wa_log_envios').insert({ club_id, cedula, tipo_mensaje, mes, anio });
 }
 
-async function enviarWA(celular: string, body: string) {
+const QR_PAGO_URL = 'https://olcevdnhmexaahymfzii.supabase.co/storage/v1/object/public/club-assets/qr-pago-cityfc.jpeg';
+
+async function enviarWA(celular: string, body: string, conQR = false) {
   const sid   = TWILIO_ACCOUNT_SID;
   const token = TWILIO_AUTH_TOKEN;
   const from  = TWILIO_WHATSAPP_FROM;
@@ -310,13 +316,16 @@ async function enviarWA(celular: string, body: string) {
   const to  = celular.startsWith('whatsapp:') ? celular : `whatsapp:+57${celular}`;
   const url = `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`;
 
+  const params: Record<string, string> = { From: from, To: to, Body: body };
+  if (conQR) params['MediaUrl0'] = QR_PAGO_URL;
+
   const res = await fetch(url, {
     method: 'POST',
     headers: {
       Authorization: `Basic ${btoa(`${sid}:${token}`)}`,
       'Content-Type': 'application/x-www-form-urlencoded',
     },
-    body: new URLSearchParams({ From: from, To: to, Body: body }).toString(),
+    body: new URLSearchParams(params).toString(),
   });
 
   if (!res.ok) {
