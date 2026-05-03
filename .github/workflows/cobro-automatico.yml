@@ -1,0 +1,21 @@
+name: Ciclo de Cobro Automático
+
+on:
+  schedule:
+    - cron: '0 13 * * *'   # 8am Colombia (UTC-5) = 13:00 UTC
+  workflow_dispatch:        # permite ejecutarlo manualmente desde GitHub
+
+jobs:
+  cobrar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Disparar ciclo de cobro
+        run: |
+          curl -X POST \
+            "https://olcevdnhmexaahymfzii.supabase.co/functions/v1/cobro-automatico" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            --fail \
+            --silent \
+            --show-error
