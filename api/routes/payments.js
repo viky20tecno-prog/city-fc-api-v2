@@ -219,12 +219,14 @@ async function actualizarMensualidad(club_id, cedula, monto) {
   const target      = pendientes[0];
   const yaPageado   = parseFloat(target.valor_pagado) || 0;
   const oficial     = parseFloat(target.valor_oficial) || 0;
-  const porPagar    = Math.max(0, oficial - yaPageado);
+  const penalidad   = parseFloat(target.penalidad)     || 0;
+  const totalDeuda  = oficial + penalidad;                            // deuda real con mora
+  const porPagar    = Math.max(0, totalDeuda - yaPageado);
   const pagoAplicar = Math.min(monto, porPagar);
   const excedente   = monto - pagoAplicar;
   const nuevoPagado = yaPageado + pagoAplicar;
-  const nuevoSaldo  = oficial - nuevoPagado;
-  const nuevoEstado = nuevoPagado >= oficial ? 'AL_DIA' : 'PARCIAL';
+  const nuevoSaldo  = Math.max(0, totalDeuda - nuevoPagado);
+  const nuevoEstado = nuevoPagado >= totalDeuda ? 'AL_DIA' : 'PARCIAL';
 
   await db.updateMensualidad(target.id, {
     valor_pagado:    nuevoPagado,

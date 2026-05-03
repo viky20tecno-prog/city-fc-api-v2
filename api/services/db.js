@@ -468,6 +468,39 @@ async function deletePlayer(club_id, cedula) {
   if (error) throw error;
 }
 
+/**
+ * Marcar mensualidad en MORA y aplicar penalidad (solo una vez por mes)
+ */
+async function aplicarMoraConPenalidad(mensualidad_id, penalidad = 10000) {
+  const { data: mens, error: fetchErr } = await supabase
+    .from('mensualidades')
+    .select('valor_oficial, valor_pagado, penalidad')
+    .eq('id', mensualidad_id)
+    .single();
+  if (fetchErr) throw fetchErr;
+
+  // Guard: no aplicar penalidad dos veces
+  if (parseFloat(mens.penalidad) > 0) return null;
+
+  const oficial    = parseFloat(mens.valor_oficial) || 0;
+  const yaPageado  = parseFloat(mens.valor_pagado)  || 0;
+  const nuevoSaldo = Math.max(0, oficial + penalidad - yaPageado);
+
+  const { data, error } = await supabase
+    .from('mensualidades')
+    .update({
+      estado:                    'MORA',
+      penalidad,
+      saldo_pendiente:           nuevoSaldo,
+      fecha_ultima_actualizacion: new Date().toISOString(),
+    })
+    .eq('id', mensualidad_id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 module.exports = {
   supabase,
   getClubBySlug,
@@ -503,4 +536,5 @@ module.exports = {
   getSuspensionesJugador,
   createSuspension,
   deactivateSuspension,
+  aplicarMoraConPenalidad,
 };
