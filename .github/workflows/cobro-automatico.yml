@@ -11,11 +11,13 @@ jobs:
     steps:
       - name: Disparar ciclo de cobro
         run: |
-          curl -X POST \
+          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST \
             "https://olcevdnhmexaahymfzii.supabase.co/functions/v1/cobro-automatico" \
             -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
             -H "Content-Type: application/json" \
-            -d '{"dia_override": 8}' \
-            --fail \
-            --silent \
-            --show-error
+            -d '{}')
+          BODY=$(echo "$RESPONSE" | sed -e 's/HTTP_STATUS:.*//')
+          STATUS=$(echo "$RESPONSE" | grep -o 'HTTP_STATUS:[0-9]*' | cut -d: -f2)
+          echo "HTTP $STATUS"
+          echo "$BODY" | python3 -m json.tool 2>/dev/null || echo "$BODY"
+          [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 300 ] || exit 1
