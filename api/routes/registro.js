@@ -51,13 +51,14 @@ router.post('/', async (req, res) => {
   // Crear el club
   const { error: clubError } = await supabase.from('clubs').insert({
     slug,
+    name:          nombre_club.trim(),
     is_active:     true,
     owner_user_id: userId,
     celular_admin: celular_admin || null,
     config: {
-      nombre:             nombre_club.trim(),
-      ciudad:             ciudad?.trim() || '',
-      valor_mensualidad:  65000,
+      nombre:            nombre_club.trim(),
+      ciudad:            ciudad?.trim() || '',
+      valor_mensualidad: 65000,
     },
   });
 
