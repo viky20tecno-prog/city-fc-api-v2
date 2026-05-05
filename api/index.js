@@ -30,7 +30,7 @@ app.use(cors({
       'https://city-fc-dashboard-theta.vercel.app',
       'https://city-fc-dashboard-pi.vercel.app',
     ];
-    if (!origin || allowed.includes(origin) || /^https:\/\/city-fc-dashboard[^.]*\.vercel\.app$/.test(origin)) {
+    if (!origin || allowed.includes(origin) || /^https:\/\/city-fc-dashboard[^.]*\.vercel\.app$/.test(origin) || /^http:\/\/localhost(:\d+)?$/.test(origin)) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
