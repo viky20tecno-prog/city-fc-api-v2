@@ -13,6 +13,7 @@ const inscripcionRouter = require('./routes/inscripcion');
 const arbitrageRouter      = require('./routes/arbitrage');
 const suspensionesRouter   = require('./routes/suspensiones');
 const whatsappRouter       = require('./routes/whatsapp');
+const registroRouter       = require('./routes/registro');
 const requireAuth          = require('./middleware/auth');
 
 const app = express();
@@ -65,7 +66,9 @@ app.get('/api/health', (req, res) => {
 app.use('/api', (req, res, next) => {
   if (
     req.path === '/health' ||
-    req.path.startsWith('/inscripcion')
+    req.path.startsWith('/inscripcion') ||
+    req.path.startsWith('/registro') ||
+    req.path.startsWith('/whatsapp')
   ) {
     return next();
   }
@@ -81,9 +84,10 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-// Rutas públicas (sin JWT — whatsapp usa su propio webhook secret)
+// Rutas públicas (sin JWT)
 app.use('/api/inscripcion', inscripcionRouter);
 app.use('/api/whatsapp',    whatsappRouter);
+app.use('/api/registro',    registroRouter);
 
 // Middleware de autenticación JWT para todas las rutas protegidas
 app.use('/api', requireAuth);
