@@ -59,6 +59,8 @@ router.post('/', async (req, res) => {
       nombre:            nombre_club.trim(),
       ciudad:            ciudad?.trim() || '',
       valor_mensualidad: 65000,
+      color:             '#00AAFF',
+      subtitulo:         '',
     },
   });
 
