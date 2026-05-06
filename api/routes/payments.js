@@ -132,6 +132,7 @@ router.put('/:id', async (req, res) => {
             `❌ *Pago no verificado*\n\n` +
             `Hola ${nombre}, no pudimos verificar tu comprobante de *$${montoFmt}*.\n\n` +
             `Por favor comunícate con el administrador del club.`,
+            club.config?.codigo_pais || '57',
           );
           waEnviado = true;
         }
@@ -195,7 +196,7 @@ router.put('/:id', async (req, res) => {
             : `✅ *Pago confirmado*\n\n` +
               `Hola ${nombre}, tu pago de *$${montoFmt}* fue verificado y aplicado a *${conceptoLabel}*. ¡Gracias!`;
 
-          await sendWhatsAppMessage(player.celular, mensaje);
+          await sendWhatsAppMessage(player.celular, mensaje, club.config?.codigo_pais || '57');
           waEnviado = true;
         } catch (waErr) {
           console.error('[aprobar] WhatsApp no enviado:', waErr.message);
@@ -285,14 +286,14 @@ async function actualizarTorneo(club_id, cedula, monto, filtroTorneo) {
   return { excedente };
 }
 
-async function sendWhatsAppMessage(celular, body) {
+async function sendWhatsAppMessage(celular, body, codigoPais = '57') {
   const sid   = process.env.TWILIO_ACCOUNT_SID;
   const token = process.env.TWILIO_AUTH_TOKEN;
   const from  = process.env.TWILIO_WHATSAPP_FROM || 'whatsapp:+14155238886';
   if (!sid || !token) {
     throw new Error('TWILIO_ACCOUNT_SID/AUTH_TOKEN no configurados en Vercel env');
   }
-  const to = celular.startsWith('whatsapp:') ? celular : `whatsapp:+57${celular}`;
+  const to = celular.startsWith('whatsapp:') ? celular : `whatsapp:+${codigoPais}${celular}`;
   const url = `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`;
   const res = await fetch(url, {
     method: 'POST',

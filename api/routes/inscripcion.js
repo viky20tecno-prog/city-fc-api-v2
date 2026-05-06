@@ -49,13 +49,13 @@ router.post('/', inscripcionLimiter, async (req, res) => {
     if (!/^\d{7,15}$/.test(String(cedula))) {
       return res.status(400).json({ success: false, error: 'Cédula inválida (7-15 dígitos)' });
     }
-    if (!/^\d{10}$/.test(String(celular))) {
-      return res.status(400).json({ success: false, error: 'Celular inválido (10 dígitos)' });
+    if (!/^\d{6,15}$/.test(String(celular))) {
+      return res.status(400).json({ success: false, error: 'Celular inválido (6-15 dígitos)' });
     }
 
-    // Obtener club
-    const club = await db.getClubBySlug('city-fc');
-    if (!club) return res.status(500).json({ success: false, error: 'Club no configurado' });
+    const clubSlug = req.query.club_id || req.body?.club_id || 'city-fc';
+    const club = await db.getClubBySlug(clubSlug);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
     // Verificar duplicado por cédula
     const existente = await db.getPlayerByCedula(club.id, cedula);

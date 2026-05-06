@@ -12,7 +12,7 @@ function generarSlug(nombre) {
 }
 
 router.post('/', async (req, res) => {
-  const { nombre_club, ciudad, email, password, nombre_admin, celular_admin } = req.body || {};
+  const { nombre_club, ciudad, email, password, nombre_admin, celular_admin, color } = req.body || {};
 
   if (!nombre_club?.trim() || !email?.trim() || !password) {
     return res.status(400).json({ success: false, error: 'Nombre del club, email y contraseña son requeridos.' });
@@ -59,8 +59,9 @@ router.post('/', async (req, res) => {
       nombre:            nombre_club.trim(),
       ciudad:            ciudad?.trim() || '',
       valor_mensualidad: 65000,
-      color:             '#00AAFF',
+      color:             color || '#00AAFF',
       subtitulo:         '',
+      codigo_pais:       '57',
     },
   });
 
