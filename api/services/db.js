@@ -201,7 +201,7 @@ async function updatePlayer(club_id, cedula, updates) {
     'lugar_de_nacimiento', 'fecha_nacimiento', 'tipo_sangre', 'eps',
     'estatura', 'peso',
     'municipio', 'barrio', 'direccion',
-    'familiar_emergencia', 'celular_contacto',
+    'familiar_emergencia', 'celular_contacto', 'notas',
   ];
   const fields = Object.fromEntries(
     Object.entries(updates).filter(([k]) => allowed.includes(k))
