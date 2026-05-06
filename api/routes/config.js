@@ -33,6 +33,9 @@ router.get('/', async (req, res) => {
       subtitulo:         club.config?.subtitulo         || '',
       logo_url:          club.config?.logo_url          || null,
       codigo_pais:       club.config?.codigo_pais       || '57',
+      plan:              club.config?.plan              || 'trial',
+      trial_ends_at:     club.config?.trial_ends_at     || null,
+      modulos:           club.config?.modulos           || null,
     });
   } catch (error) {
     console.error('Error in GET /config:', error);
