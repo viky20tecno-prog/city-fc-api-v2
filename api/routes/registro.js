@@ -63,6 +63,7 @@ router.post('/', async (req, res) => {
       subtitulo:         '',
       codigo_pais:       codigo_pais || '57',
       plan:              'trial',
+      trial_ends_at:     new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
       modulos: {
         dashboard:    true,
         jugadores:    true,
