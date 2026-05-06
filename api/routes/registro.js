@@ -62,6 +62,16 @@ router.post('/', async (req, res) => {
       color:             color || '#00AAFF',
       subtitulo:         '',
       codigo_pais:       codigo_pais || '57',
+      plan:              'trial',
+      modulos: {
+        dashboard:    true,
+        jugadores:    true,
+        uniformes:    true,
+        arbitraje:    true,
+        cobro:        true,
+        whatsapp:     true,
+        conciliacion: true,
+      },
     },
   });
 
