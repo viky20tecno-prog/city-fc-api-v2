@@ -5,13 +5,6 @@ const db = require('../services/db');
 const router = express.Router();
 
 const MESES = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-const TORNEOS = [
-  { nombre: 'Punto y Coma', valor: 80000 },
-  { nombre: 'JBC (Fútbol 7)', valor: 50000 },
-  { nombre: 'INDESA 2026 I', valor: 120000 },
-  { nombre: 'INDER Envigado', valor: 100000 },
-];
-const CUOTA = 65000;
 
 // Rate limiting: máx 5 inscripciones por IP en 15 minutos
 const inscripcionLimiter = rateLimit({
@@ -56,6 +49,9 @@ router.post('/', inscripcionLimiter, async (req, res) => {
     const clubSlug = req.query.club_id || req.body?.club_id || 'city-fc';
     const club = await db.getClubBySlug(clubSlug);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const CUOTA   = parseFloat(club.config?.valor_mensualidad) || 65000;
+    const TORNEOS = Array.isArray(club.config?.torneos_iniciales) ? club.config.torneos_iniciales : [];
 
     // Verificar duplicado por cédula
     const existente = await db.getPlayerByCedula(club.id, cedula);
@@ -123,23 +119,25 @@ router.post('/', inscripcionLimiter, async (req, res) => {
       estado:          'PENDIENTE',
     }]);
 
-    // Crear torneos
-    const torneos = TORNEOS.map(t => ({
-      club_id:         club.id,
-      player_id:       player.id,
-      cedula:          String(cedula),
-      nombre_torneo:   t.nombre,
-      valor_oficial:   t.valor,
-      valor_pagado:    0,
-      saldo_pendiente: t.valor,
-      estado:          'PENDIENTE',
-    }));
-    await db.bulkInsert('torneos', torneos);
+    // Crear torneos (solo si el club configuró torneos en el onboarding)
+    if (TORNEOS.length > 0) {
+      const torneos = TORNEOS.map(t => ({
+        club_id:         club.id,
+        player_id:       player.id,
+        cedula:          String(cedula),
+        nombre_torneo:   t.nombre,
+        valor_oficial:   parseFloat(t.valor) || 0,
+        valor_pagado:    0,
+        saldo_pendiente: parseFloat(t.valor) || 0,
+        estado:          'PENDIENTE',
+      }));
+      await db.bulkInsert('torneos', torneos);
+    }
 
     res.json({
       success: true,
-      message: '¡Bienvenido a City FC! ⚽',
-      data: { cedula, nombre: nombreCompleto, club_id: 'city-fc' },
+      message: `¡Bienvenido a ${club.config?.nombre || club.name}! ⚽`,
+      data: { cedula, nombre: nombreCompleto, club_id: clubSlug },
     });
 
   } catch (error) {
