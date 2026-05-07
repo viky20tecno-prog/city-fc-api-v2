@@ -27,10 +27,9 @@ const supabaseAdmin = createClient(
 app.use(cors({
   origin: (origin, callback) => {
     const allowed = [
-      'https://city-fc-dashboard-theta.vercel.app',
-      'https://city-fc-dashboard-pi.vercel.app',
+      'https://zensports.vercel.app',
     ];
-    if (!origin || allowed.includes(origin) || /^https:\/\/city-fc-dashboard[^.]*\.vercel\.app$/.test(origin) || /^http:\/\/localhost(:\d+)?$/.test(origin)) {
+    if (!origin || allowed.includes(origin) || /^http:\/\/localhost(:\d+)?$/.test(origin)) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
