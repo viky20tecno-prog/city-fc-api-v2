@@ -399,6 +399,14 @@ async function updatePedidoUniforme(id, fields) {
   return data;
 }
 
+async function deletePedidoUniforme(id) {
+  const { error } = await supabase
+    .from('pedido_uniformes')
+    .delete()
+    .eq('id', id);
+  if (error) throw error;
+}
+
 /**
  * Suspensiones de mensualidades
  */
@@ -532,6 +540,7 @@ module.exports = {
   getPedidoUniformes,
   createPedidoUniforme,
   updatePedidoUniforme,
+  deletePedidoUniforme,
   getSuspensiones,
   getSuspensionesJugador,
   createSuspension,

@@ -118,4 +118,24 @@ router.put('/:id', async (req, res) => {
   }
 });
 
+// DELETE /api/uniforms/:id
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const pedidos = await db.getPedidoUniformes(club.id);
+    const pedido = pedidos.find(p => String(p.id) === String(id));
+    if (!pedido) return res.status(404).json({ success: false, error: 'Pedido no encontrado' });
+
+    await db.deletePedidoUniforme(id);
+    res.json({ success: true, message: 'Pedido eliminado' });
+  } catch (error) {
+    console.error('Error in DELETE /uniforms/:id:', error);
+    res.status(500).json({ success: false, error: 'Error eliminando pedido', message: error.message });
+  }
+});
+
 module.exports = router;
