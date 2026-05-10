@@ -57,12 +57,6 @@ router.post('/', async (req, res) => {
       }
     }
 
-    // Verificar número duplicado
-    const numeroRepetido = pedidos.some(p => p.numero_estampar === String(numero));
-    if (numeroRepetido) {
-      return res.status(409).json({ success: false, error: `El número ${numero} ya está asignado a otro jugador` });
-    }
-
     const pedido = await db.createPedidoUniforme({
       club_id:         club.id,
       player_id:       player.id,
@@ -107,12 +101,6 @@ router.put('/:id', async (req, res) => {
     const pedidos = await db.getPedidoUniformes(club.id);
     const pedido = pedidos.find(p => String(p.id) === String(id));
     if (!pedido) return res.status(404).json({ success: false, error: 'Pedido no encontrado' });
-
-    // Si el número cambió, verificar que no esté ocupado
-    if (numero && numero !== pedido.numero_estampar) {
-      const ocupado = pedidos.some(p => String(p.id) !== String(id) && p.numero_estampar === String(numero));
-      if (ocupado) return res.status(409).json({ success: false, error: `El número ${numero} ya está asignado a otro jugador` });
-    }
 
     const updated = await db.updatePedidoUniforme(id, {
       ...(prendas         !== undefined && { prendas }),
