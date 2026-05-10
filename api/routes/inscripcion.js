@@ -107,18 +107,6 @@ router.post('/', inscripcionLimiter, async (req, res) => {
     }
     await db.bulkInsert('mensualidades', mensualidades);
 
-    // Crear uniforme
-    await db.bulkInsert('uniformes', [{
-      club_id:         club.id,
-      player_id:       player.id,
-      cedula:          String(cedula),
-      tipo_uniforme:   'General',
-      valor_oficial:   90000,
-      valor_pagado:    0,
-      saldo_pendiente: 90000,
-      estado:          'PENDIENTE',
-    }]);
-
     // Crear torneos (solo si el club configuró torneos en el onboarding)
     if (TORNEOS.length > 0) {
       const torneos = TORNEOS.map(t => ({
