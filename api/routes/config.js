@@ -38,6 +38,10 @@ router.get('/', async (req, res) => {
       modulos:           club.config?.modulos           || null,
       onboarding_completed: club.config?.onboarding_completed || false,
       prendas_uniforme:  club.config?.prendas_uniforme  || [],
+      whatsapp:          club.config?.whatsapp           || '',
+      dias_gracia_mora:  club.config?.dias_gracia_mora   || 7,
+      penalidad_mora:    club.config?.penalidad_mora     || 5000,
+      torneos_iniciales: club.config?.torneos_iniciales  || [],
     });
   } catch (error) {
     console.error('Error in GET /config:', error);
