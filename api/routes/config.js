@@ -73,6 +73,15 @@ router.patch('/', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Club no encontrado' });
     }
 
+    // Si se envían prendas_uniforme, preservar precios existentes para nombres que ya tenían precio
+    if (req.body.prendas_uniforme) {
+      const existing = club.config?.prendas_uniforme || [];
+      req.body.prendas_uniforme = req.body.prendas_uniforme.map(p => {
+        if (typeof p === 'object' && p.nombre) return p;
+        const found = existing.find(e => (typeof e === 'object' ? e.nombre : e) === p);
+        return { nombre: String(p), precio: typeof found === 'object' ? (found.precio || 0) : 0 };
+      });
+    }
     const updatedConfig = { ...club.config, ...req.body };
 
     const { error: updateErr } = await supabase
