@@ -38,10 +38,13 @@ router.get('/', async (req, res) => {
       modulos:           club.config?.modulos           || null,
       onboarding_completed: club.config?.onboarding_completed || false,
       prendas_uniforme:  club.config?.prendas_uniforme  || [],
-      whatsapp:          club.config?.whatsapp           || '',
-      dias_gracia_mora:  club.config?.dias_gracia_mora   || 7,
-      penalidad_mora:    club.config?.penalidad_mora     || 5000,
-      torneos_iniciales: club.config?.torneos_iniciales  || [],
+      whatsapp:                   club.config?.whatsapp                   || '',
+      dias_gracia_mora:           club.config?.dias_gracia_mora           || 7,
+      penalidad_mora:             club.config?.penalidad_mora             || 5000,
+      torneos_iniciales:          club.config?.torneos_iniciales          || [],
+      categorias_jugadores:       club.config?.categorias_jugadores       || [],
+      categorias_finanzas_ingreso: club.config?.categorias_finanzas_ingreso || [],
+      categorias_finanzas_gasto:  club.config?.categorias_finanzas_gasto  || [],
     });
   } catch (error) {
     console.error('Error in GET /config:', error);
