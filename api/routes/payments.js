@@ -63,21 +63,27 @@ router.post('/', async (req, res) => {
       tipo_origen:     'MANUAL',
     });
 
-    // Actualizar estado según concepto
+    // Actualizar estado según concepto y registrar si se aplicó
+    let resultado = { excedente: montoNum };
     if (conceptoTipo === 'mensualidad') {
-      await actualizarMensualidad(club.id, cedula, montoNum);
+      resultado = await actualizarMensualidad(club.id, cedula, montoNum);
     } else if (conceptoTipo === 'uniforme') {
-      await actualizarUniforme(club.id, cedula, montoNum);
+      resultado = await actualizarUniforme(club.id, cedula, montoNum);
     } else if (conceptoTipo === 'torneo') {
       const conceptoDesc = conceptos[0]?.descripcion || '';
-      await actualizarTorneo(club.id, cedula, montoNum, conceptoDesc);
+      resultado = await actualizarTorneo(club.id, cedula, montoNum, conceptoDesc);
     }
+
+    const conceptoAplicado = resultado.excedente < montoNum;
 
     res.json({
       success: true,
       club_id: req.club_id,
       id_transaccion: pago.id,
-      mensaje: 'Pago registrado exitosamente',
+      mensaje: conceptoAplicado
+        ? 'Pago registrado y aplicado al concepto'
+        : 'Pago registrado. No se encontraron conceptos pendientes para este jugador — el pago queda en el historial.',
+      concepto_aplicado: conceptoAplicado,
       pago: {
         id: pago.id,
         cedula,

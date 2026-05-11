@@ -16,6 +16,7 @@ const whatsappRouter       = require('./routes/whatsapp');
 const registroRouter       = require('./routes/registro');
 const finanzasRouter       = require('./routes/finanzas');
 const nominaRouter         = require('./routes/nomina');
+const torneosRouter        = require('./routes/torneos');
 const requireAuth          = require('./middleware/auth');
 
 const app = express();
@@ -137,6 +138,7 @@ app.use('/api/arbitrage',    arbitrageRouter);
 app.use('/api/suspensiones', suspensionesRouter);
 app.use('/api/finanzas',     finanzasRouter);
 app.use('/api/nomina',       nominaRouter);
+app.use('/api/torneos',      torneosRouter);
 
 // Error handler
 app.use((err, req, res, next) => {

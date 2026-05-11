@@ -366,6 +366,20 @@ async function updateTorneo(id, updates) {
   return data;
 }
 
+async function deleteTorneo(id) {
+  const { error } = await supabase.from('torneos').delete().eq('id', id);
+  if (error) throw error;
+}
+
+async function createTorneosInscripcion(rows) {
+  const { data, error } = await supabase
+    .from('torneos')
+    .insert(rows)
+    .select();
+  if (error) throw error;
+  return data;
+}
+
 /**
  * Pedidos de uniformes
  */
@@ -593,6 +607,8 @@ module.exports = {
   getUniformesPendientes,
   updateUniforme,
   getTorneos,
+  deleteTorneo,
+  createTorneosInscripcion,
   getTorneosPendientes,
   updateTorneo,
   createPago,
