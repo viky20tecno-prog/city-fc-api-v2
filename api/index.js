@@ -14,6 +14,8 @@ const arbitrageRouter      = require('./routes/arbitrage');
 const suspensionesRouter   = require('./routes/suspensiones');
 const whatsappRouter       = require('./routes/whatsapp');
 const registroRouter       = require('./routes/registro');
+const finanzasRouter       = require('./routes/finanzas');
+const nominaRouter         = require('./routes/nomina');
 const requireAuth          = require('./middleware/auth');
 
 const app = express();
@@ -133,6 +135,8 @@ app.use('/api/reports',      reportsRouter);
 app.use('/api/uniforms',     uniformsRouter);
 app.use('/api/arbitrage',    arbitrageRouter);
 app.use('/api/suspensiones', suspensionesRouter);
+app.use('/api/finanzas',     finanzasRouter);
+app.use('/api/nomina',       nominaRouter);
 
 // Error handler
 app.use((err, req, res, next) => {

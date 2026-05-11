@@ -509,6 +509,75 @@ async function aplicarMoraConPenalidad(mensualidad_id, penalidad = 10000) {
   return data;
 }
 
+/* ─── Finanzas (ingresos y gastos) ─────────────────────────── */
+
+async function getFinanzas(club_id, { desde, hasta } = {}) {
+  let q = supabase.from('finanzas').select('*').eq('club_id', club_id).order('fecha', { ascending: false });
+  if (desde) q = q.gte('fecha', desde);
+  if (hasta) q = q.lte('fecha', hasta);
+  const { data, error } = await q;
+  if (error) throw error;
+  return data;
+}
+
+async function createFinanza(record) {
+  const { data, error } = await supabase.from('finanzas').insert([record]).select().single();
+  if (error) throw error;
+  return data;
+}
+
+async function deleteFinanza(id) {
+  const { error } = await supabase.from('finanzas').delete().eq('id', id);
+  if (error) throw error;
+}
+
+/* ─── Nómina — empleados ────────────────────────────────────── */
+
+async function getNominaEmpleados(club_id) {
+  const { data, error } = await supabase
+    .from('nomina_empleados').select('*').eq('club_id', club_id).order('nombre');
+  if (error) throw error;
+  return data;
+}
+
+async function createNominaEmpleado(record) {
+  const { data, error } = await supabase.from('nomina_empleados').insert([record]).select().single();
+  if (error) throw error;
+  return data;
+}
+
+async function updateNominaEmpleado(id, fields) {
+  const { data, error } = await supabase.from('nomina_empleados').update(fields).eq('id', id).select().single();
+  if (error) throw error;
+  return data;
+}
+
+async function deleteNominaEmpleado(id) {
+  const { error } = await supabase.from('nomina_empleados').delete().eq('id', id);
+  if (error) throw error;
+}
+
+/* ─── Nómina — pagos ────────────────────────────────────────── */
+
+async function getNominaPagos(club_id, mes) {
+  let q = supabase.from('nomina_pagos').select('*, nomina_empleados(nombre,cargo)').eq('club_id', club_id);
+  if (mes) q = q.eq('mes', mes);
+  const { data, error } = await q.order('created_at', { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+async function createNominaPago(record) {
+  const { data, error } = await supabase.from('nomina_pagos').insert([record]).select('*, nomina_empleados(nombre,cargo)').single();
+  if (error) throw error;
+  return data;
+}
+
+async function deleteNominaPago(id) {
+  const { error } = await supabase.from('nomina_pagos').delete().eq('id', id);
+  if (error) throw error;
+}
+
 module.exports = {
   supabase,
   getClubBySlug,
@@ -546,4 +615,14 @@ module.exports = {
   createSuspension,
   deactivateSuspension,
   aplicarMoraConPenalidad,
+  getFinanzas,
+  createFinanza,
+  deleteFinanza,
+  getNominaEmpleados,
+  createNominaEmpleado,
+  updateNominaEmpleado,
+  deleteNominaEmpleado,
+  getNominaPagos,
+  createNominaPago,
+  deleteNominaPago,
 };
