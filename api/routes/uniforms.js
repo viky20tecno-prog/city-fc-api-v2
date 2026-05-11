@@ -47,13 +47,16 @@ router.post('/', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Jugador no encontrado' });
     }
 
-    // Verificar pedido duplicado: solo bloquear si ya existe un pedido de Jugador para la misma cédula
+    // Verificar pedido duplicado: solo bloquear si hay un pedido activo (PENDIENTE o PAGADO)
+    // Un pedido ENTREGADO ya está cerrado — se permite registrar uno nuevo
     const pedidos = await db.getPedidoUniformes(club.id);
     const tipoNormalizado = (tipo || 'Jugador').trim();
     if (tipoNormalizado === 'Jugador') {
-      const pedidoJugadorExistente = pedidos.find(p => p.cedula === String(cedula) && p.tipo === 'Jugador');
-      if (pedidoJugadorExistente) {
-        return res.status(409).json({ success: false, error: 'Este jugador ya tiene un pedido de uniforme registrado' });
+      const pedidoActivo = pedidos.find(
+        p => p.cedula === String(cedula) && p.tipo === 'Jugador' && p.estado !== 'ENTREGADO'
+      );
+      if (pedidoActivo) {
+        return res.status(409).json({ success: false, error: 'Este jugador ya tiene un pedido de uniforme activo (pendiente o pagado)' });
       }
     }
 
