@@ -45,6 +45,7 @@ router.get('/', async (req, res) => {
       categorias_jugadores:       club.config?.categorias_jugadores       || [],
       categorias_finanzas_ingreso: club.config?.categorias_finanzas_ingreso || [],
       categorias_finanzas_gasto:  club.config?.categorias_finanzas_gasto  || [],
+      redes_sociales:             club.config?.redes_sociales             || {},
     });
   } catch (error) {
     console.error('Error in GET /config:', error);
