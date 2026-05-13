@@ -57,6 +57,67 @@ router.patch('/:cedula', async (req, res) => {
   }
 });
 
+// POST /api/players/bulk?club_id=city-fc  — importación masiva desde Excel/CSV
+router.post('/bulk', async (req, res) => {
+  try {
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const { jugadores } = req.body;
+    if (!Array.isArray(jugadores) || jugadores.length === 0) {
+      return res.status(400).json({ success: false, error: 'Se requiere un array de jugadores no vacío' });
+    }
+
+    // Cédulas ya existentes en el club (una sola query)
+    const { data: existing } = await db.supabase
+      .from('players')
+      .select('cedula')
+      .eq('club_id', club.id);
+    const existingSet = new Set((existing || []).map(p => String(p.cedula)));
+
+    const errores = [];
+    const filas   = [];
+
+    jugadores.forEach((j, idx) => {
+      const cedula    = String(j.cedula    || '').trim();
+      const nombre    = String(j.nombre    || '').trim();
+      const apellidos = String(j.apellidos || '').trim();
+      const fila      = idx + 2;
+
+      if (!cedula)               return errores.push({ fila, cedula: '—', error: 'Cédula requerida' });
+      if (!nombre)               return errores.push({ fila, cedula, error: 'Nombre requerido' });
+      if (existingSet.has(cedula)) return errores.push({ fila, cedula, nombre: `${nombre} ${apellidos}`.trim(), error: 'Cédula ya registrada' });
+
+      existingSet.add(cedula); // evitar duplicados dentro del mismo lote
+      filas.push({
+        club_id:              club.id,
+        cedula,
+        nombre,
+        apellidos:            apellidos || nombre,
+        celular:              String(j.celular              || '').trim() || null,
+        correo_electronico:   String(j.correo_electronico   || '').trim() || null,
+        posicion:             String(j.posicion             || '').trim() || null,
+        numero_camiseta:      String(j.numero_camiseta      || '').trim() || null,
+        activo:               true,
+      });
+    });
+
+    let insertados = [];
+    if (filas.length > 0) insertados = await db.bulkInsert('players', filas);
+
+    res.json({
+      success:        true,
+      total:          jugadores.length,
+      insertados:     insertados.length,
+      errores:        errores.length,
+      detalle_errores: errores,
+    });
+  } catch (error) {
+    console.error('Error in POST /players/bulk:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // DELETE /api/players/:cedula?club_id=city-fc  — desactiva el jugador (soft delete)
 router.delete('/:cedula', async (req, res) => {
   try {
