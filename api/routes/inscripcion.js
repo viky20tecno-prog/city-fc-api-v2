@@ -25,6 +25,7 @@ router.post('/', inscripcionLimiter, async (req, res) => {
       lugar_de_nacimiento, fecha_nacimiento, tipo_sangre, eps,
       estatura, peso, direccion, municipio, barrio,
       familiar_emergencia, celular_contacto,
+      categoria, equipo, categorias,
       tipo_descuento = 'NA',
       website = '',           // honeypot — bots lo rellenan, humanos no lo ven
     } = req.body;
@@ -84,6 +85,10 @@ router.post('/', inscripcionLimiter, async (req, res) => {
       direccion:           direccion           || null,
       familiar_emergencia: familiar_emergencia || null,
       celular_contacto:    celular_contacto    || null,
+      categoria:           categoria           || null,
+      equipo:              equipo              || null,
+      categorias:          Array.isArray(categorias) ? categorias
+                           : (categoria ? [{ categoria, equipo: equipo || '' }] : []),
       activo:              true,
     });
 
