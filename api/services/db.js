@@ -260,6 +260,29 @@ async function getPartidos(club_id) {
 }
 
 /**
+ * Actualizar un partido
+ */
+async function updatePartido(id, updates) {
+  const { data, error } = await supabase
+    .from('partidos')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Eliminar un partido y sus pagos asociados
+ */
+async function deletePartido(id) {
+  await supabase.from('arbitraje_pagos').delete().eq('partido_id', id);
+  const { error } = await supabase.from('partidos').delete().eq('id', id);
+  if (error) throw error;
+}
+
+/**
  * Crear un partido
  */
 async function createPartido(partidoData) {
@@ -620,6 +643,8 @@ module.exports = {
   bulkInsert,
   getPartidos,
   createPartido,
+  updatePartido,
+  deletePartido,
   getArbitrajePagos,
   createArbitrajePago,
   updateArbitrajePago,

@@ -12,14 +12,19 @@ router.get('/partidos', async (req, res) => {
     const partidos = await db.getPartidos(club.id);
     res.json({
       success: true,
-      data: partidos.map(p => ({
-        id:         p.id,
-        titulo:     p.titulo,
-        fecha:      p.fecha,
-        equipoA:    p.equipo_a,
-        equipoB:    p.equipo_b,
-        montoTotal: parseFloat(p.monto_total) || 0,
-      })),
+      data: partidos.map(p => {
+        const fechaDB = p.fecha || '';
+        const [datePart, timePart] = fechaDB.includes('T') ? fechaDB.split('T') : [fechaDB, null];
+        return {
+          id:         p.id,
+          titulo:     p.titulo,
+          fecha:      datePart,
+          hora:       timePart ? timePart.slice(0, 5) : '',
+          equipoA:    p.equipo_a,
+          equipoB:    p.equipo_b,
+          montoTotal: parseFloat(p.monto_total) || 0,
+        };
+      }),
     });
   } catch (err) {
     console.error('Error GET /arbitrage/partidos:', err.message);
@@ -104,6 +109,43 @@ router.get('/pagos/:partidoId', async (req, res) => {
     });
   } catch (err) {
     console.error('Error GET /arbitrage/pagos:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PATCH /api/arbitrage/partidos/:id
+router.patch('/partidos/:id', async (req, res) => {
+  try {
+    const { titulo, fecha, hora, equipoA, equipoB } = req.body;
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const updates = {};
+    if (titulo)  updates.titulo  = titulo;
+    if (equipoA) updates.equipo_a = equipoA;
+    if (equipoB) updates.equipo_b = equipoB;
+    if (fecha) {
+      updates.fecha = hora ? `${fecha}T${hora}:00` : fecha;
+    }
+
+    await db.updatePartido(req.params.id, updates);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error PATCH /arbitrage/partidos:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/arbitrage/partidos/:id
+router.delete('/partidos/:id', async (req, res) => {
+  try {
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    await db.deletePartido(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error DELETE /arbitrage/partidos:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
