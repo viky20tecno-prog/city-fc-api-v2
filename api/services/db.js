@@ -712,6 +712,62 @@ async function deleteCalendarioEvent(id, club_id) {
   if (error) throw error;
 }
 
+// ── Asistencia ──────────────────────────────────────────────────────────────
+
+async function getAsistencia(club_id, evento_id) {
+  const { data: evento, error: evErr } = await supabase
+    .from('calendario')
+    .select('tipo, equipo')
+    .eq('id', evento_id)
+    .single();
+  if (evErr) throw evErr;
+
+  let playersQuery = supabase
+    .from('players')
+    .select('cedula, nombre, apellidos, equipo, categoria')
+    .eq('club_id', club_id)
+    .eq('activo', true)
+    .order('nombre');
+
+  if (evento.tipo === 'PARTIDO' && evento.equipo) {
+    playersQuery = playersQuery.eq('equipo', evento.equipo);
+  }
+
+  const { data: players, error: plErr } = await playersQuery;
+  if (plErr) throw plErr;
+
+  const { data: registros } = await supabase
+    .from('asistencia')
+    .select('cedula, estado, nota')
+    .eq('evento_id', evento_id);
+
+  const estadoMap = {};
+  (registros || []).forEach(r => { estadoMap[r.cedula] = r; });
+
+  return (players || []).map(p => ({
+    cedula:    p.cedula,
+    nombre:    p.nombre,
+    apellidos: p.apellidos,
+    equipo:    p.equipo,
+    categoria: p.categoria,
+    estado:    estadoMap[p.cedula]?.estado || 'PENDIENTE',
+    nota:      estadoMap[p.cedula]?.nota   || null,
+  }));
+}
+
+async function upsertAsistencia({ club_id, evento_id, cedula, estado, nota, registrado_por }) {
+  const { data, error } = await supabase
+    .from('asistencia')
+    .upsert(
+      { evento_id, club_id, cedula, estado, nota, registrado_por, updated_at: new Date().toISOString() },
+      { onConflict: 'evento_id,cedula' }
+    )
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 module.exports = {
   supabase,
   getClubBySlug,
@@ -773,4 +829,6 @@ module.exports = {
   createCalendarioEvent,
   updateCalendarioEvent,
   deleteCalendarioEvent,
+  getAsistencia,
+  upsertAsistencia,
 };

@@ -19,6 +19,7 @@ const nominaRouter         = require('./routes/nomina');
 const torneosRouter        = require('./routes/torneos');
 const membersRouter        = require('./routes/members');
 const calendarioRouter     = require('./routes/calendario');
+const asistenciaRouter     = require('./routes/asistencia');
 const requireAuth          = require('./middleware/auth');
 
 // Middleware que bloquea acceso a rutas financieras para ENTRENADOR
@@ -161,6 +162,7 @@ app.use('/api/suspensiones', suspensionesRouter);
 app.use('/api/reports',      reportsRouter);
 app.use('/api/miembros',     membersRouter);
 app.use('/api/calendario',   calendarioRouter);
+app.use('/api/asistencia',   asistenciaRouter);
 
 // Rutas solo ADMIN (bloqueadas para ENTRENADOR)
 app.use('/api/invoices',     requireAdmin, invoicesRouter);
