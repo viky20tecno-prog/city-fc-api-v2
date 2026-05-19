@@ -679,6 +679,39 @@ async function deleteClubMember(id) {
   if (error) throw error;
 }
 
+// ── Calendario ──────────────────────────────────────────────────────────────
+
+async function getCalendario(club_id, desde, hasta) {
+  let query = supabase
+    .from('calendario')
+    .select('*')
+    .eq('club_id', club_id)
+    .order('fecha_inicio', { ascending: true });
+  if (desde) query = query.gte('fecha_inicio', desde);
+  if (hasta) query = query.lte('fecha_inicio', hasta);
+  const { data, error } = await query;
+  if (error) throw error;
+  return data || [];
+}
+
+async function createCalendarioEvent(evento) {
+  const { data, error } = await supabase.from('calendario').insert([evento]).select().single();
+  if (error) throw error;
+  return data;
+}
+
+async function updateCalendarioEvent(id, club_id, updates) {
+  const { data, error } = await supabase
+    .from('calendario').update(updates).eq('id', id).eq('club_id', club_id).select().single();
+  if (error) throw error;
+  return data;
+}
+
+async function deleteCalendarioEvent(id, club_id) {
+  const { error } = await supabase.from('calendario').delete().eq('id', id).eq('club_id', club_id);
+  if (error) throw error;
+}
+
 module.exports = {
   supabase,
   getClubBySlug,
@@ -736,4 +769,8 @@ module.exports = {
   createClubMember,
   updateClubMember,
   deleteClubMember,
+  getCalendario,
+  createCalendarioEvent,
+  updateCalendarioEvent,
+  deleteCalendarioEvent,
 };
