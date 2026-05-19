@@ -160,17 +160,17 @@ app.use('/api/uniforms',     uniformsRouter);
 app.use('/api/arbitrage',    arbitrageRouter);
 app.use('/api/suspensiones', suspensionesRouter);
 app.use('/api/reports',      reportsRouter);
-app.use('/api/miembros',     membersRouter);
 app.use('/api/calendario',   calendarioRouter);
 app.use('/api/asistencia',   asistenciaRouter);
+app.use('/api/invoices',     invoicesRouter);
+app.use('/api/payments',     paymentsRouter);
+app.use('/api/config',       configRouter);
+app.use('/api/torneos',      torneosRouter);
 
 // Rutas solo ADMIN (bloqueadas para ENTRENADOR)
-app.use('/api/invoices',     requireAdmin, invoicesRouter);
-app.use('/api/payments',     requireAdmin, paymentsRouter);
-app.use('/api/config',       requireAdmin, configRouter);
 app.use('/api/finanzas',     requireAdmin, finanzasRouter);
 app.use('/api/nomina',       requireAdmin, nominaRouter);
-app.use('/api/torneos',      requireAdmin, torneosRouter);
+app.use('/api/miembros',     requireAdmin, membersRouter);
 
 // Error handler
 app.use((err, req, res, next) => {
