@@ -310,6 +310,20 @@ async function getArbitrajePagos(club_id, partido_id) {
   return data;
 }
 
+async function getArbitrajePagosCountByPartido(club_id) {
+  const { data, error } = await supabase
+    .from('arbitraje_pagos')
+    .select('partido_id')
+    .eq('club_id', club_id);
+
+  if (error) throw error;
+  const countMap = {};
+  (data || []).forEach(row => {
+    countMap[row.partido_id] = (countMap[row.partido_id] || 0) + 1;
+  });
+  return Object.entries(countMap).map(([partido_id, count]) => ({ partido_id, count }));
+}
+
 /**
  * Registrar pago de arbitraje
  */
@@ -616,6 +630,55 @@ async function deleteNominaPago(id) {
   if (error) throw error;
 }
 
+// ── Club Members (Roles) ────────────────────────────────────────────────────
+
+async function getClubMemberByUserId(user_id, club_slug) {
+  const { data, error } = await supabase
+    .from('club_members')
+    .select('role, nombre, activo')
+    .eq('user_id', user_id)
+    .eq('club_id', club_slug)
+    .single();
+  if (error && error.code !== 'PGRST116') throw error;
+  return data || null;
+}
+
+async function getClubMembers(club_slug) {
+  const { data, error } = await supabase
+    .from('club_members')
+    .select('id, user_id, role, nombre, activo')
+    .eq('club_id', club_slug)
+    .order('role');
+  if (error) throw error;
+  return data || [];
+}
+
+async function createClubMember(member) {
+  const { data, error } = await supabase
+    .from('club_members')
+    .insert([member])
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function updateClubMember(id, updates) {
+  const { data, error } = await supabase
+    .from('club_members')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function deleteClubMember(id) {
+  const { error } = await supabase.from('club_members').delete().eq('id', id);
+  if (error) throw error;
+}
+
 module.exports = {
   supabase,
   getClubBySlug,
@@ -646,6 +709,7 @@ module.exports = {
   updatePartido,
   deletePartido,
   getArbitrajePagos,
+  getArbitrajePagosCountByPartido,
   createArbitrajePago,
   updateArbitrajePago,
   getPedidoUniformes,
@@ -667,4 +731,9 @@ module.exports = {
   getNominaPagos,
   createNominaPago,
   deleteNominaPago,
+  getClubMemberByUserId,
+  getClubMembers,
+  createClubMember,
+  updateClubMember,
+  deleteClubMember,
 };

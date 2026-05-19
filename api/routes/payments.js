@@ -194,13 +194,13 @@ router.put('/:id', async (req, res) => {
             : 'Mensualidad';
 
           const mensaje = excedente > 0
-            ? `✅ *Pago confirmado*\n\n` +
-              `Hola ${nombre}, tu pago de *$${montoFmt}* fue verificado y aplicado a *${conceptoLabel}*.\n\n` +
-              `💰 Tienes un saldo a favor de *$${excedenteFmt}*.\n\n` +
-              `¿A qué concepto lo abonamos? Responde con:\n` +
-              `• *mensualidad*\n• *uniforme*\n• *torneo*`
-            : `✅ *Pago confirmado*\n\n` +
-              `Hola ${nombre}, tu pago de *$${montoFmt}* fue verificado y aplicado a *${conceptoLabel}*. ¡Gracias!`;
+            ? `✅ *¡Transacción exitosa!*\n\n` +
+              `Hola ${nombre} 🎉 Tu pago de *$${montoFmt}* fue confirmado y aplicado a *${conceptoLabel}*.\n\n` +
+              `💰 Tienes un saldo a favor de *$${excedenteFmt}*. ¿A qué concepto lo abonamos?\n` +
+              `Responde: *mensualidad*, *uniforme* o *torneo*`
+            : `✅ *¡Transacción exitosa!*\n\n` +
+              `Hola ${nombre} 🎉 Tu pago de *$${montoFmt}* fue confirmado y aplicado a *${conceptoLabel}*.\n\n` +
+              `¡Gracias por mantener tu compromiso con el club! Sigue siendo un campeón 🏆`;
 
           await sendWhatsAppMessage(player.celular, mensaje, club.config?.codigo_pais || '57');
           waEnviado = true;

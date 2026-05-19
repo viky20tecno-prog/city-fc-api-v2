@@ -17,7 +17,16 @@ const registroRouter       = require('./routes/registro');
 const finanzasRouter       = require('./routes/finanzas');
 const nominaRouter         = require('./routes/nomina');
 const torneosRouter        = require('./routes/torneos');
+const membersRouter        = require('./routes/members');
 const requireAuth          = require('./middleware/auth');
+
+// Middleware que bloquea acceso a rutas financieras para ENTRENADOR
+const requireAdmin = (req, res, next) => {
+  if (req.userRole === 'ENTRENADOR') {
+    return res.status(403).json({ success: false, error: 'Acceso restringido al administrador' });
+  }
+  next();
+};
 
 const app = express();
 
@@ -95,8 +104,7 @@ app.use('/api/registro',    registroRouter);
 app.use('/api', requireAuth);
 
 // Validación de pertenencia al club (post-auth)
-// Si el club tiene owner_user_id configurado, valida que el usuario sea el dueño.
-// Si owner_user_id es NULL (migración pendiente), permite el acceso (retrocompatible).
+// Admite dueño del club (owner_user_id) y miembros con rol en club_members.
 app.use('/api', async (req, res, next) => {
   if (!req.user || !req.club_id) return next();
 
@@ -115,11 +123,28 @@ app.use('/api', async (req, res, next) => {
       return res.status(403).json({ success: false, error: 'Club inactivo' });
     }
 
-    if (club.owner_user_id && club.owner_user_id !== req.user.id) {
+    if (!club.owner_user_id || club.owner_user_id === req.user.id) {
+      // Dueño del club o club sin owner (retrocompatible)
+      req.club_uuid = club.id;
+      req.userRole  = 'ADMIN';
+      return next();
+    }
+
+    // Verificar si es miembro con rol
+    const { data: member } = await supabaseAdmin
+      .from('club_members')
+      .select('role, activo, nombre')
+      .eq('user_id', req.user.id)
+      .eq('club_id', req.club_id)
+      .single();
+
+    if (!member || !member.activo) {
       return res.status(403).json({ success: false, error: 'No tienes acceso a este club' });
     }
 
-    req.club_uuid = club.id;
+    req.club_uuid  = club.id;
+    req.userRole   = member.role;
+    req.memberName = member.nombre;
     next();
   } catch (err) {
     console.error('Club access validation error:', err.message);
@@ -127,18 +152,21 @@ app.use('/api', async (req, res, next) => {
   }
 });
 
-// Rutas protegidas
+// Rutas protegidas — acceso universal (ADMIN y ENTRENADOR)
 app.use('/api/players',      playersRouter);
-app.use('/api/invoices',     invoicesRouter);
-app.use('/api/payments',     paymentsRouter);
-app.use('/api/config',       configRouter);
-app.use('/api/reports',      reportsRouter);
 app.use('/api/uniforms',     uniformsRouter);
 app.use('/api/arbitrage',    arbitrageRouter);
 app.use('/api/suspensiones', suspensionesRouter);
-app.use('/api/finanzas',     finanzasRouter);
-app.use('/api/nomina',       nominaRouter);
-app.use('/api/torneos',      torneosRouter);
+app.use('/api/reports',      reportsRouter);
+app.use('/api/miembros',     membersRouter);
+
+// Rutas solo ADMIN (bloqueadas para ENTRENADOR)
+app.use('/api/invoices',     requireAdmin, invoicesRouter);
+app.use('/api/payments',     requireAdmin, paymentsRouter);
+app.use('/api/config',       requireAdmin, configRouter);
+app.use('/api/finanzas',     requireAdmin, finanzasRouter);
+app.use('/api/nomina',       requireAdmin, nominaRouter);
+app.use('/api/torneos',      requireAdmin, torneosRouter);
 
 // Error handler
 app.use((err, req, res, next) => {

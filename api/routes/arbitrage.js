@@ -10,19 +10,27 @@ router.get('/partidos', async (req, res) => {
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
     const partidos = await db.getPartidos(club.id);
+
+    // Cargar conteo de jugadores por partido en una sola query
+    const jugadoresCounts = await db.getArbitrajePagosCountByPartido(club.id);
+    const countMap = {};
+    jugadoresCounts.forEach(r => { countMap[r.partido_id] = parseInt(r.count) || 0; });
+
     res.json({
       success: true,
       data: partidos.map(p => {
         const fechaDB = p.fecha || '';
         const [datePart, timePart] = fechaDB.includes('T') ? fechaDB.split('T') : [fechaDB, null];
         return {
-          id:         p.id,
-          titulo:     p.titulo,
-          fecha:      datePart,
-          hora:       timePart ? timePart.slice(0, 5) : '',
-          equipoA:    p.equipo_a,
-          equipoB:    p.equipo_b,
-          montoTotal: parseFloat(p.monto_total) || 0,
+          id:               p.id,
+          titulo:           p.titulo,
+          fecha:            datePart,
+          hora:             timePart ? timePart.slice(0, 5) : '',
+          equipoA:          p.equipo_a,
+          equipoB:          p.equipo_b,
+          montoTotal:       parseFloat(p.monto_total) || 0,
+          montoPorJugador:  parseFloat(p.monto_por_jugador) || 0,
+          jugadoresCount:   countMap[p.id] || 0,
         };
       }),
     });
