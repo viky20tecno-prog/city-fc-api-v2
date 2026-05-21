@@ -21,6 +21,7 @@ const membersRouter        = require('./routes/members');
 const calendarioRouter     = require('./routes/calendario');
 const asistenciaRouter     = require('./routes/asistencia');
 const publicoRouter        = require('./routes/publico');
+const cronRouter           = require('./routes/cron');
 const requireAuth          = require('./middleware/auth');
 
 // Middleware que bloquea acceso a rutas financieras para ENTRENADOR
@@ -83,7 +84,8 @@ app.use('/api', (req, res, next) => {
     req.path.startsWith('/inscripcion') ||
     req.path.startsWith('/registro') ||
     req.path.startsWith('/whatsapp') ||
-    req.path.startsWith('/publico')
+    req.path.startsWith('/publico') ||
+    req.path.startsWith('/cron')
   ) {
     return next();
   }
@@ -104,6 +106,7 @@ app.use('/api/inscripcion', inscripcionRouter);
 app.use('/api/whatsapp',    whatsappRouter);
 app.use('/api/registro',    registroRouter);
 app.use('/api/publico',     publicoRouter);
+app.use('/api/cron',       cronRouter);
 
 // Middleware de autenticación JWT para todas las rutas protegidas
 app.use('/api', requireAuth);

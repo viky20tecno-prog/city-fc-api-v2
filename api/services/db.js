@@ -164,6 +164,29 @@ async function getPagos(club_id, { cedula, estado_revision, limit = 100 } = {}) 
 }
 
 /**
+ * Obtener todos los clubs activos con su owner_user_id para secuencias de email
+ */
+async function getAllActiveClubs() {
+  const { data, error } = await supabase
+    .from('clubs')
+    .select('id, slug, name, owner_user_id, created_at, config')
+    .eq('is_active', true);
+  if (error) throw error;
+  return data || [];
+}
+
+/**
+ * Marcar un tipo de email como enviado en config.emails_enviados del club
+ */
+async function marcarEmailEnviado(club_id, email_key) {
+  const { data: club } = await supabase.from('clubs').select('config').eq('id', club_id).single();
+  const config = club?.config || {};
+  const emails_enviados = { ...(config.emails_enviados || {}), [email_key]: new Date().toISOString() };
+  const { error } = await supabase.from('clubs').update({ config: { ...config, emails_enviados } }).eq('id', club_id);
+  if (error) throw error;
+}
+
+/**
  * Obtener un pago por id
  */
 async function getPagoById(id) {
@@ -831,4 +854,6 @@ module.exports = {
   deleteCalendarioEvent,
   getAsistencia,
   upsertAsistencia,
+  getAllActiveClubs,
+  marcarEmailEnviado,
 };
