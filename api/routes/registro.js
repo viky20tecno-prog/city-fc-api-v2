@@ -1,6 +1,7 @@
 const express = require('express');
 const router  = express.Router();
 const { createClient } = require('@supabase/supabase-js');
+const { sendWelcomeClub } = require('../services/email');
 
 function generarSlug(nombre) {
   return nombre
@@ -63,7 +64,7 @@ router.post('/', async (req, res) => {
       subtitulo:         '',
       codigo_pais:       codigo_pais || '57',
       plan:              'trial',
-      trial_ends_at:     new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
+      trial_ends_at:     new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
       modulos: {
         dashboard:    true,
         jugadores:    true,
@@ -89,6 +90,14 @@ router.post('/', async (req, res) => {
     email:    email.trim().toLowerCase(),
     password,
   });
+
+  // Enviar email de bienvenida (sin bloquear la respuesta)
+  sendWelcomeClub({
+    nombre_club: nombre_club.trim(),
+    nombre_admin: nombre_admin || '',
+    email: email.trim().toLowerCase(),
+    club_slug: slug,
+  }).catch(err => console.error('[registro] Error enviando email bienvenida:', err));
 
   return res.status(201).json({
     success:       true,
