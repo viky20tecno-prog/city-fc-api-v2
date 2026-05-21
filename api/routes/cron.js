@@ -60,12 +60,6 @@ router.all('/emails', async (req, res) => {
           resultados.enviados.push({ slug: club.slug, tipo: 'onboarding_3' });
         }
 
-        if (diasDesdeRegistro >= 7 && diasDesdeRegistro < 9 && !emails_enviados.onboarding_7) {
-          await sendOnboardingDay7({ nombre_club, nombre_admin, email });
-          await db.marcarEmailEnviado(club.id, 'onboarding_7');
-          resultados.enviados.push({ slug: club.slug, tipo: 'onboarding_7' });
-        }
-
         // ── Secuencia Trial (solo para clubs en trial) ──────────────────────
         if (plan !== 'trial' || !config.trial_ends_at) continue;
 
