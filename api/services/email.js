@@ -57,7 +57,7 @@ function sendWelcomeClub({ nombre_club, nombre_admin, email, club_slug }) {
           <p style="font-size:15px;color:rgba(255,255,255,0.6);line-height:1.7;margin:0 0 28px;">
             Hola ${nombre_admin}, tu panel está listo. Tienes <strong style="color:#E14924;">5 días de prueba gratuita</strong> para explorar todas las funcionalidades.
           </p>
-          <a href="https://city-fc-dashboard-pi.vercel.app/login"
+          <a href="https://zensports.vercel.app/login"
              style="display:inline-block;background:linear-gradient(135deg,#E14924,#E14924cc);color:#fff;font-weight:700;font-size:15px;text-decoration:none;border-radius:12px;padding:14px 28px;">
             Abrir mi panel →
           </a>
@@ -119,7 +119,7 @@ function sendTrialExpiring({ nombre_club, nombre_admin, email, dias_restantes })
           <p style="font-size:15px;color:rgba(255,255,255,0.6);line-height:1.7;margin:0 0 28px;">
             Hola ${nombre_admin}, para continuar usando ZenSports sin interrupciones activa tu plan antes de que venza tu prueba.
           </p>
-          <a href="https://city-fc-dashboard-pi.vercel.app/#precios"
+          <a href="https://zensports.vercel.app/#precios"
              style="display:inline-block;background:linear-gradient(135deg,#E14924,#E14924cc);color:#fff;font-weight:700;font-size:15px;text-decoration:none;border-radius:12px;padding:14px 28px;">
             Ver planes y precios →
           </a>
@@ -155,7 +155,7 @@ function sendPlanActivated({ nombre_club, nombre_admin, email, plan, precio }) {
           <p style="font-size:15px;color:rgba(255,255,255,0.6);line-height:1.7;margin:0 0 28px;">
             Hola ${nombre_admin}, tu plan fue activado exitosamente.${precio ? ` El cobro de <strong style="color:#fff;">${precio}</strong> se realizará mensualmente.` : ''}
           </p>
-          <a href="https://city-fc-dashboard-pi.vercel.app/login"
+          <a href="https://zensports.vercel.app/login"
              style="display:inline-block;background:linear-gradient(135deg,#00D084,#00D084cc);color:#fff;font-weight:700;font-size:15px;text-decoration:none;border-radius:12px;padding:14px 28px;">
             Ir a mi panel →
           </a>
