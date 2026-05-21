@@ -87,7 +87,7 @@ function sendWelcomeClub({ nombre_club, nombre_admin, email, club_slug }) {
       <table width="100%" cellpadding="0" cellspacing="0">
         <tr><td style="text-align:center;padding-top:16px;">
           <p style="font-size:12px;color:rgba(255,255,255,0.2);margin:0;">
-            ZenSports · ZENPRA © 2026 · Sistema operativo deportivo para LATAM
+            ZenSports · ZENPRA © 2026 · Software de gestión deportiva global
           </p>
           <p style="font-size:12px;color:rgba(255,255,255,0.15);margin:8px 0 0;">
             Recibiste este email porque registraste el club "${nombre_club}" en ZenSports.
