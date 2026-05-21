@@ -2,6 +2,7 @@ const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
 const db = require('../services/db');
 const {
+  sendWelcomeClub,
   sendTrialExpiring,
   sendTrialExpired,
   sendOnboardingDay3,
@@ -97,6 +98,38 @@ router.all('/emails', async (req, res) => {
     console.error('[cron] Error fatal:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+// GET /api/cron/preview-emails?email=tu@correo.com
+// Envía todos los templates de prueba a un correo para revisión visual
+router.get('/preview-emails', async (req, res) => {
+  const email = req.query.email;
+  if (!email) return res.status(400).json({ error: 'Falta ?email=tu@correo.com' });
+
+  const datos = {
+    nombre_club:  'City FC Demo',
+    nombre_admin: 'Diego',
+    email,
+    club_slug:    'city-fc',
+  };
+
+  const resultados = [];
+
+  const envios = [
+    { tipo: 'bienvenida',   fn: () => sendWelcomeClub(datos) },
+    { tipo: 'onboarding_3', fn: () => sendOnboardingDay3(datos) },
+    { tipo: 'trial_3dias',  fn: () => sendTrialExpiring({ ...datos, dias_restantes: 3 }) },
+    { tipo: 'trial_1dia',   fn: () => sendTrialExpiring({ ...datos, dias_restantes: 1 }) },
+    { tipo: 'trial_vencido',fn: () => sendTrialExpired(datos) },
+  ];
+
+  for (const { tipo, fn } of envios) {
+    const r = await fn().catch(e => ({ ok: false, error: e.message }));
+    resultados.push({ tipo, ok: r.ok, id: r.id });
+    await new Promise(resolve => setTimeout(resolve, 300)); // pausa entre envíos
+  }
+
+  res.json({ success: true, enviados_a: email, resultados });
 });
 
 module.exports = router;
