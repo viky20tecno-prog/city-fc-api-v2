@@ -40,17 +40,20 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
     const resumen = mensualidades
       .filter(m => m.anio >= anioActual - 1)
       .map(m => ({
-        mes:        m.mes,
-        mes_nombre: MESES[(m.mes || 1) - 1] || '',
-        anio:       m.anio,
-        estado:     mapEstado(m.estado),
-        valor:      calcSaldo(m),
-        fecha_pago: m.fecha_pago || null,
+        mes:           m.mes,
+        numero_mes:    parseInt(m.numero_mes) || 0,
+        anio:          m.anio,
+        estado:        mapEstado(m.estado),
+        valor_oficial: parseFloat(m.valor_oficial) || 0,
+        valor_pagado:  parseFloat(m.valor_pagado)  || 0,
+        saldo:         parseFloat(m.saldo_pendiente) || calcSaldo(m),
+        fecha_pago:    m.fecha_pago || null,
       }))
-      .sort((a, b) => a.anio !== b.anio ? a.anio - b.anio : a.mes - b.mes);
+      .sort((a, b) => a.anio !== b.anio ? a.anio - b.anio : a.numero_mes - b.numero_mes);
 
     const pendientes      = resumen.filter(m => m.estado !== 'pagado');
-    const saldo_pendiente = pendientes.reduce((s, m) => s + m.valor, 0);
+    const saldo_pendiente = pendientes.reduce((s, m) => s + m.saldo, 0);
+    const total_pagado    = resumen.reduce((s, m) => s + m.valor_pagado, 0);
 
     res.json({
       success: true,
@@ -70,8 +73,9 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
         posicion:  jugador.posicion || '',
         numero:    jugador.numero || '',
       },
-      mensualidades: resumen,
+      mensualidades:    resumen,
       saldo_pendiente,
+      total_pagado,
       meses_pendientes: pendientes.length,
     });
   } catch (error) {
