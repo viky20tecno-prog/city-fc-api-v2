@@ -55,7 +55,7 @@ function sendWelcomeClub({ nombre_club, nombre_admin, email, club_slug }) {
             ¡${nombre_club} ya está en ZenSports! 🏆
           </h1>
           <p style="font-size:15px;color:rgba(255,255,255,0.6);line-height:1.7;margin:0 0 28px;">
-            Hola ${nombre_admin}, tu panel está listo. Tienes <strong style="color:#E14924;">14 días de prueba gratuita</strong> para explorar todas las funcionalidades.
+            Hola ${nombre_admin}, tu panel está listo. Tienes <strong style="color:#E14924;">5 días de prueba gratuita</strong> para explorar todas las funcionalidades.
           </p>
           <a href="https://city-fc-dashboard-pi.vercel.app/login"
              style="display:inline-block;background:linear-gradient(135deg,#E14924,#E14924cc);color:#fff;font-weight:700;font-size:15px;text-decoration:none;border-radius:12px;padding:14px 28px;">
