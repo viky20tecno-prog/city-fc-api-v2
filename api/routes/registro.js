@@ -1,7 +1,18 @@
-const express = require('express');
-const router  = express.Router();
+const express   = require('express');
+const router    = express.Router();
+const rateLimit = require('express-rate-limit');
 const { createClient } = require('@supabase/supabase-js');
 const { sendWelcomeClub } = require('../services/email');
+
+const registroLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Demasiados intentos de registro. Intenta de nuevo en 1 hora.' },
+});
+
+router.use(registroLimiter);
 
 function generarSlug(nombre) {
   return nombre

@@ -136,7 +136,7 @@ router.patch('/partidos/:id', async (req, res) => {
       updates.fecha = hora ? `${fecha}T${hora}:00` : fecha;
     }
 
-    await db.updatePartido(req.params.id, updates);
+    await db.updatePartido(req.params.id, club.id, updates);
     res.json({ success: true });
   } catch (err) {
     console.error('Error PATCH /arbitrage/partidos:', err.message);
@@ -150,7 +150,7 @@ router.delete('/partidos/:id', async (req, res) => {
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
-    await db.deletePartido(req.params.id);
+    await db.deletePartido(req.params.id, club.id);
     res.json({ success: true });
   } catch (err) {
     console.error('Error DELETE /arbitrage/partidos:', err.message);

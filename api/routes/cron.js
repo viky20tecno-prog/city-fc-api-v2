@@ -11,18 +11,25 @@ const {
 
 const router = express.Router();
 
+function verifyCronSecret(req, res) {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) {
+    res.status(500).json({ success: false, error: 'CRON_SECRET no configurado en el servidor' });
+    return false;
+  }
+  const auth  = req.headers['authorization'] || req.headers['x-cron-secret'];
+  const token = auth?.replace('Bearer ', '');
+  if (token !== secret) {
+    res.status(401).json({ success: false, error: 'No autorizado' });
+    return false;
+  }
+  return true;
+}
+
 // POST /api/cron/emails — llamado por Vercel Cron diariamente
 // También acepta GET para facilitar pruebas manuales desde el admin
 router.all('/emails', async (req, res) => {
-  // Verificar que es Vercel Cron o una llamada autorizada
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = req.headers['authorization'] || req.headers['x-cron-secret'];
-    const token = auth?.replace('Bearer ', '');
-    if (token !== secret) {
-      return res.status(401).json({ success: false, error: 'No autorizado' });
-    }
-  }
+  if (!verifyCronSecret(req, res)) return;
 
   const supabaseAdmin = createClient(
     process.env.SUPABASE_URL,
@@ -101,8 +108,9 @@ router.all('/emails', async (req, res) => {
 });
 
 // GET /api/cron/preview-emails?email=tu@correo.com
-// Envía todos los templates de prueba a un correo para revisión visual
+// Envía todos los templates de prueba a un correo para revisión visual — requiere CRON_SECRET
 router.get('/preview-emails', async (req, res) => {
+  if (!verifyCronSecret(req, res)) return;
   const email = req.query.email;
   if (!email) return res.status(400).json({ error: 'Falta ?email=tu@correo.com' });
 

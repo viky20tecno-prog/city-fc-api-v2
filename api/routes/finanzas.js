@@ -55,7 +55,7 @@ router.delete('/:id', async (req, res) => {
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
-    await db.deleteFinanza(req.params.id);
+    await db.deleteFinanza(req.params.id, club.id);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

@@ -285,11 +285,12 @@ async function getPartidos(club_id) {
 /**
  * Actualizar un partido
  */
-async function updatePartido(id, updates) {
+async function updatePartido(id, club_id, updates) {
   const { data, error } = await supabase
     .from('partidos')
     .update(updates)
     .eq('id', id)
+    .eq('club_id', club_id)
     .select()
     .single();
   if (error) throw error;
@@ -299,9 +300,9 @@ async function updatePartido(id, updates) {
 /**
  * Eliminar un partido y sus pagos asociados
  */
-async function deletePartido(id) {
+async function deletePartido(id, club_id) {
   await supabase.from('arbitraje_pagos').delete().eq('partido_id', id);
-  const { error } = await supabase.from('partidos').delete().eq('id', id);
+  const { error } = await supabase.from('partidos').delete().eq('id', id).eq('club_id', club_id);
   if (error) throw error;
 }
 
@@ -601,8 +602,8 @@ async function createFinanza(record) {
   return data;
 }
 
-async function deleteFinanza(id) {
-  const { error } = await supabase.from('finanzas').delete().eq('id', id);
+async function deleteFinanza(id, club_id) {
+  const { error } = await supabase.from('finanzas').delete().eq('id', id).eq('club_id', club_id);
   if (error) throw error;
 }
 
@@ -621,14 +622,14 @@ async function createNominaEmpleado(record) {
   return data;
 }
 
-async function updateNominaEmpleado(id, fields) {
-  const { data, error } = await supabase.from('nomina_empleados').update(fields).eq('id', id).select().single();
+async function updateNominaEmpleado(id, club_id, fields) {
+  const { data, error } = await supabase.from('nomina_empleados').update(fields).eq('id', id).eq('club_id', club_id).select().single();
   if (error) throw error;
   return data;
 }
 
-async function deleteNominaEmpleado(id) {
-  const { error } = await supabase.from('nomina_empleados').delete().eq('id', id);
+async function deleteNominaEmpleado(id, club_id) {
+  const { error } = await supabase.from('nomina_empleados').delete().eq('id', id).eq('club_id', club_id);
   if (error) throw error;
 }
 
@@ -648,8 +649,8 @@ async function createNominaPago(record) {
   return data;
 }
 
-async function deleteNominaPago(id) {
-  const { error } = await supabase.from('nomina_pagos').delete().eq('id', id);
+async function deleteNominaPago(id, club_id) {
+  const { error } = await supabase.from('nomina_pagos').delete().eq('id', id).eq('club_id', club_id);
   if (error) throw error;
 }
 
@@ -686,19 +687,20 @@ async function createClubMember(member) {
   return data;
 }
 
-async function updateClubMember(id, updates) {
+async function updateClubMember(id, club_slug, updates) {
   const { data, error } = await supabase
     .from('club_members')
     .update(updates)
     .eq('id', id)
+    .eq('club_id', club_slug)
     .select()
     .single();
   if (error) throw error;
   return data;
 }
 
-async function deleteClubMember(id) {
-  const { error } = await supabase.from('club_members').delete().eq('id', id);
+async function deleteClubMember(id, club_slug) {
+  const { error } = await supabase.from('club_members').delete().eq('id', id).eq('club_id', club_slug);
   if (error) throw error;
 }
 

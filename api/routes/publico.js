@@ -1,6 +1,17 @@
-const express = require('express');
-const db = require('../services/db');
-const router = express.Router();
+const express   = require('express');
+const rateLimit = require('express-rate-limit');
+const db        = require('../services/db');
+const router    = express.Router();
+
+const portalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Demasiadas consultas. Intenta de nuevo en un minuto.' },
+});
+
+router.use('/atleta', portalLimiter);
 
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 

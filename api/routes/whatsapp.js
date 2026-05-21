@@ -2,6 +2,11 @@ const express = require('express');
 const db = require('../services/db');
 const router = express.Router();
 
+function sanitizeText(value, maxLen = 200) {
+  if (value === null || value === undefined) return '';
+  return String(value).replace(/[<>"'`]/g, '').slice(0, maxLen);
+}
+
 const MESES = {
   1: 'Enero', 2: 'Febrero', 3: 'Marzo', 4: 'Abril',
   5: 'Mayo', 6: 'Junio', 7: 'Julio', 8: 'Agosto',
@@ -30,6 +35,10 @@ router.post('/pago-comprobante', async (req, res) => {
       concepto = 'mensualidad',
       url_comprobante = '',
     } = req.body;
+
+    const bancoClean      = sanitizeText(banco, 100);
+    const referenciaClean = sanitizeText(referencia, 100);
+    const conceptoClean   = sanitizeText(concepto, 50);
 
     if (!monto || !banco) {
       return res.status(400).json({
@@ -65,21 +74,21 @@ router.post('/pago-comprobante', async (req, res) => {
       player_id: player.id,
       cedula: player.cedula,
       monto: montoNum,
-      banco,
-      concepto,
-      referencia,
+      banco: bancoClean,
+      concepto: conceptoClean,
+      referencia: referenciaClean,
       url_comprobante,
     });
 
     // Actualizar estado de mensualidad si aplica
     let mensualidadActualizada = null;
-    if (concepto === 'mensualidad') {
+    if (conceptoClean === 'mensualidad') {
       mensualidadActualizada = await actualizarMensualidad(club.id, player.cedula, montoNum);
     }
 
     // Construir mensaje de confirmación para el jugador
-    let mensajeWhatsapp = `✅ *Pago registrado*\n\nHola ${player.nombre}, recibimos tu comprobante:\n• Monto: $${montoNum.toLocaleString('es-CO')}\n• Banco: ${banco}`;
-    if (referencia) mensajeWhatsapp += `\n• Referencia: ${referencia}`;
+    let mensajeWhatsapp = `✅ *Pago registrado*\n\nHola ${sanitizeText(player.nombre, 60)}, recibimos tu comprobante:\n• Monto: $${montoNum.toLocaleString('es-CO')}\n• Banco: ${bancoClean}`;
+    if (referenciaClean) mensajeWhatsapp += `\n• Referencia: ${referenciaClean}`;
     if (mensualidadActualizada) {
       mensajeWhatsapp += `\n• Mes actualizado: ${mensualidadActualizada.mes} → *${mensualidadActualizada.estado}*`;
     }

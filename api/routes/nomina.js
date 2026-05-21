@@ -47,7 +47,10 @@ router.put('/empleados/:id', async (req, res) => {
     if (salario_mensual  !== undefined) fields.salario_mensual  = Number(salario_mensual);
     if (activo           !== undefined) fields.activo           = Boolean(activo);
 
-    const data = await db.updateNominaEmpleado(req.params.id, fields);
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const data = await db.updateNominaEmpleado(req.params.id, club.id, fields);
     res.json({ success: true, data });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -57,7 +60,10 @@ router.put('/empleados/:id', async (req, res) => {
 // DELETE /api/nomina/empleados/:id
 router.delete('/empleados/:id', async (req, res) => {
   try {
-    await db.deleteNominaEmpleado(req.params.id);
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    await db.deleteNominaEmpleado(req.params.id, club.id);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -121,7 +127,10 @@ router.post('/pagos', async (req, res) => {
 // DELETE /api/nomina/pagos/:id
 router.delete('/pagos/:id', async (req, res) => {
   try {
-    await db.deleteNominaPago(req.params.id);
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    await db.deleteNominaPago(req.params.id, club.id);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

@@ -93,7 +93,7 @@ router.post('/', async (req, res) => {
       activo:   true,
     });
 
-    res.json({ success: true, data: member, email, password, nombre, role });
+    res.json({ success: true, data: member, email, nombre, role, temp_password: password });
   } catch (err) {
     console.error('Error POST /miembros:', err.message);
     res.status(500).json({ success: false, error: err.message });
@@ -107,10 +107,13 @@ router.patch('/:id', async (req, res) => {
       return res.status(403).json({ success: false, error: 'Sin permisos' });
     }
     const { role, activo } = req.body;
+    if (role !== undefined && !['ENTRENADOR', 'ADMIN'].includes(role)) {
+      return res.status(400).json({ success: false, error: 'role inválido' });
+    }
     const updates = {};
     if (role !== undefined) updates.role = role;
     if (activo !== undefined) updates.activo = activo;
-    const member = await db.updateClubMember(req.params.id, updates);
+    const member = await db.updateClubMember(req.params.id, req.club_id, updates);
     res.json({ success: true, data: member });
   } catch (err) {
     console.error('Error PATCH /miembros:', err.message);
@@ -124,7 +127,7 @@ router.delete('/:id', async (req, res) => {
     if (req.userRole === 'ENTRENADOR') {
       return res.status(403).json({ success: false, error: 'Sin permisos' });
     }
-    await db.deleteClubMember(req.params.id);
+    await db.deleteClubMember(req.params.id, req.club_id);
     res.json({ success: true });
   } catch (err) {
     console.error('Error DELETE /miembros:', err.message);
