@@ -92,6 +92,19 @@ router.post('/bulk', async (req, res) => {
       const str = (v) => String(v || '').trim() || null;
       const up  = (v) => { const s = str(v); return s ? s.toUpperCase() : null; };
       const num = (v) => { const n = parseFloat(v); return isNaN(n) ? null : n; };
+      // Excel stores dates as serial numbers (days since 1900-01-00). Convert to ISO date.
+      const excelDate = (v) => {
+        if (!v) return null;
+        const n = parseFloat(v);
+        if (!isNaN(n) && n > 1000) {
+          const d = new Date(Math.round((n - 25569) * 86400 * 1000));
+          if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+        }
+        const s = String(v).trim();
+        const d = new Date(s);
+        if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+        return s || null;
+      };
       filas.push({
         club_id:              club.id,
         cedula,
@@ -101,7 +114,7 @@ router.post('/bulk', async (req, res) => {
         correo_electronico:   str(j.correo_electronico)?.toLowerCase() || null,
         instagram:            str(j.instagram),
         tipo_id:              str(j.tipo_id),
-        fecha_nacimiento:     str(j.fecha_nacimiento),
+        fecha_nacimiento:     excelDate(j.fecha_nacimiento),
         lugar_de_nacimiento:  up(j.lugar_de_nacimiento),
         tipo_sangre:          up(j.tipo_sangre),
         eps:                  up(j.eps),
