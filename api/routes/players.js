@@ -116,6 +116,7 @@ router.post('/bulk', async (req, res) => {
         numero_camiseta:      str(j.numero_camiseta),
         categoria:            up(j.categoria),
         equipo:               up(j.equipo),
+        categorias:           j.categoria ? [{ categoria: up(j.categoria), equipo: up(j.equipo) || '' }] : [],
         activo:               true,
       });
     });
