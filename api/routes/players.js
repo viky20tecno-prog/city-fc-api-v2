@@ -2,6 +2,8 @@ const express = require('express');
 const db = require('../services/db');
 const router = express.Router();
 
+const MESES = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
 // GET /api/players?club_id=city-fc
 router.get('/', async (req, res) => {
   try {
@@ -135,7 +137,51 @@ router.post('/bulk', async (req, res) => {
     });
 
     let insertados = [];
-    if (filas.length > 0) insertados = await db.bulkInsert('players', filas);
+    if (filas.length > 0) {
+      insertados = await db.bulkInsert('players', filas);
+
+      // Crear mensualidades y torneos para cada jugador insertado
+      const CUOTA   = parseFloat(club.config?.valor_mensualidad) || 65000;
+      const TORNEOS = Array.isArray(club.config?.torneos_iniciales) ? club.config.torneos_iniciales : [];
+      const anioActual = new Date().getFullYear();
+      const mesActual  = new Date().getMonth() + 1;
+
+      const mensualidades = [];
+      const torneos = [];
+
+      for (const p of insertados) {
+        for (let mes = 1; mes <= 12; mes++) {
+          const esPasado = mes < mesActual;
+          mensualidades.push({
+            club_id:         club.id,
+            player_id:       p.id,
+            cedula:          String(p.cedula),
+            anio:            anioActual,
+            mes:             MESES[mes],
+            numero_mes:      mes,
+            valor_oficial:   esPasado ? 0 : CUOTA,
+            valor_pagado:    0,
+            saldo_pendiente: esPasado ? 0 : CUOTA,
+            estado:          esPasado ? 'AL_DIA' : 'PENDIENTE',
+          });
+        }
+        for (const t of TORNEOS) {
+          torneos.push({
+            club_id:         club.id,
+            player_id:       p.id,
+            cedula:          String(p.cedula),
+            nombre_torneo:   t.nombre,
+            valor_oficial:   parseFloat(t.valor) || 0,
+            valor_pagado:    0,
+            saldo_pendiente: parseFloat(t.valor) || 0,
+            estado:          'PENDIENTE',
+          });
+        }
+      }
+
+      if (mensualidades.length > 0) await db.bulkInsert('mensualidades', mensualidades);
+      if (torneos.length > 0)       await db.bulkInsert('torneos', torneos);
+    }
 
     res.json({
       success:        true,
