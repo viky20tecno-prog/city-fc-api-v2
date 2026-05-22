@@ -23,6 +23,7 @@ const asistenciaRouter     = require('./routes/asistencia');
 const publicoRouter        = require('./routes/publico');
 const cronRouter           = require('./routes/cron');
 const leadsRouter          = require('./routes/leads');
+const waAgentRouter        = require('./routes/wa-agent');
 const requireAuth          = require('./middleware/auth');
 
 // Middleware que bloquea acceso a rutas financieras para ENTRENADOR
@@ -112,6 +113,7 @@ app.use('/api/registro',    registroRouter);
 app.use('/api/publico',     publicoRouter);
 app.use('/api/cron',        cronRouter);
 app.use('/api/leads',       leadsRouter);
+app.use('/api/wa-agent',    waAgentRouter);
 
 // Middleware de autenticación JWT para todas las rutas protegidas
 app.use('/api', requireAuth);

@@ -39,6 +39,22 @@ async function getPlayerByCelular(club_id, celular) {
 }
 
 /**
+ * Buscar jugador por celular en TODOS los clubs (para el agente WA)
+ */
+async function getPlayerByCelularGlobal(celular) {
+  const normalized = String(celular).replace(/\D/g, '').replace(/^57/, '');
+  const { data, error } = await supabase
+    .from('players')
+    .select('*, clubs(slug, name, config)')
+    .or(`celular.eq.${normalized},celular.eq.57${normalized},celular.eq.+57${normalized}`)
+    .eq('activo', true)
+    .limit(1)
+    .single();
+  if (error && error.code !== 'PGRST116') throw error;
+  return data || null;
+}
+
+/**
  * Buscar un jugador por cédula dentro de un club
  */
 async function getPlayerByCedula(club_id, cedula) {
@@ -800,6 +816,7 @@ module.exports = {
   getPlayers,
   getPlayerByCedula,
   getPlayerByCelular,
+  getPlayerByCelularGlobal,
   updatePlayer,
   deletePlayer,
   getMensualidades,
