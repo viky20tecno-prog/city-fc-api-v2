@@ -88,16 +88,33 @@ router.post('/bulk', async (req, res) => {
       if (!nombre)               return errores.push({ fila, cedula, error: 'Nombre requerido' });
       if (existingSet.has(cedula)) return errores.push({ fila, cedula, nombre: `${nombre} ${apellidos}`.trim(), error: 'Cédula ya registrada' });
 
-      existingSet.add(cedula); // evitar duplicados dentro del mismo lote
+      existingSet.add(cedula);
+      const str = (v) => String(v || '').trim() || null;
+      const num = (v) => { const n = parseFloat(v); return isNaN(n) ? null : n; };
       filas.push({
         club_id:              club.id,
         cedula,
         nombre,
         apellidos:            apellidos || nombre,
-        celular:              String(j.celular              || '').trim() || null,
-        correo_electronico:   String(j.correo_electronico   || '').trim() || null,
-        posicion:             String(j.posicion             || '').trim() || null,
-        numero_camiseta:      String(j.numero_camiseta      || '').trim() || null,
+        celular:              str(j.celular),
+        correo_electronico:   str(j.correo_electronico),
+        instagram:            str(j.instagram),
+        tipo_id:              str(j.tipo_id),
+        fecha_nacimiento:     str(j.fecha_nacimiento),
+        lugar_de_nacimiento:  str(j.lugar_de_nacimiento),
+        tipo_sangre:          str(j.tipo_sangre),
+        eps:                  str(j.eps),
+        estatura:             num(j.estatura),
+        peso:                 num(j.peso),
+        municipio:            str(j.municipio),
+        direccion:            str(j.direccion),
+        barrio:               str(j.barrio),
+        familiar_emergencia:  str(j.familiar_emergencia),
+        celular_contacto:     str(j.celular_contacto),
+        posicion:             str(j.posicion),
+        numero_camiseta:      str(j.numero_camiseta),
+        categoria:            str(j.categoria),
+        equipo:               str(j.equipo),
         activo:               true,
       });
     });
