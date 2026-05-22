@@ -428,8 +428,9 @@ async function updateTorneo(id, updates) {
   return data;
 }
 
-async function deleteTorneo(id) {
-  const { error } = await supabase.from('torneos').delete().eq('id', id);
+async function deleteTorneo(id, club_id) {
+  const q = supabase.from('torneos').delete().eq('id', id);
+  const { error } = club_id ? await q.eq('club_id', club_id) : await q;
   if (error) throw error;
 }
 

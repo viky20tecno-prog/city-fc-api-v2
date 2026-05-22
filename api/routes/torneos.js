@@ -88,7 +88,7 @@ router.delete('/:id', async (req, res) => {
     const torneo = todos.find(t => String(t.id) === String(id));
     if (!torneo) return res.status(404).json({ success: false, error: 'Inscripción no encontrada' });
 
-    await db.deleteTorneo(id);
+    await db.deleteTorneo(id, club.id);
     res.json({ success: true, message: 'Inscripción eliminada' });
   } catch (error) {
     console.error('Error en DELETE /torneos/:id:', error);
