@@ -90,7 +90,8 @@ app.use('/api', (req, res, next) => {
     req.path.startsWith('/whatsapp') ||
     req.path.startsWith('/publico') ||
     req.path.startsWith('/cron') ||
-    req.path.startsWith('/leads')
+    req.path.startsWith('/leads') ||
+    req.path.startsWith('/wa-agent')
   ) {
     return next();
   }
