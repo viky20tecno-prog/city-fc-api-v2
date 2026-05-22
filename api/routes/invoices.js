@@ -121,4 +121,39 @@ router.get('/player/:cedula', async (req, res) => {
   }
 });
 
+// PATCH /api/invoices/mensualidad/:id — editar mensualidad manualmente
+router.patch('/mensualidad/:id', async (req, res) => {
+  try {
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const { valor_oficial, valor_pagado, estado } = req.body;
+    const ESTADOS = ['AL_DIA', 'PENDIENTE', 'PARCIAL', 'MORA'];
+    if (estado && !ESTADOS.includes(estado))
+      return res.status(400).json({ success: false, error: 'estado inválido' });
+
+    const oficial = valor_oficial !== undefined ? parseFloat(valor_oficial) : undefined;
+    const pagado  = valor_pagado  !== undefined ? parseFloat(valor_pagado)  : undefined;
+
+    const updates = {};
+    if (oficial !== undefined) updates.valor_oficial   = oficial;
+    if (pagado  !== undefined) updates.valor_pagado    = pagado;
+    if (oficial !== undefined || pagado !== undefined) {
+      const { data: actual } = await db.supabase
+        .from('mensualidades').select('valor_oficial,valor_pagado').eq('id', req.params.id).single();
+      const vOficial = oficial ?? parseFloat(actual?.valor_oficial) ?? 0;
+      const vPagado  = pagado  ?? parseFloat(actual?.valor_pagado)  ?? 0;
+      updates.saldo_pendiente = Math.max(0, vOficial - vPagado);
+      if (!estado) updates.estado = vPagado >= vOficial ? 'AL_DIA' : vPagado > 0 ? 'PARCIAL' : 'PENDIENTE';
+    }
+    if (estado) updates.estado = estado;
+
+    const updated = await db.updateMensualidad(req.params.id, updates);
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    console.error('PATCH /invoices/mensualidad/:id', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
