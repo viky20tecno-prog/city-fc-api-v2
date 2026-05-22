@@ -14,7 +14,7 @@ const limiter = rateLimit({
 // POST /api/leads
 router.post('/', limiter, async (req, res) => {
   try {
-    const { nombre, whatsapp, nombre_club, ciudad, plan_interes = 'free', fuente = 'landing' } = req.body || {};
+    const { nombre, whatsapp, email, nombre_club, ciudad, plan_interes = 'free', fuente = 'landing' } = req.body || {};
 
     if (!nombre?.trim() || !whatsapp?.trim()) {
       return res.status(400).json({ success: false, error: 'nombre y whatsapp son requeridos' });
@@ -30,9 +30,11 @@ router.post('/', limiter, async (req, res) => {
       process.env.SUPABASE_SERVICE_ROLE_KEY
     );
 
+    const emailVal = email?.trim().toLowerCase() || null;
     const { data, error } = await supabase.from('leads').insert({
       nombre:       nombre.trim().slice(0, 120),
       whatsapp:     wa,
+      email:        emailVal,
       nombre_club:  nombre_club?.trim().slice(0, 120) || null,
       ciudad:       ciudad?.trim().slice(0, 80) || null,
       plan_interes: ['free','starter','pro','scale','enterprise'].includes(plan_interes) ? plan_interes : 'free',
