@@ -90,31 +90,32 @@ router.post('/bulk', async (req, res) => {
 
       existingSet.add(cedula);
       const str = (v) => String(v || '').trim() || null;
+      const up  = (v) => { const s = str(v); return s ? s.toUpperCase() : null; };
       const num = (v) => { const n = parseFloat(v); return isNaN(n) ? null : n; };
       filas.push({
         club_id:              club.id,
         cedula,
-        nombre,
-        apellidos:            apellidos || nombre,
+        nombre:               nombre.toUpperCase(),
+        apellidos:            (apellidos || nombre).toUpperCase(),
         celular:              str(j.celular),
-        correo_electronico:   str(j.correo_electronico),
+        correo_electronico:   str(j.correo_electronico)?.toLowerCase() || null,
         instagram:            str(j.instagram),
         tipo_id:              str(j.tipo_id),
         fecha_nacimiento:     str(j.fecha_nacimiento),
-        lugar_de_nacimiento:  str(j.lugar_de_nacimiento),
-        tipo_sangre:          str(j.tipo_sangre),
-        eps:                  str(j.eps),
+        lugar_de_nacimiento:  up(j.lugar_de_nacimiento),
+        tipo_sangre:          up(j.tipo_sangre),
+        eps:                  up(j.eps),
         estatura:             num(j.estatura),
         peso:                 num(j.peso),
-        municipio:            str(j.municipio),
-        direccion:            str(j.direccion),
-        barrio:               str(j.barrio),
-        familiar_emergencia:  str(j.familiar_emergencia),
+        municipio:            up(j.municipio),
+        direccion:            up(j.direccion),
+        barrio:               up(j.barrio),
+        familiar_emergencia:  up(j.familiar_emergencia),
         celular_contacto:     str(j.celular_contacto),
-        posicion:             str(j.posicion),
+        posicion:             up(j.posicion),
         numero_camiseta:      str(j.numero_camiseta),
-        categoria:            str(j.categoria),
-        equipo:               str(j.equipo),
+        categoria:            up(j.categoria),
+        equipo:               up(j.equipo),
         activo:               true,
       });
     });
