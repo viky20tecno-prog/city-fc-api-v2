@@ -190,25 +190,42 @@ Reglas:
 - Si no tienes acceso a un dato, dilo honestamente
 - No respondas temas fuera del ámbito deportivo y de gestión de clubes`;
 
-const MAX_HISTORY = 10; // mensajes a conservar por sesión
+const MAX_HISTORY = 10;
 
-// ── Procesar mensaje con el agente ───────────────────────────────────────────
-async function processMessage(from, text) {
-  // Cargar sesión previa
-  const session  = await db.getWaSession(from);
-  const history  = session?.messages || [];
-  const jugador  = session?.jugador  || null;
+// ── Enviar mensaje vía Twilio sandbox ────────────────────────────────────────
+async function sendTwilio(to, text) {
+  const sid   = process.env.TWILIO_ACCOUNT_SID;
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  const from  = process.env.TWILIO_WHATSAPP_FROM || 'whatsapp:+14155238886';
+  const toWA  = to.startsWith('whatsapp:') ? to : `whatsapp:+${to}`;
+  const url   = `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`;
+  const res   = await fetch(url, {
+    method:  'POST',
+    headers: {
+      Authorization:  `Basic ${Buffer.from(`${sid}:${token}`).toString('base64')}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({ From: from, To: toWA, Body: text }).toString(),
+  });
+  const data = await res.json();
+  if (!res.ok) console.error('[wa-agent] sendTwilio error:', res.status, JSON.stringify(data));
+  else console.log('[wa-agent] sendTwilio ok:', data.sid);
+  return data;
+}
 
-  // Construir system prompt enriquecido con contexto del jugador si ya fue identificado
+// ── Generar respuesta del agente (compartida entre Meta y Twilio) ─────────────
+async function generateReply(from, text) {
+  const session    = await db.getWaSession(from);
+  const history    = session?.messages || [];
+  const jugador    = session?.jugador  || null;
+
   let system = SYSTEM;
   if (jugador) {
     system += `\n\nCONTEXTO: El usuario ya fue identificado. Sus datos son:\n${JSON.stringify(jugador)}`;
   }
 
-  // Historial + mensaje nuevo
-  const messages = [...history, { role: 'user', content: text }];
-
-  let reply = null;
+  const messages   = [...history, { role: 'user', content: text }];
+  let reply        = null;
   let nuevoJugador = jugador;
 
   for (let i = 0; i < 5; i++) {
@@ -222,9 +239,7 @@ async function processMessage(from, text) {
 
     if (response.stop_reason === 'end_turn') {
       reply = response.content.find(b => b.type === 'text')?.text;
-      if (reply) {
-        messages.push({ role: 'assistant', content: reply });
-      }
+      if (reply) messages.push({ role: 'assistant', content: reply });
       break;
     }
 
@@ -234,28 +249,21 @@ async function processMessage(from, text) {
       for (const block of response.content) {
         if (block.type !== 'tool_use') continue;
         const result = await runTool(block.name, block.input);
-        // Si encontramos al jugador, guardarlo en sesión
-        if (block.name === 'buscar_jugador' && result.encontrado) {
-          nuevoJugador = result;
-        }
+        if (block.name === 'buscar_jugador' && result.encontrado) nuevoJugador = result;
         toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) });
       }
       messages.push({ role: 'user', content: toolResults });
       continue;
     }
-
     break;
   }
 
-  // Enviar respuesta
-  if (reply) await sendWA(from, reply);
-
-  // Guardar sesión — solo mensajes texto para no inflar el historial con tool calls
   const historialTexto = messages
     .filter(m => typeof m.content === 'string')
     .slice(-MAX_HISTORY);
-
   await db.upsertWaSession(from, { jugador: nuevoJugador, messages: historialTexto });
+
+  return reply;
 }
 
 // ── Webhook verification (GET) ───────────────────────────────────────────────
@@ -270,7 +278,7 @@ router.get('/webhook', (req, res) => {
   res.status(403).send('Forbidden');
 });
 
-// ── Recibir mensajes (POST) ──────────────────────────────────────────────────
+// ── Webhook Meta (POST) ──────────────────────────────────────────────────────
 router.post('/webhook', async (req, res) => {
   try {
     const body = req.body;
@@ -281,15 +289,36 @@ router.post('/webhook', async (req, res) => {
 
     const from = message.from;
     const text = message.text.body;
-    console.log(`[wa-agent] Mensaje de ${from}: ${text}`);
+    console.log(`[wa-agent] Meta mensaje de ${from}: ${text}`);
 
-    await processMessage(from, text);
+    const reply = await generateReply(from, text);
+    if (reply) await sendWA(from, reply);
     console.log(`[wa-agent] Procesado OK para ${from}`);
   } catch (err) {
     console.error('[wa-agent] error:', err.message);
   }
 
   res.status(200).json({ status: 'ok' });
+});
+
+// ── Webhook Twilio sandbox (POST) ────────────────────────────────────────────
+router.post('/twilio', express.urlencoded({ extended: false }), async (req, res) => {
+  try {
+    const from = req.body.From?.replace('whatsapp:+', '') || '';
+    const text = req.body.Body || '';
+    console.log(`[wa-agent] Twilio mensaje de ${from}: ${text}`);
+
+    const reply = await generateReply(from, text);
+    console.log(`[wa-agent] Twilio procesado OK para ${from}`);
+
+    // Responder con TwiML
+    res.set('Content-Type', 'text/xml');
+    res.send(`<?xml version="1.0" encoding="UTF-8"?><Response>${reply ? `<Message>${reply}</Message>` : ''}</Response>`);
+  } catch (err) {
+    console.error('[wa-agent] Twilio error:', err.message);
+    res.set('Content-Type', 'text/xml');
+    res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+  }
 });
 
 module.exports = router;
