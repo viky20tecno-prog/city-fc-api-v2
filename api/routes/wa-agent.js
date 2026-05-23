@@ -117,9 +117,11 @@ async function runTool(name, input) {
     }
 
     if (name === 'consultar_calendario') {
+      const club = await db.getClubBySlug(input.club_slug);
+      if (!club) return { eventos: [] };
       const hoy   = new Date().toISOString().split('T')[0];
       const hasta = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
-      const eventos = await db.getCalendario(input.club_slug, hoy, hasta);
+      const eventos = await db.getCalendario(club.id, hoy, hasta);
       const filtrados = input.equipo
         ? eventos.filter(e => !e.equipo || e.equipo.toUpperCase().includes(input.equipo.toUpperCase()))
         : eventos;
@@ -187,23 +189,42 @@ Reglas:
 - Si no tienes acceso a un dato, dilo honestamente
 - No respondas temas fuera del ámbito deportivo y de gestión de clubes`;
 
+const MAX_HISTORY = 10; // mensajes a conservar por sesión
+
 // ── Procesar mensaje con el agente ───────────────────────────────────────────
 async function processMessage(from, text) {
-  const messages = [{ role: 'user', content: text }];
+  // Cargar sesión previa
+  const session  = await db.getWaSession(from);
+  const history  = session?.messages || [];
+  const jugador  = session?.jugador  || null;
+
+  // Construir system prompt enriquecido con contexto del jugador si ya fue identificado
+  let system = SYSTEM;
+  if (jugador) {
+    system += `\n\nCONTEXTO: El usuario ya fue identificado. Sus datos son:\n${JSON.stringify(jugador)}`;
+  }
+
+  // Historial + mensaje nuevo
+  const messages = [...history, { role: 'user', content: text }];
+
+  let reply = null;
+  let nuevoJugador = jugador;
 
   for (let i = 0; i < 5; i++) {
     const response = await anthropic.messages.create({
       model:      'claude-haiku-4-5-20251001',
       max_tokens: 1024,
-      system:     SYSTEM,
+      system,
       tools:      TOOLS,
       messages,
     });
 
     if (response.stop_reason === 'end_turn') {
-      const reply = response.content.find(b => b.type === 'text')?.text;
-      if (reply) await sendWA(from, reply);
-      return;
+      reply = response.content.find(b => b.type === 'text')?.text;
+      if (reply) {
+        messages.push({ role: 'assistant', content: reply });
+      }
+      break;
     }
 
     if (response.stop_reason === 'tool_use') {
@@ -212,6 +233,10 @@ async function processMessage(from, text) {
       for (const block of response.content) {
         if (block.type !== 'tool_use') continue;
         const result = await runTool(block.name, block.input);
+        // Si encontramos al jugador, guardarlo en sesión
+        if (block.name === 'buscar_jugador' && result.encontrado) {
+          nuevoJugador = result;
+        }
         toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) });
       }
       messages.push({ role: 'user', content: toolResults });
@@ -220,6 +245,16 @@ async function processMessage(from, text) {
 
     break;
   }
+
+  // Enviar respuesta
+  if (reply) await sendWA(from, reply);
+
+  // Guardar sesión — solo mensajes texto para no inflar el historial con tool calls
+  const historialTexto = messages
+    .filter(m => typeof m.content === 'string')
+    .slice(-MAX_HISTORY);
+
+  await db.upsertWaSession(from, { jugador: nuevoJugador, messages: historialTexto });
 }
 
 // ── Webhook verification (GET) ───────────────────────────────────────────────

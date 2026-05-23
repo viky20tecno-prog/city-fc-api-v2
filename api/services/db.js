@@ -810,8 +810,28 @@ async function upsertAsistencia({ club_id, evento_id, cedula, estado, nota, regi
   return data;
 }
 
+// ── Sesiones WhatsApp ───────────────────────────────────────────────────────
+
+async function getWaSession(phone) {
+  const { data } = await supabase
+    .from('wa_sessions')
+    .select('*')
+    .eq('phone', phone)
+    .single();
+  return data || null;
+}
+
+async function upsertWaSession(phone, { jugador, messages }) {
+  const { error } = await supabase
+    .from('wa_sessions')
+    .upsert({ phone, jugador, messages, updated_at: new Date().toISOString() }, { onConflict: 'phone' });
+  if (error) console.error('[db] upsertWaSession error:', error.message);
+}
+
 module.exports = {
   supabase,
+  getWaSession,
+  upsertWaSession,
   getClubBySlug,
   getPlayers,
   getPlayerByCedula,
