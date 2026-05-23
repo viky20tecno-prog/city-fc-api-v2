@@ -270,26 +270,25 @@ router.get('/webhook', (req, res) => {
 });
 
 // ── Recibir mensajes (POST) ──────────────────────────────────────────────────
-router.post('/webhook', (req, res) => {
-  res.status(200).json({ status: 'ok' }); // responder a Meta inmediatamente
-
+router.post('/webhook', async (req, res) => {
   try {
-    const body   = req.body;
-    if (body.object !== 'whatsapp_business_account') return;
+    const body = req.body;
+    if (body.object !== 'whatsapp_business_account') return res.status(200).json({ status: 'ok' });
 
     const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-    if (!message || message.type !== 'text') return;
+    if (!message || message.type !== 'text') return res.status(200).json({ status: 'ok' });
 
     const from = message.from;
     const text = message.text.body;
     console.log(`[wa-agent] Mensaje de ${from}: ${text}`);
 
-    processMessage(from, text).catch(err =>
-      console.error('[wa-agent] processMessage error:', err.message)
-    );
+    await processMessage(from, text);
+    console.log(`[wa-agent] Procesado OK para ${from}`);
   } catch (err) {
-    console.error('[wa-agent] webhook error:', err.message);
+    console.error('[wa-agent] error:', err.message);
   }
+
+  res.status(200).json({ status: 'ok' });
 });
 
 module.exports = router;
