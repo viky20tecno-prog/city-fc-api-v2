@@ -25,7 +25,8 @@ async function sendWA(to, text) {
     }),
   });
   const data = await res.json();
-  if (!res.ok) console.error('[wa-agent] sendWA error:', JSON.stringify(data));
+  if (!res.ok) console.error('[wa-agent] sendWA error:', res.status, JSON.stringify(data));
+  else console.log('[wa-agent] sendWA ok:', JSON.stringify(data));
   return data;
 }
 
