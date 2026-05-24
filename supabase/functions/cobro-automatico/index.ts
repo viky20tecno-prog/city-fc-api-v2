@@ -7,9 +7,8 @@ const TWILIO_ACCOUNT_SID        = Deno.env.get('TWILIO_ACCOUNT_SID')!;
 const TWILIO_AUTH_TOKEN         = Deno.env.get('TWILIO_AUTH_TOKEN')!;
 const TWILIO_WHATSAPP_FROM      = Deno.env.get('TWILIO_WHATSAPP_FROM') || 'whatsapp:+14155238886';
 
-const PENALIDAD_MORA    = 10_000;
-const VALOR_MENSUALIDAD = 65_000;
-const LLAVE_PAGO        = '0087276387';
+const DEFAULT_PENALIDAD_MORA    = 10_000;
+const DEFAULT_VALOR_MENSUALIDAD = 65_000;
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
 serve(async (req) => {
@@ -65,9 +64,12 @@ async function procesarClub(
   anio: number,
   testCedula: string | null = null,
 ) {
-  const valorMensual = Number(club.config?.valor_mensualidad ?? VALOR_MENSUALIDAD);
-  const nombreClub   = String(club.config?.nombre ?? 'City FC');
-  const stats        = { mensajes: 0, mora_aplicada: 0, mensualidades_creadas: 0 };
+  const valorMensual  = Number(club.config?.valor_mensualidad ?? DEFAULT_VALOR_MENSUALIDAD);
+  const penalidad     = Number(club.config?.penalidad_mora    ?? DEFAULT_PENALIDAD_MORA);
+  const llavePago     = String(club.config?.llave_pago        ?? '');
+  const qrPagoUrl     = String(club.config?.qr_pago_url       ?? '');
+  const nombreClub    = String(club.config?.nombre            ?? club.slug);
+  const stats         = { mensajes: 0, mora_aplicada: 0, mensualidades_creadas: 0 };
 
   // Jugadores activos con celular (test_cedula restringe a uno solo en pruebas)
   let query = supabase
@@ -96,6 +98,7 @@ async function procesarClub(
         `💰 Valor: *$${valorMensual.toLocaleString('es-CO')}*\n\n` +
         `⏳ Organízate desde ya y evita recargos innecesarios.\n\n` +
         `En ${nombreClub} jugamos en equipo… y estar al día es parte del juego 💙⚽`,
+        false, qrPagoUrl,
       );
       await logEnvio(supabase, club.id, j.cedula, 'preventivo', mesDest, anioDest);
       stats.mensajes++;
@@ -134,15 +137,15 @@ async function procesarClub(
 
       if (await yaEnviado(supabase, club.id, j.cedula, 'activacion', mes, anio)) continue;
       const nombre = nombreCompleto(j);
+      const diasGracia = Number(club.config?.dias_gracia_mora ?? 7);
       await enviarWA(j.celular,
         `📢⚽ *${nombreClub} — Cuota activa*\n\n` +
         `Hola ${nombre}, tu cuota de *${nombreM}* ya está activa.\n\n` +
         `💰 Valor: *$${valorMensual.toLocaleString('es-CO')}*\n` +
-        `📅 Tienes hasta el *día 7* para pagar sin penalidad\n\n` +
-        `📲 Escanea el QR o usa la llave:\n` +
-        `🔑 ${LLAVE_PAGO}\n\n` +
+        `📅 Tienes hasta el *día ${diasGracia}* para pagar sin penalidad\n\n` +
+        (llavePago ? `📲 Paga con la llave:\n🔑 ${llavePago}\n\n` : '') +
         `💪 Paga hoy y juega tranquilo todo el mes ⚽🔥`,
-        true,
+        !!qrPagoUrl, qrPagoUrl,
       );
       await logEnvio(supabase, club.id, j.cedula, 'activacion', mes, anio);
       stats.mensajes++;
@@ -161,11 +164,10 @@ async function procesarClub(
         `⏰⚽ *${nombreClub} te recuerda*\n\n` +
         `Hola ${nombre}, te quedan *3 días* para pagar tu cuota de *${nombreM}*.\n\n` +
         `💰 Valor: *$${valorMensual.toLocaleString('es-CO')}*\n` +
-        `⚠️ Evita una penalidad de *$${PENALIDAD_MORA.toLocaleString('es-CO')}*\n\n` +
-        `📲 Escanea el QR o paga con la llave:\n` +
-        `🔑 ${LLAVE_PAGO}\n\n` +
+        `⚠️ Evita una penalidad de *$${penalidad.toLocaleString('es-CO')}*\n\n` +
+        (llavePago ? `📲 Paga con la llave:\n🔑 ${llavePago}\n\n` : '') +
         `🔥 No lo dejes para el último minuto… el equipo cuenta contigo ⚽💪`,
-        true,
+        !!qrPagoUrl, qrPagoUrl,
       );
       await logEnvio(supabase, club.id, j.cedula, 'recordatorio', mes, anio);
       stats.mensajes++;
@@ -184,11 +186,10 @@ async function procesarClub(
         `🚨⚽ *HOY es el último día — ${nombreClub}*\n\n` +
         `Hola ${nombre}, hoy vence tu cuota de *${nombreM}*.\n\n` +
         `💰 Valor: *$${valorMensual.toLocaleString('es-CO')}*\n` +
-        `⚠️ Mañana tendrás penalidad de *$${PENALIDAD_MORA.toLocaleString('es-CO')}*\n\n` +
-        `📲 Escanea el QR o usa la llave:\n` +
-        `🔑 ${LLAVE_PAGO}\n\n` +
+        `⚠️ Mañana tendrás penalidad de *$${penalidad.toLocaleString('es-CO')}*\n\n` +
+        (llavePago ? `📲 Paga con la llave:\n🔑 ${llavePago}\n\n` : '') +
         `⏳ Estás a una jugada de seguir al día… no pierdas este partido ⚽🔥`,
-        true,
+        !!qrPagoUrl, qrPagoUrl,
       );
       await logEnvio(supabase, club.id, j.cedula, 'vencimiento', mes, anio);
       stats.mensajes++;
@@ -217,10 +218,10 @@ async function procesarClub(
       if (penActual === 0) {
         const oficial    = parseFloat(mens.valor_oficial) || 0;
         const yaPageado  = parseFloat(mens.valor_pagado)  || 0;
-        const nuevoSaldo = Math.max(0, oficial + PENALIDAD_MORA - yaPageado);
+        const nuevoSaldo = Math.max(0, oficial + penalidad - yaPageado);
         await supabase.from('mensualidades').update({
           estado:                     'MORA',
-          penalidad:                  PENALIDAD_MORA,
+          penalidad:                  penalidad,
           saldo_pendiente:            nuevoSaldo,
           fecha_ultima_actualizacion: new Date().toISOString(),
         }).eq('id', mens.id);
@@ -232,16 +233,15 @@ async function procesarClub(
       if (await yaEnviado(supabase, club.id, j.cedula, 'mora', mes, anio)) continue;
       const nombre     = nombreCompleto(j);
       const oficial    = parseFloat(mens.valor_oficial) || 0;
-      const totalDeuda = (oficial + PENALIDAD_MORA).toLocaleString('es-CO');
+      const totalDeuda = (oficial + penalidad).toLocaleString('es-CO');
       await enviarWA(j.celular,
         `🚫⚽ *${nombreClub} — Estado en mora*\n\n` +
         `Hola ${nombre}, tu cuota de *${nombreM} ${anio}* ya está vencida.\n\n` +
         `💰 Total a pagar: *$${totalDeuda}*\n` +
-        `(incluye penalidad de $${PENALIDAD_MORA.toLocaleString('es-CO')})\n\n` +
-        `📲 Escanea el QR o paga con la llave:\n` +
-        `🔑 ${LLAVE_PAGO}\n\n` +
+        `(incluye penalidad de $${penalidad.toLocaleString('es-CO')})\n\n` +
+        (llavePago ? `📲 Paga con la llave:\n🔑 ${llavePago}\n\n` : '') +
         `🔁 Entre más pronto pagues, más rápido vuelves al juego ⚽`,
-        true,
+        !!qrPagoUrl, qrPagoUrl,
       );
       await logEnvio(supabase, club.id, j.cedula, 'mora', mes, anio);
       stats.mensajes++;
@@ -278,11 +278,10 @@ async function procesarClub(
         `⚽🔥 *${nombre}, vuelve al juego con ${nombreClub}*\n\n` +
         `Eres parte del equipo y te queremos en la cancha 💙\n\n` +
         `No dejes que una cuota te saque del partido.\n\n` +
-        `📲 Escanea el QR o paga con la llave:\n` +
-        `🔑 ${LLAVE_PAGO}\n\n` +
+        (llavePago ? `📲 Paga con la llave:\n🔑 ${llavePago}\n\n` : '') +
         `🚀 Un pago hoy, cero preocupaciones mañana\n\n` +
         `💪 ${nombreClub} sigue contando contigo ⚽🔥💯`,
-        true,
+        !!qrPagoUrl, qrPagoUrl,
       );
       await logEnvio(supabase, club.id, j.cedula, 'reenganche', mes, anio);
       stats.mensajes++;
@@ -363,9 +362,7 @@ async function logEnvio(
   await supabase.from('wa_log_envios').insert({ club_id, cedula, tipo_mensaje, mes, anio });
 }
 
-const QR_PAGO_URL = 'https://olcevdnhmexaahymfzii.supabase.co/storage/v1/object/public/club-assets/qr-pago-cityfc.jpeg';
-
-async function enviarWA(celular: string, body: string, conQR = false) {
+async function enviarWA(celular: string, body: string, conQR = false, qrUrl = '') {
   const sid   = TWILIO_ACCOUNT_SID;
   const token = TWILIO_AUTH_TOKEN;
   const from  = TWILIO_WHATSAPP_FROM;
@@ -375,7 +372,7 @@ async function enviarWA(celular: string, body: string, conQR = false) {
   const url = `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`;
 
   const params: Record<string, string> = { From: from, To: to, Body: body };
-  if (conQR) params['MediaUrl0'] = QR_PAGO_URL;
+  if (conQR && qrUrl) params['MediaUrl0'] = qrUrl;
 
   const res = await fetch(url, {
     method: 'POST',
