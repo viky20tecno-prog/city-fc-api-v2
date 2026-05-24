@@ -1,10 +1,9 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const db = require('../services/db');
+const { MESES } = require('../services/meses');
 
 const router = express.Router();
-
-const MESES = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
 // Rate limiting: máx 5 inscripciones por IP en 15 minutos
 const inscripcionLimiter = rateLimit({

@@ -1,8 +1,7 @@
 const express = require('express');
 const db = require('../services/db');
+const { MESES } = require('../services/meses');
 const router = express.Router();
-
-const MESES = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
 // GET /api/players?club_id=city-fc
 router.get('/', async (req, res) => {
