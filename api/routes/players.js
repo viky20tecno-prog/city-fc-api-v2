@@ -45,13 +45,48 @@ router.get('/:cedula', async (req, res) => {
 });
 
 // PATCH /api/players/:cedula?club_id=city-fc
-// Actualiza foto_url, posicion, numero_camiseta
 router.patch('/:cedula', async (req, res) => {
   try {
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
     const updated = await db.updatePlayer(club.id, req.params.cedula, req.body);
+
+    // Si se modificó el descuento, recalcular la mensualidad del mes actual (si no está AL_DIA)
+    if (req.body.descuento_pct !== undefined) {
+      const mesActual  = new Date().getMonth() + 1;
+      const anioActual = new Date().getFullYear();
+      const valorMensual = Number(club.config?.valor_mensualidad ?? 65000);
+      const nuevoPct     = Math.max(0, Math.min(100, Number(req.body.descuento_pct ?? 0)));
+      const nuevoOficial = Math.round(valorMensual * (1 - nuevoPct / 100));
+
+      const { data: mens } = await db.supabase
+        .from('mensualidades')
+        .select('id, valor_pagado, penalidad')
+        .eq('club_id', club.id)
+        .eq('cedula', req.params.cedula)
+        .eq('numero_mes', mesActual)
+        .eq('anio', anioActual)
+        .neq('estado', 'AL_DIA')
+        .maybeSingle();
+
+      if (mens) {
+        const penalidad  = Number(mens.penalidad   ?? 0);
+        const pagado     = Number(mens.valor_pagado ?? 0);
+        const nuevoSaldo = Math.max(0, nuevoOficial + penalidad - pagado);
+        const nuevoEstado =
+          nuevoOficial === 0 || pagado >= nuevoOficial + penalidad ? 'AL_DIA'
+          : pagado > 0 ? 'PARCIAL'
+          : 'PENDIENTE';
+
+        await db.supabase.from('mensualidades').update({
+          valor_oficial:   nuevoOficial,
+          saldo_pendiente: nuevoSaldo,
+          estado:          nuevoEstado,
+        }).eq('id', mens.id);
+      }
+    }
+
     res.json({ success: true, data: updated });
   } catch (error) {
     console.error('Error in PATCH /players/:cedula:', error);

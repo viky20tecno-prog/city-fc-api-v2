@@ -74,7 +74,7 @@ async function procesarClub(
   // Jugadores activos con celular (test_cedula restringe a uno solo en pruebas)
   let query = supabase
     .from('players')
-    .select('id, cedula, nombre, apellidos, celular')
+    .select('id, cedula, nombre, apellidos, celular, descuento_pct')
     .eq('club_id', club.id)
     .eq('activo', true)
     .not('celular', 'is', null);
@@ -119,6 +119,10 @@ async function procesarClub(
         .eq('anio', anio)
         .maybeSingle();
 
+      const descuento    = Number(j.descuento_pct ?? 0);
+      const valorJugador = Math.round(valorMensual * (1 - descuento / 100));
+      const estadoInicial = valorJugador === 0 ? 'AL_DIA' : 'PENDIENTE';
+
       if (!existente) {
         await supabase.from('mensualidades').insert({
           club_id:         club.id,
@@ -126,22 +130,28 @@ async function procesarClub(
           numero_mes:      mes,
           mes:             nombreM,
           anio,
-          valor_oficial:   valorMensual,
+          valor_oficial:   valorJugador,
           valor_pagado:    0,
-          saldo_pendiente: valorMensual,
-          estado:          'PENDIENTE',
+          saldo_pendiente: valorJugador,
+          estado:          estadoInicial,
           penalidad:       0,
         });
         stats.mensualidades_creadas++;
       }
 
+      // Jugadores con beca completa no reciben aviso de cobro
+      if (estadoInicial === 'AL_DIA') continue;
+
       if (await yaEnviado(supabase, club.id, j.cedula, 'activacion', mes, anio)) continue;
       const nombre = nombreCompleto(j);
       const diasGracia = Number(club.config?.dias_gracia_mora ?? 7);
+      const textoValor = descuento > 0
+        ? `$${valorJugador.toLocaleString('es-CO')} *(beca ${descuento}%)*`
+        : `$${valorJugador.toLocaleString('es-CO')}`;
       await enviarWA(j.celular,
         `📢⚽ *${nombreClub} — Cuota activa*\n\n` +
         `Hola ${nombre}, tu cuota de *${nombreM}* ya está activa.\n\n` +
-        `💰 Valor: *$${valorMensual.toLocaleString('es-CO')}*\n` +
+        `💰 Valor: *${textoValor}*\n` +
         `📅 Tienes hasta el *día ${diasGracia}* para pagar sin penalidad\n\n` +
         (llavePago ? `📲 Paga con la llave:\n🔑 ${llavePago}\n\n` : '') +
         `💪 Paga hoy y juega tranquilo todo el mes ⚽🔥`,
