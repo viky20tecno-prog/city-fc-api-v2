@@ -1,5 +1,7 @@
 const express = require('express');
+const XLSX = require('xlsx');
 const db = require('../services/db');
+const { MESES } = require('../services/meses');
 const router = express.Router();
 
 // GET /api/invoices?club_id=city-fc&status=PENDIENTE&mes=4&anio=2026
@@ -152,6 +154,252 @@ router.patch('/mensualidad/:id', async (req, res) => {
     res.json({ success: true, data: updated });
   } catch (err) {
     console.error('PATCH /invoices/mensualidad/:id', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/invoices/generar-anio
+// Crea los registros faltantes de mensualidades para el año actual.
+// Solo inserta filas que no existan ya (idempotente).
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/generar-anio', async (req, res) => {
+  try {
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const anio    = new Date().getFullYear();
+    const CUOTA   = parseFloat(club.config?.valor_mensualidad) || 65000;
+    const players = await db.getPlayers(club.id);
+
+    if (!players.length) return res.json({ success: true, creados: 0, message: 'No hay jugadores activos' });
+
+    // Obtener mensualidades existentes para este año de una sola consulta
+    const existentes = await db.getMensualidades(club.id);
+    const existentesAnio = existentes.filter(m => String(m.anio) === String(anio));
+
+    // Índice: "cedula-mes"
+    const yaExiste = new Set(existentesAnio.map(m => `${m.cedula}-${m.numero_mes}`));
+
+    const nuevas = [];
+    for (const p of players) {
+      for (let mes = 1; mes <= 12; mes++) {
+        const key = `${p.cedula}-${mes}`;
+        if (yaExiste.has(key)) continue;
+
+        // Descuento individual del jugador
+        const descuento = parseFloat(p.descuento_mensualidad) || 0;
+        const oficial   = Math.max(0, CUOTA - descuento);
+
+        nuevas.push({
+          club_id:         club.id,
+          player_id:       p.id,
+          cedula:          String(p.cedula),
+          anio,
+          mes:             MESES[mes],
+          numero_mes:      mes,
+          valor_oficial:   oficial,
+          valor_pagado:    0,
+          saldo_pendiente: oficial,
+          estado:          'PENDIENTE',
+        });
+      }
+    }
+
+    if (nuevas.length > 0) await db.bulkInsert('mensualidades', nuevas);
+
+    res.json({
+      success: true,
+      anio,
+      jugadores: players.length,
+      creados: nuevas.length,
+      omitidos: players.length * 12 - nuevas.length,
+      message: `${nuevas.length} mensualidades creadas para ${anio}`,
+    });
+  } catch (err) {
+    console.error('POST /invoices/generar-anio', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/invoices/plantilla-excel
+// Descarga un Excel con todos los jugadores y sus estados actuales por mes.
+// El presidente lo llena con los valores pagados y lo sube de vuelta.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/plantilla-excel', async (req, res) => {
+  try {
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const anio    = parseInt(req.query.anio) || new Date().getFullYear();
+    const CUOTA   = parseFloat(club.config?.valor_mensualidad) || 65000;
+    const players = await db.getPlayers(club.id);
+    players.sort((a, b) => {
+      const na = `${a.nombre} ${a.apellidos}`.toLowerCase();
+      const nb = `${b.nombre} ${b.apellidos}`.toLowerCase();
+      return na.localeCompare(nb);
+    });
+
+    const existentes = await db.getMensualidades(club.id);
+    const porJugadorMes = {};
+    existentes.filter(m => String(m.anio) === String(anio)).forEach(m => {
+      porJugadorMes[`${m.cedula}-${m.numero_mes}`] = m;
+    });
+
+    // Encabezados
+    const mesesAbrev = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+    const headers = ['Cedula', 'Nombre', 'Apellidos', 'Categoria', 'Cuota_Oficial',
+      ...mesesAbrev.map(m => `${m}_pagado`),
+      ...mesesAbrev.map(m => `${m}_estado`),
+    ];
+
+    // Fila de instrucciones
+    const instrucciones = [
+      '** NO modificar Cedula ni columnas de estado **',
+      'Llena solo las columnas *_pagado con el monto real pagado.',
+      'Deja 0 si no ha pagado. El sistema calcula el estado.',
+      '', '', '',
+      ...Array(12).fill(''), ...Array(12).fill(''),
+    ];
+
+    const rows = [instrucciones, headers];
+
+    for (const p of players) {
+      const descuento  = parseFloat(p.descuento_mensualidad) || 0;
+      const cuotaReal  = Math.max(0, CUOTA - descuento);
+      const row = [
+        String(p.cedula),
+        p.nombre || '',
+        p.apellidos || '',
+        p.categoria || '',
+        cuotaReal,
+      ];
+
+      // Columnas _pagado (meses 1-12)
+      for (let mes = 1; mes <= 12; mes++) {
+        const inv = porJugadorMes[`${p.cedula}-${mes}`];
+        row.push(inv ? (parseFloat(inv.valor_pagado) || 0) : 0);
+      }
+      // Columnas _estado (solo lectura, para referencia)
+      for (let mes = 1; mes <= 12; mes++) {
+        const inv = porJugadorMes[`${p.cedula}-${mes}`];
+        row.push(inv ? inv.estado : 'SIN_REGISTRO');
+      }
+
+      rows.push(row);
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+
+    // Anchos de columna
+    ws['!cols'] = [
+      { wch: 14 }, { wch: 18 }, { wch: 20 }, { wch: 14 }, { wch: 14 },
+      ...Array(12).fill({ wch: 11 }),
+      ...Array(12).fill({ wch: 12 }),
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `Mensualidades ${anio}`);
+
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const nombreClub = (club.config?.nombre || club.slug).replace(/\s+/g, '-').toLowerCase();
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="mensualidades-${nombreClub}-${anio}.xlsx"`);
+    res.send(buffer);
+  } catch (err) {
+    console.error('GET /invoices/plantilla-excel', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/invoices/importar-estados
+// Recibe filas del Excel y actualiza/crea mensualidades en bulk.
+// Body: { anio: 2026, filas: [{ cedula, mes_1, mes_2, ..., mes_12 }] }
+// Cada mes_N contiene el valor pagado.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/importar-estados', async (req, res) => {
+  try {
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const { anio = new Date().getFullYear(), filas } = req.body;
+    if (!Array.isArray(filas) || filas.length === 0)
+      return res.status(400).json({ success: false, error: 'Faltan filas para importar' });
+
+    const CUOTA   = parseFloat(club.config?.valor_mensualidad) || 65000;
+    const players = await db.getPlayers(club.id);
+    const playerMap = {};
+    players.forEach(p => { playerMap[String(p.cedula)] = p; });
+
+    const existentes = await db.getMensualidades(club.id);
+    const existentesAnio = existentes.filter(m => String(m.anio) === String(anio));
+    const invMap = {};
+    existentesAnio.forEach(m => { invMap[`${m.cedula}-${m.numero_mes}`] = m; });
+
+    const resultados = { actualizados: 0, creados: 0, omitidos: 0, errores: [] };
+
+    for (const fila of filas) {
+      const cedula = String(fila.cedula || '').trim();
+      if (!cedula) { resultados.omitidos++; continue; }
+
+      const player = playerMap[cedula];
+      if (!player) {
+        resultados.errores.push({ cedula, error: 'Jugador no encontrado' });
+        continue;
+      }
+
+      const descuento = parseFloat(player.descuento_mensualidad) || 0;
+      const oficial   = Math.max(0, CUOTA - descuento);
+
+      for (let mes = 1; mes <= 12; mes++) {
+        const valorPagado = parseFloat(fila[`mes_${mes}`]) || 0;
+        const saldo       = Math.max(0, oficial - valorPagado);
+        const estado      = valorPagado >= oficial ? 'AL_DIA' : valorPagado > 0 ? 'PARCIAL' : 'PENDIENTE';
+
+        const key = `${cedula}-${mes}`;
+        const inv = invMap[key];
+
+        try {
+          if (inv) {
+            await db.updateMensualidad(inv.id, {
+              valor_oficial:   oficial,
+              valor_pagado:    valorPagado,
+              saldo_pendiente: saldo,
+              estado,
+            });
+            resultados.actualizados++;
+          } else {
+            await db.bulkInsert('mensualidades', [{
+              club_id:         club.id,
+              player_id:       player.id,
+              cedula:          cedula,
+              anio:            Number(anio),
+              mes:             MESES[mes],
+              numero_mes:      mes,
+              valor_oficial:   oficial,
+              valor_pagado:    valorPagado,
+              saldo_pendiente: saldo,
+              estado,
+            }]);
+            resultados.creados++;
+          }
+        } catch (e) {
+          resultados.errores.push({ cedula, mes, error: e.message });
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      anio,
+      ...resultados,
+      message: `${resultados.actualizados} actualizados, ${resultados.creados} creados`,
+    });
+  } catch (err) {
+    console.error('POST /invoices/importar-estados', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
