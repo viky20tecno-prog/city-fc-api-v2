@@ -247,27 +247,27 @@ router.get('/plantilla-excel', async (req, res) => {
       porJugadorMes[`${m.cedula}-${m.numero_mes}`] = m;
     });
 
-    // Encabezados
+    // Solo meses transcurridos hasta hoy — los futuros los maneja el flujo automático
+    const mesActual  = new Date().getMonth() + 1; // 1-12
     const mesesAbrev = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+    const mesesActivos = mesesAbrev.slice(0, mesActual); // ['Ene','Feb','Mar','Abr','May']
+
     const headers = ['Cedula', 'Nombre', 'Apellidos', 'Categoria', 'Cuota_Oficial',
-      ...mesesAbrev.map(m => `${m}_pagado`),
-      ...mesesAbrev.map(m => `${m}_estado`),
+      ...mesesActivos.map(m => `${m}_pagado`),
     ];
 
     // Fila de instrucciones
     const instrucciones = [
-      '** NO modificar Cedula ni columnas de estado **',
-      'Llena solo las columnas *_pagado con el monto real pagado.',
-      'Deja 0 si no ha pagado. El sistema calcula el estado.',
-      '', '', '',
-      ...Array(12).fill(''), ...Array(12).fill(''),
+      `** Llena solo las columnas *_pagado (${mesesActivos.join(', ')}) con el monto real pagado. Deja 0 si no pagó. **`,
+      '', '', '', '',
+      ...Array(mesActual).fill(''),
     ];
 
     const rows = [instrucciones, headers];
 
     for (const p of players) {
-      const descuento  = parseFloat(p.descuento_mensualidad) || 0;
-      const cuotaReal  = Math.max(0, CUOTA - descuento);
+      const descuento = parseFloat(p.descuento_mensualidad) || 0;
+      const cuotaReal = Math.max(0, CUOTA - descuento);
       const row = [
         String(p.cedula),
         p.nombre || '',
@@ -276,15 +276,10 @@ router.get('/plantilla-excel', async (req, res) => {
         cuotaReal,
       ];
 
-      // Columnas _pagado (meses 1-12)
-      for (let mes = 1; mes <= 12; mes++) {
+      // Solo columnas de meses activos
+      for (let mes = 1; mes <= mesActual; mes++) {
         const inv = porJugadorMes[`${p.cedula}-${mes}`];
         row.push(inv ? (parseFloat(inv.valor_pagado) || 0) : 0);
-      }
-      // Columnas _estado (solo lectura, para referencia)
-      for (let mes = 1; mes <= 12; mes++) {
-        const inv = porJugadorMes[`${p.cedula}-${mes}`];
-        row.push(inv ? inv.estado : 'SIN_REGISTRO');
       }
 
       rows.push(row);
@@ -295,8 +290,7 @@ router.get('/plantilla-excel', async (req, res) => {
     // Anchos de columna
     ws['!cols'] = [
       { wch: 14 }, { wch: 18 }, { wch: 20 }, { wch: 14 }, { wch: 14 },
-      ...Array(12).fill({ wch: 11 }),
-      ...Array(12).fill({ wch: 12 }),
+      ...Array(mesActual).fill({ wch: 11 }),
     ];
 
     const wb = XLSX.utils.book_new();
@@ -354,7 +348,9 @@ router.post('/importar-estados', async (req, res) => {
       const descuento = parseFloat(player.descuento_mensualidad) || 0;
       const oficial   = Math.max(0, CUOTA - descuento);
 
-      for (let mes = 1; mes <= 12; mes++) {
+      // Solo procesar meses hasta el actual — los futuros los maneja el flujo automático
+      const mesActual = new Date().getMonth() + 1;
+      for (let mes = 1; mes <= mesActual; mes++) {
         const valorPagado = parseFloat(fila[`mes_${mes}`]) || 0;
         const saldo       = Math.max(0, oficial - valorPagado);
         const estado      = valorPagado >= oficial ? 'AL_DIA' : valorPagado > 0 ? 'PARCIAL' : 'PENDIENTE';
