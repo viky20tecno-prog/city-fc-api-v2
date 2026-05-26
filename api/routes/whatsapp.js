@@ -22,6 +22,16 @@ router.use((req, res, next) => {
   next();
 });
 
+// Extraer club_id (las rutas /whatsapp saltean el middleware global de club_id)
+router.use((req, res, next) => {
+  const club_id = req.query.club_id || req.body?.club_id;
+  if (!club_id) {
+    return res.status(400).json({ success: false, error: 'club_id requerido (?club_id=tu-club)' });
+  }
+  req.club_id = club_id;
+  next();
+});
+
 // POST /api/whatsapp/pago-comprobante
 // Make.com llama este endpoint con los datos ya extraídos por GPT-4o Vision
 // Body: { celular?, cedula?, monto, banco, referencia?, concepto?, url_comprobante? }
