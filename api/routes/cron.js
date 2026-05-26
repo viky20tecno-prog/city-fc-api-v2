@@ -140,4 +140,46 @@ router.get('/preview-emails', async (req, res) => {
   res.json({ success: true, enviados_a: email, resultados });
 });
 
+// POST /api/cron/cobro — llamado por Vercel Cron diariamente a las 8am Colombia (13:00 UTC)
+// Dispara la Supabase Edge Function cobro-automatico que maneja el ciclo completo
+// (días 27/1/4/7/8/9) enviando WA directo via Twilio sin pasar por Make.com
+router.all('/cobro', async (req, res) => {
+  if (!verifyCronSecret(req, res)) return;
+
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !serviceKey) {
+    return res.status(500).json({ success: false, error: 'SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY no configurados' });
+  }
+
+  const funcionUrl = `${supabaseUrl.replace('.supabase.co', '.supabase.co')}/functions/v1/cobro-automatico`;
+
+  try {
+    const body = req.body && Object.keys(req.body).length > 0 ? req.body : {};
+
+    const resp = await fetch(funcionUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${serviceKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const data = await resp.json().catch(() => ({}));
+
+    if (!resp.ok) {
+      console.error('[cron/cobro] Error desde cobro-automatico:', resp.status, data);
+      return res.status(resp.status).json({ success: false, error: data });
+    }
+
+    console.log('[cron/cobro] cobro-automatico ejecutado:', JSON.stringify(data));
+    res.json({ success: true, ...data });
+  } catch (err) {
+    console.error('[cron/cobro] Error llamando cobro-automatico:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
