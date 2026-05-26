@@ -158,7 +158,7 @@ async function runTool(name, input) {
           { nombre: 'Pro',        precio: '$399.000/mes',  jugadores: 'hasta 150',   features: 'Todo Starter + arbitraje + nómina' },
           { nombre: 'Club',       precio: '$799.000/mes',  jugadores: 'ilimitados',  features: 'Todo incluido + soporte prioritario' },
         ],
-        registro: 'Regístrate gratis en zensports.vercel.app — 5 días de prueba gratis en plan Pro.',
+        registro: 'Regístrate gratis en zensports.zenpra.ai — 5 días de prueba gratis en plan Pro.',
         contacto: 'WhatsApp Zenpra: +57 3204409015',
       };
     }

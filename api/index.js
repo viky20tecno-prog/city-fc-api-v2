@@ -45,6 +45,8 @@ const supabaseAdmin = createClient(
 const ALLOWED_ORIGINS = [
   'https://zensports.vercel.app',
   'https://zensports-admin.vercel.app',
+  'https://zensports.zenpra.ai',
+  'https://admin-zensports.zenpra.ai',
 ];
 
 const corsOptions = {

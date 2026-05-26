@@ -57,7 +57,7 @@ function sendWelcomeClub({ nombre_club, nombre_admin, email, club_slug }) {
           <p style="font-size:15px;color:rgba(255,255,255,0.6);line-height:1.7;margin:0 0 28px;">
             Hola ${nombre_admin}, tu panel está listo. Tienes <strong style="color:#E14924;">5 días de prueba gratuita</strong> para explorar todas las funcionalidades.
           </p>
-          <a href="https://zensports.vercel.app/login"
+          <a href="https://zensports.zenpra.ai/login"
              style="display:inline-block;background:linear-gradient(135deg,#E14924,#E14924cc);color:#fff;font-weight:700;font-size:15px;text-decoration:none;border-radius:12px;padding:14px 28px;">
             Abrir mi panel →
           </a>
@@ -119,7 +119,7 @@ function sendTrialExpiring({ nombre_club, nombre_admin, email, dias_restantes })
           <p style="font-size:15px;color:rgba(255,255,255,0.6);line-height:1.7;margin:0 0 28px;">
             Hola ${nombre_admin}, para continuar usando ZenSports sin interrupciones activa tu plan antes de que venza tu prueba.
           </p>
-          <a href="https://zensports.vercel.app/#precios"
+          <a href="https://zensports.zenpra.ai/#precios"
              style="display:inline-block;background:linear-gradient(135deg,#E14924,#E14924cc);color:#fff;font-weight:700;font-size:15px;text-decoration:none;border-radius:12px;padding:14px 28px;">
             Ver planes y precios →
           </a>
@@ -155,7 +155,7 @@ function sendPlanActivated({ nombre_club, nombre_admin, email, plan, precio }) {
           <p style="font-size:15px;color:rgba(255,255,255,0.6);line-height:1.7;margin:0 0 28px;">
             Hola ${nombre_admin}, tu plan fue activado exitosamente.${precio ? ` El cobro de <strong style="color:#fff;">${precio}</strong> se realizará mensualmente.` : ''}
           </p>
-          <a href="https://zensports.vercel.app/login"
+          <a href="https://zensports.zenpra.ai/login"
              style="display:inline-block;background:linear-gradient(135deg,#00D084,#00D084cc);color:#fff;font-weight:700;font-size:15px;text-decoration:none;border-radius:12px;padding:14px 28px;">
             Ir a mi panel →
           </a>
@@ -194,7 +194,7 @@ function sendTrialExpired({ nombre_club, nombre_admin, email }) {
           <p style="font-size:15px;color:rgba(255,255,255,0.6);line-height:1.7;margin:0 0 28px;">
             Activa un plan hoy y retoma donde lo dejaste sin perder nada.
           </p>
-          <a href="https://zensports.vercel.app/#precios"
+          <a href="https://zensports.zenpra.ai/#precios"
              style="display:inline-block;background:linear-gradient(135deg,#E14924,#E14924cc);color:#fff;font-weight:700;font-size:15px;text-decoration:none;border-radius:12px;padding:14px 28px;">
             Activar mi plan ahora →
           </a>
@@ -244,7 +244,7 @@ function sendOnboardingDay3({ nombre_club, nombre_admin, email, club_slug }) {
           <p style="font-size:15px;color:rgba(255,255,255,0.6);line-height:1.7;margin:0 0 28px;">
             Los clubes que más aprovechan ZenSports son los que en los primeros 3 días ya tienen sus jugadores cargados y el cobro automático activo.
           </p>
-          <a href="https://zensports.vercel.app/login"
+          <a href="https://zensports.zenpra.ai/login"
              style="display:inline-block;background:linear-gradient(135deg,#E14924,#E14924cc);color:#fff;font-weight:700;font-size:15px;text-decoration:none;border-radius:12px;padding:14px 28px;">
             Ir a mi panel →
           </a>
@@ -264,7 +264,7 @@ function sendOnboardingDay3({ nombre_club, nombre_admin, email, club_slug }) {
             <p style="margin:0;font-size:13px;color:rgba(255,255,255,0.6);">${text}</p>
           </div>`).join('')}
           <div style="margin-top:16px;padding:12px 16px;background:rgba(0,208,132,0.06);border:1px solid rgba(0,208,132,0.15);border-radius:10px;">
-            <p style="margin:0;font-size:13px;color:rgba(0,208,132,0.8);">💡 El portal de padres de <strong>${nombre_club}</strong> es: <a href="https://zensports.vercel.app/p/${club_slug}" style="color:#00D084;">zensports.vercel.app/p/${club_slug}</a></p>
+            <p style="margin:0;font-size:13px;color:rgba(0,208,132,0.8);">💡 El portal de padres de <strong>${nombre_club}</strong> es: <a href="https://zensports.zenpra.ai/p/${club_slug}" style="color:#00D084;">zensports.zenpra.ai/p/${club_slug}</a></p>
           </div>
         </td></tr>
       </table>
@@ -298,7 +298,7 @@ function sendOnboardingDay7({ nombre_club, nombre_admin, email }) {
           <p style="font-size:15px;color:rgba(255,255,255,0.6);line-height:1.7;margin:0 0 28px;">
             ¿Todo listo para continuar? Activa tu plan hoy y mantén el control de ${nombre_club} sin interrupciones.
           </p>
-          <a href="https://zensports.vercel.app/#precios"
+          <a href="https://zensports.zenpra.ai/#precios"
              style="display:inline-block;background:linear-gradient(135deg,#E14924,#E14924cc);color:#fff;font-weight:700;font-size:15px;text-decoration:none;border-radius:12px;padding:14px 28px;">
             Ver planes →
           </a>
