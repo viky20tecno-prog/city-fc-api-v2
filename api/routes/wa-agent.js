@@ -153,12 +153,12 @@ async function runTool(name, input) {
       return {
         descripcion: 'ZenSports es el sistema operativo para clubes deportivos. Gestión de jugadores, cobros automáticos, calendario, arbitraje y más.',
         planes: [
-          { nombre: 'FREE',       precio: '$0/mes',       jugadores: 'hasta 20',    features: 'Jugadores, pagos básicos' },
-          { nombre: 'Starter',    precio: '$149.000/mes',  jugadores: 'hasta 50',    features: 'Todo FREE + WhatsApp cobros' },
-          { nombre: 'Pro',        precio: '$399.000/mes',  jugadores: 'hasta 150',   features: 'Todo Starter + arbitraje + nómina' },
-          { nombre: 'Club',       precio: '$799.000/mes',  jugadores: 'ilimitados',  features: 'Todo incluido + soporte prioritario' },
+          { nombre: 'FREE',       precio: '$0/mes',         jugadores: 'hasta 30',    features: 'Dashboard + jugadores + asistencia' },
+          { nombre: 'Starter',    precio: '$149.000/mes',   jugadores: 'hasta 80',    features: 'Todo FREE + cobros WA + carnet digital' },
+          { nombre: 'Pro',        precio: '$399.000/mes',   jugadores: 'hasta 200',   features: 'Todo Starter + torneos + arbitraje + finanzas' },
+          { nombre: 'Scale',      precio: '$799.000/mes',   jugadores: 'ilimitados',  features: 'Todo incluido + múltiples admins + soporte prioritario' },
         ],
-        registro: 'Regístrate gratis en zensports.zenpra.ai — 5 días de prueba gratis en plan Pro.',
+        registro: 'Regístrate gratis en zensports.zenpra.ai — 5 días de prueba completa.',
         contacto: 'WhatsApp Zenpra: +57 3204409015',
       };
     }
@@ -298,6 +298,43 @@ router.post('/webhook', async (req, res) => {
     console.error('[wa-agent] error:', err.message);
   }
 
+  res.status(200).json({ status: 'ok' });
+});
+
+// ── Enviar mensaje vía WAHA ──────────────────────────────────────────────────
+async function sendWAHA(to, text) {
+  const wahaUrl = process.env.WAHA_URL;
+  const session = process.env.WAHA_SESSION || 'default';
+  if (!wahaUrl) { console.error('[wa-agent] WAHA_URL no configurado'); return; }
+  const chatId = to.includes('@') ? to : `${to}@c.us`;
+  const res = await fetch(`${wahaUrl}/api/sendText`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chatId, text, session }),
+  });
+  const data = await res.json();
+  if (!res.ok) console.error('[wa-agent] sendWAHA error:', res.status, JSON.stringify(data));
+  else console.log('[wa-agent] sendWAHA ok:', data.id || 'sent');
+  return data;
+}
+
+// ── Webhook WAHA (POST) ──────────────────────────────────────────────────────
+router.post('/waha', async (req, res) => {
+  try {
+    const { event, payload } = req.body;
+    if (event !== 'message' || !payload?.body || payload?.fromMe) {
+      return res.status(200).json({ status: 'ignored' });
+    }
+    const from = payload.from.replace('@c.us', '').replace('@s.whatsapp.net', '');
+    const text = payload.body;
+    console.log(`[wa-agent] WAHA mensaje de ${from}: ${text}`);
+
+    const reply = await generateReply(from, text);
+    if (reply) await sendWAHA(from, reply);
+    console.log(`[wa-agent] WAHA procesado OK para ${from}`);
+  } catch (err) {
+    console.error('[wa-agent] WAHA error:', err.message);
+  }
   res.status(200).json({ status: 'ok' });
 });
 
