@@ -44,18 +44,21 @@ async function sendWA(to, text) {
 }
 
 // ── Herramientas del agente ──────────────────────────────────────────────────
-const TOOLS = [
-  {
-    name: 'buscar_jugador',
-    description: 'Busca un jugador por su número de celular en todos los clubes. Retorna nombre, cédula, club, categoría y equipo.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        celular: { type: 'string', description: 'Número de celular, ej: 3001234567' },
-      },
-      required: ['celular'],
+
+// buscar_jugador: SOLO admins — jugadores/visitantes no pueden ver datos de otras personas
+const TOOL_BUSCAR_JUGADOR = {
+  name: 'buscar_jugador',
+  description: 'SOLO ADMIN. Busca un jugador del club por su número de celular. Retorna nombre, cédula, categoría y equipo.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      celular: { type: 'string', description: 'Número de celular, ej: 3001234567' },
     },
+    required: ['celular'],
   },
+};
+
+const TOOLS_BASE = [
   {
     name: 'consultar_pagos',
     description: 'Consulta el estado de mensualidades del año actual de un jugador.',
@@ -163,8 +166,13 @@ const TOOLS = [
   },
 ];
 
+// Herramientas por rol — jugadores y visitantes NO pueden buscar datos de otras personas
+const TOOLS_ADMIN     = [TOOL_BUSCAR_JUGADOR, ...TOOLS_BASE];
+const TOOLS_JUGADOR   = TOOLS_BASE.filter(t => !['registrar_lead', 'consultar_pagos_club', 'consultar_morosos', 'enviar_recordatorio_pago', 'consultar_asistencia_hoy'].includes(t.name));
+const TOOLS_VISITANTE = TOOLS_BASE.filter(t => ['registrar_lead', 'info_zensports'].includes(t.name));
+
 // ── Ejecutar herramienta ─────────────────────────────────────────────────────
-async function runTool(name, input) {
+async function runTool(name, input, contexto = {}) {
   try {
     if (name === 'buscar_jugador') {
       const jugador = await db.getPlayerByCelularGlobal(input.celular);
@@ -183,6 +191,10 @@ async function runTool(name, input) {
     }
 
     if (name === 'consultar_pagos') {
+      // Validación server-side: jugador solo puede consultar su propia cédula
+      if (contexto.rol === 'jugador' && input.cedula !== String(contexto.cedula)) {
+        return { error: 'No autorizado. Solo puedes consultar tu propio estado de cuenta.' };
+      }
       const anio = new Date().getFullYear();
       const mensualidades = await db.getMensualidades(input.club_id, input.cedula);
       const del_anio = mensualidades
@@ -233,6 +245,10 @@ async function runTool(name, input) {
     }
 
     if (name === 'consultar_asistencia') {
+      // Validación server-side: jugador solo puede consultar su propia asistencia
+      if (contexto.rol === 'jugador' && input.cedula !== String(contexto.cedula)) {
+        return { error: 'No autorizado. Solo puedes consultar tu propia asistencia.' };
+      }
       const registros = await db.getAsistenciaJugador(input.club_id, input.cedula);
       const asistio    = registros.filter(r => r.estado === 'PRESENTE').length;
       const ausente    = registros.filter(r => r.estado === 'AUSENTE').length;
@@ -416,6 +432,11 @@ const SYSTEM_JUGADOR = `${SYSTEM_BASE}
 ROL: Estás atendiendo a un JUGADOR o PADRE DE FAMILIA registrado en un club.
 El usuario ya fue identificado — sus datos están en el CONTEXTO.
 
+PRIVACIDAD — REGLA ABSOLUTA:
+- NUNCA busques ni entregues información de OTROS jugadores
+- Si alguien pide datos de otra persona (por nombre, cédula o teléfono), responde: "Por privacidad no puedo compartir información de otros jugadores."
+- Solo puedes consultar los datos del usuario identificado en el CONTEXTO
+
 MENÚ DE BIENVENIDA (usar cuando digan "hola", "menu", "inicio" o sea primera vez):
 ---
 👋 ¡Hola! Soy *Zen*, el asistente de ZenSports.
@@ -574,8 +595,10 @@ async function generateReply(from, text) {
     return null; // ignorar silenciosamente — el admin lo desactivó
   }
 
-  const systemMap = { admin: SYSTEM_ADMIN, jugador: SYSTEM_JUGADOR, visitante: SYSTEM_VISITANTE };
-  const system    = `${systemMap[rol]}\n\nCONTEXTO DEL USUARIO:\n${JSON.stringify({ rol, ...contexto })}`;
+  const systemMap  = { admin: SYSTEM_ADMIN, jugador: SYSTEM_JUGADOR, visitante: SYSTEM_VISITANTE };
+  const toolsMap   = { admin: TOOLS_ADMIN,  jugador: TOOLS_JUGADOR,  visitante: TOOLS_VISITANTE };
+  const system     = `${systemMap[rol]}\n\nCONTEXTO DEL USUARIO:\n${JSON.stringify({ rol, ...contexto })}`;
+  const rolTools   = toolsMap[rol] || TOOLS_JUGADOR;
 
   const messages = [...history, { role: 'user', content: text }];
   let reply      = null;
@@ -585,7 +608,7 @@ async function generateReply(from, text) {
       model:      'claude-haiku-4-5-20251001',
       max_tokens: 1024,
       system,
-      tools:      TOOLS,
+      tools:      rolTools,
       messages,
     });
 
@@ -600,7 +623,7 @@ async function generateReply(from, text) {
       const toolResults = [];
       for (const block of response.content) {
         if (block.type !== 'tool_use') continue;
-        const result = await runTool(block.name, block.input);
+        const result = await runTool(block.name, block.input, { rol, ...contexto });
         toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) });
       }
       messages.push({ role: 'user', content: toolResults });
