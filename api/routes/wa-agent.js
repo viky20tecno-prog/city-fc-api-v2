@@ -689,6 +689,12 @@ router.post('/waha', async (req, res) => {
     }
 
     const msgId   = payload.id;
+
+    // Capa 1: in-memory (misma instancia Vercel, sincrónico — sin I/O)
+    if (isDuplicate(msgId)) {
+      return res.status(200).json({ status: 'duplicate' });
+    }
+
     const rawFrom = payload.from;
     let from      = rawFrom.replace('@c.us', '').replace('@s.whatsapp.net', '');
 
@@ -700,21 +706,33 @@ router.post('/waha', async (req, res) => {
 
     const text = payload.body;
 
-    // Deduplicar en Supabase — persiste entre instancias serverless
+    // Capa 2: Supabase atómico — INSERT, si falla por conflicto en msg_id es duplicado
     if (msgId) {
       try {
-        const { data: existing } = await db.supabase
+        // Intentar update solo si last_msg_id es diferente
+        const { data: updated } = await db.supabase
           .from('wa_sessions')
-          .select('last_msg_id')
+          .update({ last_msg_id: msgId, updated_at: new Date().toISOString() })
           .eq('phone', from)
-          .single();
-        if (existing?.last_msg_id === msgId) {
-          console.log(`[wa-agent] WAHA duplicado ignorado: ${msgId}`);
-          return res.status(200).json({ status: 'duplicate' });
+          .neq('last_msg_id', msgId)
+          .select('phone');
+
+        if (updated !== null && updated.length === 0) {
+          // El update no aplicó — verificar si ya existe con este msgId (duplicado cross-instancia)
+          const { data: existing } = await db.supabase
+            .from('wa_sessions')
+            .select('last_msg_id')
+            .eq('phone', from)
+            .single();
+          if (existing?.last_msg_id === msgId) {
+            console.log(`[wa-agent] WAHA duplicado cross-instancia ignorado: ${msgId}`);
+            return res.status(200).json({ status: 'duplicate' });
+          }
+          // No existe sesión aún → upsert inicial
+          await db.supabase
+            .from('wa_sessions')
+            .upsert({ phone: from, last_msg_id: msgId, updated_at: new Date().toISOString() }, { onConflict: 'phone' });
         }
-        await db.supabase
-          .from('wa_sessions')
-          .upsert({ phone: from, last_msg_id: msgId, updated_at: new Date().toISOString() }, { onConflict: 'phone' });
       } catch (dedupErr) {
         console.warn('[wa-agent] dedup error (ignorado):', dedupErr.message);
       }
