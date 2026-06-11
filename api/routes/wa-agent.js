@@ -91,8 +91,61 @@ const TOOLS = [
     },
   },
   {
+    name: 'consultar_pagos_club',
+    description: 'SOLO ADMIN. Resumen de pagos del club: total jugadores, cuántos al día, cuántos pendientes y deuda total.',
+    input_schema: {
+      type: 'object',
+      properties: { club_id: { type: 'string' } },
+      required: ['club_id'],
+    },
+  },
+  {
+    name: 'consultar_morosos',
+    description: 'SOLO ADMIN. Lista de jugadores con pagos pendientes, ordenados por deuda mayor.',
+    input_schema: {
+      type: 'object',
+      properties: { club_id: { type: 'string' } },
+      required: ['club_id'],
+    },
+  },
+  {
+    name: 'enviar_recordatorio_pago',
+    description: 'SOLO ADMIN. Envía un mensaje de WhatsApp a todos los jugadores con deuda pendiente.',
+    input_schema: {
+      type: 'object',
+      properties: { club_id: { type: 'string' }, club_nombre: { type: 'string' } },
+      required: ['club_id', 'club_nombre'],
+    },
+  },
+  {
+    name: 'consultar_asistencia_hoy',
+    description: 'SOLO ADMIN. Resumen de asistencia del evento de hoy en el club.',
+    input_schema: {
+      type: 'object',
+      properties: { club_id: { type: 'string' } },
+      required: ['club_id'],
+    },
+  },
+  {
+    name: 'registrar_lead',
+    description: 'Guarda los datos de un club interesado en ZenSports y genera el link de registro prellenado.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        nombre_club:  { type: 'string' },
+        deporte:      { type: 'string' },
+        ciudad:       { type: 'string' },
+        num_jugadores: { type: 'string' },
+        nombre_admin: { type: 'string' },
+        email:        { type: 'string' },
+        celular:      { type: 'string' },
+      },
+      required: ['nombre_club', 'nombre_admin', 'celular'],
+    },
+  },
+  {
     name: 'info_zensports',
-    description: 'Retorna información sobre ZenSports: qué es, planes, precios y cómo registrarse. Usar cuando alguien pregunte por el producto o quiera registrar su club.',
+    description: 'Retorna información sobre ZenSports: qué es, planes, precios y cómo registrarse.',
     input_schema: { type: 'object', properties: {} },
   },
 ];
@@ -125,7 +178,9 @@ async function runTool(name, input) {
       const pendientes = del_anio.filter(m => m.estado !== 'AL_DIA');
       const al_dia     = del_anio.filter(m => m.estado === 'AL_DIA');
       const total_deuda = pendientes.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
-      return { anio, al_dia: al_dia.length, pendientes: pendientes.length, total_deuda,
+      const { data: clubData } = await db.supabase.from('clubs').select('config').eq('id', input.club_id).single();
+      const qr_pago_url = clubData?.config?.qr_pago_url || null;
+      return { anio, al_dia: al_dia.length, pendientes: pendientes.length, total_deuda, qr_pago_url,
                detalle: del_anio.map(m => ({ mes: m.mes, estado: m.estado, saldo: m.saldo_pendiente })) };
     }
 
@@ -181,6 +236,132 @@ async function runTool(name, input) {
       };
     }
 
+    if (name === 'consultar_pagos_club') {
+      const anio = new Date().getFullYear();
+      const supabase = db.supabase;
+      const { data: players } = await supabase
+        .from('players')
+        .select('cedula, nombre, apellidos')
+        .eq('club_id', input.club_id)
+        .eq('activo', true);
+      if (!players?.length) return { total: 0, al_dia: 0, pendientes: 0, deuda_total: 0 };
+
+      let alDia = 0, pendientes = 0, deudaTotal = 0;
+      for (const p of players) {
+        const mens = await db.getMensualidades(input.club_id, p.cedula);
+        const delAnio = mens.filter(m => String(m.anio) === String(anio));
+        const pend = delAnio.filter(m => m.estado !== 'AL_DIA');
+        if (pend.length === 0) alDia++;
+        else {
+          pendientes++;
+          deudaTotal += pend.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
+        }
+      }
+      return { total: players.length, al_dia: alDia, pendientes, deuda_total: deudaTotal };
+    }
+
+    if (name === 'consultar_morosos') {
+      const anio = new Date().getFullYear();
+      const supabase = db.supabase;
+      const { data: players } = await supabase
+        .from('players')
+        .select('cedula, nombre, apellidos, celular, equipo')
+        .eq('club_id', input.club_id)
+        .eq('activo', true);
+      if (!players?.length) return { morosos: [] };
+
+      const morosos = [];
+      for (const p of players) {
+        const mens = await db.getMensualidades(input.club_id, p.cedula);
+        const pend = mens.filter(m => String(m.anio) === String(anio) && m.estado !== 'AL_DIA');
+        if (pend.length > 0) {
+          const deuda = pend.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
+          morosos.push({ nombre: `${p.nombre} ${p.apellidos}`.trim(), celular: p.celular, equipo: p.equipo, meses_pendientes: pend.length, deuda });
+        }
+      }
+      morosos.sort((a, b) => b.deuda - a.deuda);
+      return { morosos: morosos.slice(0, 15) };
+    }
+
+    if (name === 'enviar_recordatorio_pago') {
+      const anio = new Date().getFullYear();
+      const supabase = db.supabase;
+      const { data: players } = await supabase
+        .from('players')
+        .select('cedula, nombre, celular')
+        .eq('club_id', input.club_id)
+        .eq('activo', true)
+        .not('celular', 'is', null);
+      if (!players?.length) return { enviados: 0 };
+
+      let enviados = 0;
+      const wahaUrl = process.env.WAHA_URL;
+      const apiKey  = process.env.WAHA_API_KEY;
+      const session = process.env.WAHA_SESSION || 'default';
+      if (!wahaUrl) return { error: 'WAHA no configurado' };
+
+      for (const p of players) {
+        const mens = await db.getMensualidades(input.club_id, p.cedula);
+        const pend = mens.filter(m => String(m.anio) === String(anio) && m.estado !== 'AL_DIA');
+        if (!pend.length) continue;
+        const deuda = pend.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
+        const msg = `⚽ *${input.club_nombre}*\n\nHola ${p.nombre}, tienes *${pend.length} mensualidad(es)* pendiente(s) por un total de *$${deuda.toLocaleString('es-CO')}*.\n\nPor favor ponerte al día para seguir disfrutando del club. ¡Gracias! 🙏`;
+        const chatId = `57${String(p.celular).replace(/\D/g, '').replace(/^57/, '')}@c.us`;
+        try {
+          const headers = { 'Content-Type': 'application/json' };
+          if (apiKey) headers['X-Api-Key'] = apiKey;
+          await fetch(`${wahaUrl}/api/sendText`, { method: 'POST', headers, body: JSON.stringify({ chatId, text: msg, session }) });
+          enviados++;
+        } catch (e) { /* continuar con el siguiente */ }
+      }
+      return { enviados, mensaje: `Se enviaron recordatorios a ${enviados} jugadores con deuda pendiente.` };
+    }
+
+    if (name === 'consultar_asistencia_hoy') {
+      const supabase = db.supabase;
+      const hoy = new Date().toISOString().split('T')[0];
+      const { data: eventos } = await supabase
+        .from('calendario')
+        .select('id, titulo, tipo, equipo')
+        .eq('club_id', input.club_id)
+        .gte('fecha_inicio', `${hoy}T00:00:00`)
+        .lte('fecha_inicio', `${hoy}T23:59:59`);
+      if (!eventos?.length) return { mensaje: 'No hay eventos programados para hoy.' };
+
+      const resumen = [];
+      for (const ev of eventos) {
+        const lista = await db.getAsistencia(input.club_id, ev.id);
+        const presentes = lista.filter(j => j.estado === 'PRESENTE').length;
+        const ausentes  = lista.filter(j => j.estado === 'AUSENTE').length;
+        const pendientes = lista.filter(j => j.estado === 'PENDIENTE').length;
+        resumen.push({ titulo: ev.titulo, tipo: ev.tipo, equipo: ev.equipo, presentes, ausentes, pendientes, total: lista.length });
+      }
+      return { eventos: resumen };
+    }
+
+    if (name === 'registrar_lead') {
+      const supabase = db.supabase;
+      const leadData = {
+        nombre_club:   input.nombre_club,
+        nombre_admin:  input.nombre_admin,
+        celular:       input.celular,
+        email:         input.email || null,
+        ciudad:        input.ciudad || null,
+        deporte:       input.deporte || null,
+        num_jugadores: input.num_jugadores || null,
+        fuente:        'whatsapp',
+        created_at:    new Date().toISOString(),
+      };
+      await supabase.from('leads').upsert(leadData, { onConflict: 'celular' });
+      const params = new URLSearchParams();
+      if (input.nombre_club) params.set('club', input.nombre_club);
+      if (input.nombre_admin) params.set('admin', input.nombre_admin);
+      if (input.email) params.set('email', input.email);
+      if (input.ciudad) params.set('ciudad', input.ciudad);
+      const link = `https://zensports.zenpra.ai/registro?${params.toString()}`;
+      return { link, mensaje: `Lead guardado. Link de registro generado para ${input.nombre_club}.` };
+    }
+
     if (name === 'info_zensports') {
       return {
         descripcion: 'ZenSports es el sistema operativo para clubes deportivos. Gestión de jugadores, cobros automáticos, calendario, arbitraje y más.',
@@ -203,40 +384,79 @@ async function runTool(name, input) {
 }
 
 // ── Sistema prompt ───────────────────────────────────────────────────────────
-const SYSTEM = `Eres Zen ⚽, el asistente virtual de ZenSports. Ayudas a jugadores, padres de familia y administradores de clubes deportivos colombianos.
+const SYSTEM_BASE = `Eres *Zen* ⚽, el asistente virtual de ZenSports — la plataforma para gestión de clubes deportivos colombianos.
 
-ZenSports es la plataforma de gestión para clubes deportivos: controla jugadores, cobros, calendario, partidos, asistencia y más.
+REGLAS GENERALES:
+- Responde SIEMPRE en español
+- Sé amigable, cálido y conciso
+- Usa emojis con moderación
+- Nunca inventes datos — solo usa lo que retornan las herramientas
+- Si no tienes un dato, dilo honestamente
+- Precios: formato $150.000 (con puntos, sin decimales)
+- Fechas: formato legible "Sábado 15 de junio", no "2026-06-15"`;
 
-FLUJO DE ATENCIÓN:
-1. Si es la primera vez que escribe o dice "hola"/"menu"/"inicio" → preséntate y muestra el menú de opciones
-2. Si pregunta por pagos, asistencia, calendario o partidos → primero usa buscar_jugador con su número de celular para identificarlo, luego consulta lo que necesite
-3. Si pregunta qué es ZenSports o quiere registrar su club → usa info_zensports
-4. Si no se puede identificar → pídele su cédula o el número de celular con el que se registró en el club
+const SYSTEM_JUGADOR = `${SYSTEM_BASE}
 
-MENÚ DE BIENVENIDA (usar cuando corresponda):
+ROL: Estás atendiendo a un JUGADOR o PADRE DE FAMILIA registrado en un club.
+El usuario ya fue identificado — sus datos están en el CONTEXTO.
+
+MENÚ DE BIENVENIDA (usar cuando digan "hola", "menu", "inicio" o sea primera vez):
 ---
 👋 ¡Hola! Soy *Zen*, el asistente de ZenSports.
 
-¿En qué te puedo ayudar?
+¿En qué te puedo ayudar hoy?
 
-1️⃣ Ver mis pagos
-2️⃣ Ver calendario / entrenamientos
+1️⃣ Ver mis pagos y estado de cuenta
+2️⃣ Ver calendario de entrenamientos
 3️⃣ Ver próximos partidos
 4️⃣ Ver mi asistencia
-5️⃣ Información sobre ZenSports
+5️⃣ Hablar con el administrador del club
 
-Escribe el número de la opción o cuéntame en qué te puedo ayudar 😊
+Escribe el número o cuéntame directamente 😊
 ---
 
-REGLAS:
-- Responde SIEMPRE en español
-- Sé amigable, cálido y conciso — como un asistente de confianza del club
-- Usa emojis con moderación para dar calidez
-- Nunca inventes datos — usa solo lo que retornan las herramientas
-- Si no tienes acceso a un dato, dilo honestamente y sugiere contactar al administrador del club
-- Formatea los números en pesos colombianos: $150.000, no 150000
-- Cuando muestres fechas usa formato legible: "Sábado 15 de junio" no "2026-06-15"`;
+FLUJO:
+- Para pagos → usa consultar_pagos con club_id y cedula del contexto
+- Para calendario → usa consultar_calendario con club_slug del contexto
+- Para partidos → usa consultar_partidos con club_id del contexto
+- Para asistencia → usa consultar_asistencia con club_id y cedula del contexto
+- "Hablar con el admin" → da el número celular_admin del contexto`;
 
+const SYSTEM_ADMIN = `${SYSTEM_BASE}
+
+ROL: Estás atendiendo al ADMINISTRADOR del club. Sus datos de club están en el CONTEXTO.
+
+MENÚ DE ADMIN (usar cuando digan "hola", "menu" o sea primera vez):
+---
+👋 ¡Hola! Soy *Zen*, tu asistente de administración.
+
+¿Qué necesitas hoy?
+
+1️⃣ Ver pagos pendientes del club
+2️⃣ Ver jugadores morosos
+3️⃣ Enviar recordatorio de pago masivo
+4️⃣ Ver asistencia del día
+5️⃣ Ver próximos eventos del club
+
+Escribe el número o dime directamente 💼
+---
+
+FLUJO:
+- "pagos pendientes" / opción 1 → usa consultar_pagos_club
+- "morosos" / opción 2 → usa consultar_morosos
+- "recordatorio" / opción 3 → usa enviar_recordatorio_pago
+- "asistencia" / opción 4 → usa consultar_asistencia_hoy
+- "eventos" o "calendario" / opción 5 → usa consultar_calendario con club_slug del contexto`;
+
+const SYSTEM_VISITANTE = `${SYSTEM_BASE}
+
+ROL: Estás atendiendo a alguien que NO está registrado en ningún club de ZenSports.
+Puede ser un admin interesado en registrar su club, o un jugador que aún no ha sido ingresado.
+
+FLUJO:
+1. Salúdalo y pregunta si quiere información sobre ZenSports o si es jugador de un club
+2. Si quiere registrar su club → usa info_zensports y luego registrar_lead para recolectar sus datos
+3. Si dice que es jugador → pídele que pregunte a su admin que lo registre, o dile que verifique el número con el que fue inscrito`;
 
 const MAX_HISTORY = 10;
 
@@ -261,20 +481,65 @@ async function sendTwilio(to, text) {
   return data;
 }
 
-// ── Generar respuesta del agente (compartida entre Meta y Twilio) ─────────────
-async function generateReply(from, text) {
-  const session    = await db.getWaSession(from);
-  const history    = session?.messages || [];
-  const jugador    = session?.jugador  || null;
-
-  let system = SYSTEM;
-  if (jugador) {
-    system += `\n\nCONTEXTO: El usuario ya fue identificado. Sus datos son:\n${JSON.stringify(jugador)}`;
+// ── Identificar rol del usuario ──────────────────────────────────────────────
+async function identificarRol(celular, sessionData) {
+  // 1. Si ya lo teníamos en sesión, usar eso
+  if (sessionData?.rol && sessionData?.contexto) {
+    return { rol: sessionData.rol, contexto: sessionData.contexto };
   }
 
-  const messages   = [...history, { role: 'user', content: text }];
-  let reply        = null;
-  let nuevoJugador = jugador;
+  const numero = String(celular).replace(/\D/g, '').replace(/^57/, '');
+
+  // 2. ¿Es admin de algún club?
+  const club = await db.getClubByCelularAdmin(numero);
+  if (club) {
+    return {
+      rol: 'admin',
+      contexto: {
+        club_id:       club.id,
+        club_slug:     club.slug,
+        club_nombre:   club.config?.nombre || club.name,
+        celular_admin: club.celular_admin,
+        config:        club.config || {},
+      },
+    };
+  }
+
+  // 3. ¿Es jugador registrado?
+  const jugador = await db.getPlayerByCelularGlobal(numero);
+  if (jugador) {
+    return {
+      rol: 'jugador',
+      contexto: {
+        nombre:        `${jugador.nombre} ${jugador.apellidos}`.trim(),
+        cedula:        jugador.cedula,
+        club_id:       jugador.club_id,
+        club_slug:     jugador.clubs?.slug,
+        club_nombre:   jugador.clubs?.config?.nombre || jugador.clubs?.name,
+        celular_admin: jugador.clubs?.config?.celular_admin,
+        categoria:     jugador.categoria,
+        equipo:        jugador.equipo,
+      },
+    };
+  }
+
+  // 4. Visitante no registrado
+  return { rol: 'visitante', contexto: {} };
+}
+
+// ── Generar respuesta del agente (compartida entre todos los canales) ─────────
+async function generateReply(from, text) {
+  const session = await db.getWaSession(from);
+  const history = session?.messages || [];
+
+  // Identificar quién es
+  const { rol, contexto } = await identificarRol(from, session);
+
+  const systemMap = { admin: SYSTEM_ADMIN, jugador: SYSTEM_JUGADOR, visitante: SYSTEM_VISITANTE };
+  const system    = `${systemMap[rol]}\n\nCONTEXTO DEL USUARIO:\n${JSON.stringify({ rol, ...contexto })}`;
+
+  const messages = [...history, { role: 'user', content: text }];
+  let reply      = null;
 
   for (let i = 0; i < 5; i++) {
     const response = await anthropic.messages.create({
@@ -297,7 +562,6 @@ async function generateReply(from, text) {
       for (const block of response.content) {
         if (block.type !== 'tool_use') continue;
         const result = await runTool(block.name, block.input);
-        if (block.name === 'buscar_jugador' && result.encontrado) nuevoJugador = result;
         toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) });
       }
       messages.push({ role: 'user', content: toolResults });
@@ -309,7 +573,7 @@ async function generateReply(from, text) {
   const historialTexto = messages
     .filter(m => typeof m.content === 'string')
     .slice(-MAX_HISTORY);
-  await db.upsertWaSession(from, { jugador: nuevoJugador, messages: historialTexto });
+  await db.upsertWaSession(from, { rol, contexto, messages: historialTexto });
 
   return reply;
 }

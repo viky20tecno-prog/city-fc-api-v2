@@ -55,6 +55,22 @@ async function getPlayerByCelularGlobal(celular) {
 }
 
 /**
+ * Buscar club por celular del administrador (para identificar admins en el agente WA)
+ */
+async function getClubByCelularAdmin(celular) {
+  const normalized = String(celular).replace(/\D/g, '').replace(/^57/, '');
+  const { data, error } = await supabase
+    .from('clubs')
+    .select('id, slug, name, celular_admin, config')
+    .or(`celular_admin.eq.${normalized},celular_admin.eq.57${normalized},celular_admin.eq.+57${normalized}`)
+    .eq('is_active', true)
+    .limit(1)
+    .single();
+  if (error && error.code !== 'PGRST116') throw error;
+  return data || null;
+}
+
+/**
  * Buscar un jugador por cédula dentro de un club
  */
 async function getPlayerByCedula(club_id, cedula) {
@@ -842,6 +858,7 @@ async function upsertWaSession(phone, { jugador, messages }) {
 
 module.exports = {
   supabase,
+  supabase,
   getWaSession,
   upsertWaSession,
   getClubBySlug,
@@ -849,6 +866,7 @@ module.exports = {
   getPlayerByCedula,
   getPlayerByCelular,
   getPlayerByCelularGlobal,
+  getClubByCelularAdmin,
   updatePlayer,
   deletePlayer,
   getMensualidades,

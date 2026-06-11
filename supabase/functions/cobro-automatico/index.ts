@@ -3,9 +3,9 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const SUPABASE_URL              = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const TWILIO_ACCOUNT_SID        = Deno.env.get('TWILIO_ACCOUNT_SID')!;
-const TWILIO_AUTH_TOKEN         = Deno.env.get('TWILIO_AUTH_TOKEN')!;
-const TWILIO_WHATSAPP_FROM      = Deno.env.get('TWILIO_WHATSAPP_FROM') || 'whatsapp:+14155238886';
+const WAHA_URL                  = Deno.env.get('WAHA_URL') || '';
+const WAHA_API_KEY              = Deno.env.get('WAHA_API_KEY') || '';
+const WAHA_SESSION              = Deno.env.get('WAHA_SESSION') || 'default';
 
 const DEFAULT_PENALIDAD_MORA    = 10_000;
 const DEFAULT_VALOR_MENSUALIDAD = 65_000;
@@ -372,32 +372,22 @@ async function logEnvio(
   await supabase.from('wa_log_envios').insert({ club_id, cedula, tipo_mensaje, mes, anio });
 }
 
-async function enviarWA(celular: string, body: string, conQR = false, qrUrl = '') {
-  const sid   = TWILIO_ACCOUNT_SID;
-  const token = TWILIO_AUTH_TOKEN;
-  const from  = TWILIO_WHATSAPP_FROM;
-  if (!sid || !token) throw new Error('Twilio no configurado');
-
-  const to  = celular.startsWith('whatsapp:') ? celular : `whatsapp:+57${celular}`;
-  const url = `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`;
-
-  const params: Record<string, string> = { From: from, To: to, Body: body };
-  if (conQR && qrUrl) params['MediaUrl0'] = qrUrl;
-
-  const res = await fetch(url, {
+async function enviarWA(celular: string, body: string, _conQR = false, _qrUrl = '') {
+  if (!WAHA_URL) throw new Error('WAHA_URL no configurado');
+  const numero = String(celular).replace(/\D/g, '').replace(/^57/, '');
+  const chatId = `57${numero}@c.us`;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (WAHA_API_KEY) headers['X-Api-Key'] = WAHA_API_KEY;
+  const res = await fetch(`${WAHA_URL}/api/sendText`, {
     method: 'POST',
-    headers: {
-      Authorization: `Basic ${btoa(`${sid}:${token}`)}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: new URLSearchParams(params).toString(),
+    headers,
+    body: JSON.stringify({ chatId, text: body, session: WAHA_SESSION }),
   });
-
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`Twilio ${res.status}: ${err}`);
+    throw new Error(`WAHA ${res.status}: ${err}`);
   }
-  console.log('[cobro-automatico] WA enviado a', to);
+  console.log('[cobro-automatico] WA enviado a', chatId);
 }
 
 function nombreCompleto(j: { nombre?: string; apellidos?: string }) {
