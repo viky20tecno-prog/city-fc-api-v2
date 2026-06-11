@@ -769,11 +769,13 @@ async function resolverLid(lidId) {
 
 // ── Webhook WAHA (POST) ──────────────────────────────────────────────────────
 router.post('/waha', async (req, res) => {
+  // Responder 200 inmediatamente — evita que WAHA reintente el webhook
+  // mientras Claude API procesa (puede tardar 3-8 s y WAHA reintenta antes)
+  res.status(200).json({ status: 'ok' });
+
   try {
     const { event, payload } = req.body;
-    if (event !== 'message' || payload?.fromMe) {
-      return res.status(200).json({ status: 'ignored' });
-    }
+    if (event !== 'message' || payload?.fromMe) return;
 
     const msgId   = payload.id;
     const msgType = payload.type || 'chat';
@@ -781,9 +783,7 @@ router.post('/waha', async (req, res) => {
     const isText  = (msgType === 'chat' || msgType === 'text') && !!payload?.body;
 
     // Capa 1: in-memory dedup (misma instancia Vercel, sincrónico)
-    if (isDuplicate(msgId)) {
-      return res.status(200).json({ status: 'duplicate' });
-    }
+    if (isDuplicate(msgId)) return;
 
     const rawFrom = payload.from;
     let from      = rawFrom.replace('@c.us', '').replace('@s.whatsapp.net', '');
@@ -793,60 +793,56 @@ router.post('/waha', async (req, res) => {
       if (resolved) from = resolved;
     }
 
-    // ── Mensajes no-texto (imagen, audio, video, documento) ──────────────────
-    if (!isText) {
-      // Identificar al remitente para saber si es jugador (para reenviar al admin)
-      const { rol, contexto } = await identificarRol(from, null);
-      const mediaUrl  = payload?.media?.url || payload?.fileUrl || null;
-      const mediaCaption = payload?.caption || '';
-
-      if (rol === 'jugador' && contexto.celular_admin && mediaUrl) {
-        // Reenviar imagen/comprobante al admin del club
-        await reenviarMediaAlAdmin(contexto.celular_admin, contexto.nombre, mediaUrl, mediaCaption);
-        await sendWAHA(from, `✅ Tu imagen fue enviada al administrador de *${contexto.club_nombre}*. Te contactarán pronto.`);
-      } else {
-        await sendWAHA(from, 'Solo puedo procesar mensajes de texto por ahora. Escríbeme lo que necesitas 😊');
-      }
-      return res.status(200).json({ status: 'ok' });
-    }
-
-    const text = payload.body;
-
-    // Capa 2: Supabase dedup atómico
+    // Capa 2: Supabase dedup — compara last_msg_id de la sesión existente
     if (msgId) {
       try {
-        const { data: updated } = await db.supabase
+        const { data: sesion } = await db.supabase
           .from('wa_sessions')
-          .update({ last_msg_id: msgId, updated_at: new Date().toISOString() })
+          .select('last_msg_id')
           .eq('phone', from)
-          .neq('last_msg_id', msgId)
-          .select('phone');
+          .maybeSingle();
 
-        if (updated !== null && updated.length === 0) {
-          const { data: existing } = await db.supabase
-            .from('wa_sessions')
-            .select('last_msg_id')
-            .eq('phone', from)
-            .single();
-          if (existing?.last_msg_id === msgId) {
-            return res.status(200).json({ status: 'duplicate' });
-          }
+        if (sesion?.last_msg_id === msgId) {
+          console.log(`[wa-agent] dedup Supabase: ya procesado ${msgId}`);
+          return;
+        }
+
+        // Actualizar last_msg_id de forma atómica (solo si la fila existe)
+        if (sesion) {
           await db.supabase
             .from('wa_sessions')
-            .upsert({ phone: from, last_msg_id: msgId, updated_at: new Date().toISOString() }, { onConflict: 'phone' });
+            .update({ last_msg_id: msgId, updated_at: new Date().toISOString() })
+            .eq('phone', from)
+            .neq('last_msg_id', msgId);
         }
+        // Si no hay fila aún (usuario nuevo), se crea al final de generateReply
       } catch (dedupErr) {
         console.warn('[wa-agent] dedup error (ignorado):', dedupErr.message);
       }
     }
 
+    // ── Mensajes no-texto (imagen, audio, video, documento) ──────────────────
+    if (!isText) {
+      const { rol, contexto } = await identificarRol(from, null);
+      const mediaUrl     = payload?.media?.url || payload?.fileUrl || null;
+      const mediaCaption = payload?.caption || '';
+
+      if (rol === 'jugador' && contexto.celular_admin && mediaUrl) {
+        await reenviarMediaAlAdmin(contexto.celular_admin, contexto.nombre, mediaUrl, mediaCaption);
+        await sendWAHA(from, `✅ Tu imagen fue enviada al administrador de *${contexto.club_nombre}*. Te contactarán pronto.`);
+      } else {
+        await sendWAHA(from, 'Solo puedo procesar mensajes de texto por ahora. Escríbeme lo que necesitas 😊');
+      }
+      return;
+    }
+
+    const text = payload.body;
     console.log(`[wa-agent] WAHA mensaje de ${from}: ${text}`);
 
     let reply;
     try {
       reply = await generateReply(from, text);
     } catch (claudeErr) {
-      // Fallback cuando Claude API falla (timeout, rate limit, outage)
       console.error('[wa-agent] Claude error:', claudeErr.message);
       reply = 'En este momento tengo problemas para procesar tu mensaje. Por favor intenta en unos minutos 🙏';
     }
@@ -855,9 +851,7 @@ router.post('/waha', async (req, res) => {
     console.log(`[wa-agent] WAHA procesado OK para ${from}`);
   } catch (err) {
     console.error('[wa-agent] WAHA error:', err.message);
-    // No respondemos al usuario en error inesperado — evitar bucles
   }
-  res.status(200).json({ status: 'ok' });
 });
 
 // ── Webhook Twilio sandbox (POST) ────────────────────────────────────────────
