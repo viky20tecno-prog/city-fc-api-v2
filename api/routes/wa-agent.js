@@ -649,7 +649,9 @@ async function sendWAHA(to, text) {
   const session = process.env.WAHA_SESSION || 'default';
   const apiKey  = process.env.WAHA_API_KEY;
   if (!wahaUrl) { console.error('[wa-agent] WAHA_URL no configurado'); return; }
-  const chatId = to.includes('@') ? to : `${to}@c.us`;
+  // Asegurar prefijo de país Colombia (+57) cuando el número no tiene código
+  const numOnly = to.replace(/\D/g, '');
+  const chatId  = to.includes('@') ? to : `${numOnly.startsWith('57') ? numOnly : '57' + numOnly}@c.us`;
   const headers = { 'Content-Type': 'application/json' };
   if (apiKey) headers['X-Api-Key'] = apiKey;
   const res = await fetch(`${wahaUrl}/api/sendText`, {
