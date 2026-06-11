@@ -42,11 +42,13 @@ async function getPlayerByCelular(club_id, celular) {
  * Buscar jugador por celular en TODOS los clubs (para el agente WA)
  */
 async function getPlayerByCelularGlobal(celular) {
-  const normalized = String(celular).replace(/\D/g, '').replace(/^57/, '');
+  const digits = String(celular).replace(/\D/g, '');
+  // Buscar por número completo (con código de país) o solo la parte local (últimos 10 dígitos)
+  const local = digits.slice(-10);
   const { data, error } = await supabase
     .from('players')
     .select('*, clubs(slug, name, config)')
-    .or(`celular.eq.${normalized},celular.eq.57${normalized},celular.eq.+57${normalized}`)
+    .or(`celular.eq.${digits},celular.eq.+${digits},celular.ilike.%${local}`)
     .eq('activo', true)
     .limit(1)
     .single();
@@ -58,11 +60,13 @@ async function getPlayerByCelularGlobal(celular) {
  * Buscar club por celular del administrador (para identificar admins en el agente WA)
  */
 async function getClubByCelularAdmin(celular) {
-  const normalized = String(celular).replace(/\D/g, '').replace(/^57/, '');
+  const digits = String(celular).replace(/\D/g, '');
+  // Buscar por número completo (con código de país) o solo la parte local (últimos 10 dígitos)
+  const local = digits.slice(-10);
   const { data, error } = await supabase
     .from('clubs')
     .select('id, slug, name, celular_admin, config')
-    .or(`celular_admin.eq.${normalized},celular_admin.eq.57${normalized},celular_admin.eq.+57${normalized}`)
+    .or(`celular_admin.eq.${digits},celular_admin.eq.+${digits},celular_admin.ilike.%${local}`)
     .eq('is_active', true)
     .limit(1)
     .single();

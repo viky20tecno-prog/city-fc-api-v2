@@ -677,7 +677,7 @@ async function resolverLid(lidId) {
     const res  = await fetch(`${wahaUrl}/api/contacts?contactId=${encodeURIComponent(lidId)}&session=${session}`, { headers });
     if (!res.ok) return null;
     const data = await res.json();
-    if (data?.number) return data.number.replace(/^57/, ''); // retorna sin prefijo 57
+    if (data?.number) return data.number; // número completo con código de país, ej: 573023903192
   } catch { /* ignorar */ }
   return null;
 }
