@@ -84,6 +84,7 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
         posicion:  jugador.posicion || '',
         numero:    jugador.numero || '',
         foto_url:  jugador.foto_url || null,
+        activo:    jugador.activo,
       },
       mensualidades:    resumen,
       saldo_pendiente,
