@@ -43,12 +43,12 @@ async function getPlayerByCelular(club_id, celular) {
  */
 async function getPlayerByCelularGlobal(celular) {
   const digits = String(celular).replace(/\D/g, '');
-  // Buscar por número completo (con código de país) o solo la parte local (últimos 10 dígitos)
-  const local = digits.slice(-10);
+  const local  = digits.slice(-10); // últimos 10 dígitos (número local sin código de país)
+  // Intentar todas las variantes: completo, con/sin +, sin código de país, con prefijo Colombia
   const { data, error } = await supabase
     .from('players')
     .select('*, clubs(slug, name, config)')
-    .or(`celular.eq.${digits},celular.eq.+${digits},celular.ilike.%${local}`)
+    .or(`celular.eq.${digits},celular.eq.+${digits},celular.eq.${local},celular.eq.57${local},celular.eq.+57${local}`)
     .eq('activo', true)
     .limit(1)
     .single();
@@ -61,12 +61,11 @@ async function getPlayerByCelularGlobal(celular) {
  */
 async function getClubByCelularAdmin(celular) {
   const digits = String(celular).replace(/\D/g, '');
-  // Buscar por número completo (con código de país) o solo la parte local (últimos 10 dígitos)
-  const local = digits.slice(-10);
+  const local  = digits.slice(-10);
   const { data, error } = await supabase
     .from('clubs')
     .select('id, slug, name, celular_admin, config')
-    .or(`celular_admin.eq.${digits},celular_admin.eq.+${digits},celular_admin.ilike.%${local}`)
+    .or(`celular_admin.eq.${digits},celular_admin.eq.+${digits},celular_admin.eq.${local},celular_admin.eq.57${local},celular_admin.eq.+57${local}`)
     .eq('is_active', true)
     .limit(1)
     .single();
