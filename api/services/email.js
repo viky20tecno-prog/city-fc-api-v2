@@ -340,18 +340,21 @@ function sendPlanActivated({ nombre_club, nombre_admin, email, plan, precio }) {
 async function sendAdminPasswordReset(email, resetUrl) {
   const subject = 'Restablecer contraseña — ZenSports Admin';
   const html = shell({
-    preheader: 'Enlace para restablecer tu contraseña del panel admin',
+    preheader: 'Enlace para restablecer tu contraseña del panel admin de ZenSports',
     body: `
-      <h2 style="color:#fff;margin-top:0;">Restablecer contraseña</h2>
-      <p>Recibimos una solicitud para restablecer la contraseña de tu cuenta en el panel de administración de ZenSports.</p>
-      <p>Haz clic en el botón para crear una nueva contraseña. El enlace expira en <strong>30 minutos</strong>.</p>
-      <div style="text-align:center;margin:28px 0;">
-        <a href="${resetUrl}" style="display:inline-block;padding:14px 28px;background:#4f46e5;color:#fff;border-radius:10px;text-decoration:none;font-weight:600;font-size:15px;">
-          Restablecer contraseña
-        </a>
-      </div>
-      <p style="font-size:12px;color:#6b7280;">Si no solicitaste este cambio, ignora este correo. Tu contraseña no cambiará.</p>
-    `,
+    ${mainCard({
+      badge: 'Panel de administración',
+      title: 'Restablecer tu contraseña',
+      body: `Recibimos una solicitud para restablecer la contraseña de tu cuenta. Haz clic en el botón para crear una nueva contraseña.<br><br>El enlace expira en <strong style="color:rgba(255,255,255,0.85);">30 minutos</strong>.`,
+      ctaText: 'Restablecer contraseña',
+      ctaUrl: resetUrl,
+    })}
+    ${spacer(12)}
+    <tr>
+      <td style="text-align:center;">
+        <p style="margin:0;font-size:12px;color:rgba(255,255,255,0.25);">Si no solicitaste este cambio, ignora este correo. Tu contraseña no cambiará.</p>
+      </td>
+    </tr>`,
   });
   return sendEmail({ to: email, subject, html });
 }
