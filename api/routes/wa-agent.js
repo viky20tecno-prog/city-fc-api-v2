@@ -193,7 +193,9 @@ async function runTool(name, input) {
       const total_deuda = pendientes.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
       const { data: clubData } = await db.supabase.from('clubs').select('config').eq('id', input.club_id).single();
       const qr_pago_url = clubData?.config?.qr_pago_url || null;
-      return { anio, al_dia: al_dia.length, pendientes: pendientes.length, total_deuda, qr_pago_url,
+      const llave_pago  = clubData?.config?.llave_pago  || null;
+      return { anio, al_dia: al_dia.length, pendientes: pendientes.length, total_deuda,
+               qr_pago_url, llave_pago,
                detalle: del_anio.map(m => ({ mes: m.mes, estado: m.estado, saldo: m.saldo_pendiente })) };
     }
 
@@ -433,7 +435,13 @@ FLUJO:
 - Para calendario → usa consultar_calendario con club_slug del contexto
 - Para partidos → usa consultar_partidos con club_id del contexto
 - Para asistencia → usa consultar_asistencia con club_id y cedula del contexto
-- "Hablar con el admin" → da el número celular_admin del contexto`;
+- "Hablar con el admin" → da el número celular_admin del contexto
+
+MEDIOS DE PAGO (cuando muestres el resultado de consultar_pagos):
+- Si hay qr_pago_url Y llave_pago → muestra AMBOS siempre, salvo que el jugador pida solo uno
+- qr_pago_url → preséntalo como "📷 QR de pago: <url>"
+- llave_pago → preséntalo como "🔑 Llave / cuenta: <valor>" (puede ser Nequi, Daviplata, cuenta bancaria, etc.)
+- Si solo existe uno de los dos, muestra solo ese`;
 
 const SYSTEM_ADMIN = `${SYSTEM_BASE}
 
