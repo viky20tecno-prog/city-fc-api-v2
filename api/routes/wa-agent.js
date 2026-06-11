@@ -710,11 +710,7 @@ async function sendWAHA(to, text) {
   const session = process.env.WAHA_SESSION || 'default';
   if (!wahaUrl) { console.error('[wa-agent] WAHA_URL no configurado'); return; }
   const chatId  = wahaChatId(to);
-  const apiKey  = process.env.WAHA_API_KEY;
-  const headers = { 'Content-Type': 'application/json' };
-  if (apiKey) headers['X-Api-Key'] = apiKey;
-  const headers = { 'Content-Type': 'application/json' };
-  if (apiKey) headers['X-Api-Key'] = apiKey;
+  const headers = wahaHeaders();
   const res = await fetch(`${wahaUrl}/api/sendText`, {
     method: 'POST',
     headers,
