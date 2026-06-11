@@ -79,6 +79,18 @@ const TOOLS = [
     },
   },
   {
+    name: 'consultar_asistencia',
+    description: 'Consulta el historial de asistencia del jugador a entrenamientos y partidos en el club actual.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        club_id: { type: 'string', description: 'UUID del club' },
+        cedula:  { type: 'string', description: 'Cédula del jugador' },
+      },
+      required: ['club_id', 'cedula'],
+    },
+  },
+  {
     name: 'info_zensports',
     description: 'Retorna información sobre ZenSports: qué es, planes, precios y cómo registrarse. Usar cuando alguien pregunte por el producto o quiera registrar su club.',
     input_schema: { type: 'object', properties: {} },
@@ -149,6 +161,26 @@ async function runTool(name, input) {
       })) };
     }
 
+    if (name === 'consultar_asistencia') {
+      const registros = await db.getAsistenciaJugador(input.club_id, input.cedula);
+      const asistio    = registros.filter(r => r.estado === 'PRESENTE').length;
+      const ausente    = registros.filter(r => r.estado === 'AUSENTE').length;
+      const total      = registros.length;
+      const porcentaje = total > 0 ? Math.round((asistio / total) * 100) : 0;
+      return {
+        total_eventos: total,
+        asistencias:   asistio,
+        ausencias:     ausente,
+        porcentaje_asistencia: porcentaje,
+        ultimos: registros.slice(0, 8).map(r => ({
+          tipo:   r.calendario?.tipo,
+          titulo: r.calendario?.titulo,
+          fecha:  r.calendario?.fecha_inicio?.split('T')[0],
+          estado: r.estado,
+        })),
+      };
+    }
+
     if (name === 'info_zensports') {
       return {
         descripcion: 'ZenSports es el sistema operativo para clubes deportivos. Gestión de jugadores, cobros automáticos, calendario, arbitraje y más.',
@@ -171,24 +203,40 @@ async function runTool(name, input) {
 }
 
 // ── Sistema prompt ───────────────────────────────────────────────────────────
-const SYSTEM = `Eres Zen, el asistente virtual de Zenpra. Ayudas a jugadores, padres de familia y clubes deportivos.
+const SYSTEM = `Eres Zen ⚽, el asistente virtual de ZenSports. Ayudas a jugadores, padres de familia y administradores de clubes deportivos colombianos.
 
-Productos de Zenpra:
-- ZenSports: plataforma SaaS para gestión de clubes deportivos
-- ZCup: plataforma de torneos deportivos (próximamente)
+ZenSports es la plataforma de gestión para clubes deportivos: controla jugadores, cobros, calendario, partidos, asistencia y más.
 
-Cuando alguien te escriba:
-1. Si pregunta por sus pagos, calendario o partidos → usa buscar_jugador con su número de celular, luego consulta lo que necesite
-2. Si pregunta por ZenSports o quiere registrar su club → usa info_zensports
-3. Si no se puede identificar → pídele su cédula o número registrado en el club
+FLUJO DE ATENCIÓN:
+1. Si es la primera vez que escribe o dice "hola"/"menu"/"inicio" → preséntate y muestra el menú de opciones
+2. Si pregunta por pagos, asistencia, calendario o partidos → primero usa buscar_jugador con su número de celular para identificarlo, luego consulta lo que necesite
+3. Si pregunta qué es ZenSports o quiere registrar su club → usa info_zensports
+4. Si no se puede identificar → pídele su cédula o el número de celular con el que se registró en el club
 
-Reglas:
+MENÚ DE BIENVENIDA (usar cuando corresponda):
+---
+👋 ¡Hola! Soy *Zen*, el asistente de ZenSports.
+
+¿En qué te puedo ayudar?
+
+1️⃣ Ver mis pagos
+2️⃣ Ver calendario / entrenamientos
+3️⃣ Ver próximos partidos
+4️⃣ Ver mi asistencia
+5️⃣ Información sobre ZenSports
+
+Escribe el número de la opción o cuéntame en qué te puedo ayudar 😊
+---
+
+REGLAS:
 - Responde SIEMPRE en español
-- Sé amigable, conciso y claro
-- Usa emojis con moderación
-- No inventes información — solo usa lo que retornan las herramientas
-- Si no tienes acceso a un dato, dilo honestamente
-- No respondas temas fuera del ámbito deportivo y de gestión de clubes`;
+- Sé amigable, cálido y conciso — como un asistente de confianza del club
+- Usa emojis con moderación para dar calidez
+- Nunca inventes datos — usa solo lo que retornan las herramientas
+- Si no tienes acceso a un dato, dilo honestamente y sugiere contactar al administrador del club
+- Formatea los números en pesos colombianos: $150.000, no 150000
+- Cuando muestres fechas usa formato legible: "Sábado 15 de junio" no "2026-06-15"`;
+
 
 const MAX_HISTORY = 10;
 

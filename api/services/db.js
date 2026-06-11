@@ -797,6 +797,18 @@ async function getAsistencia(club_id, evento_id) {
   }));
 }
 
+async function getAsistenciaJugador(club_id, cedula) {
+  const { data, error } = await supabase
+    .from('asistencia')
+    .select('estado, evento_id, calendario(tipo, titulo, fecha_inicio, equipo)')
+    .eq('club_id', club_id)
+    .eq('cedula', cedula)
+    .order('calendario(fecha_inicio)', { ascending: false })
+    .limit(30);
+  if (error) throw error;
+  return data || [];
+}
+
 async function upsertAsistencia({ club_id, evento_id, cedula, estado, nota, registrado_por }) {
   const { data, error } = await supabase
     .from('asistencia')
@@ -893,6 +905,7 @@ module.exports = {
   updateCalendarioEvent,
   deleteCalendarioEvent,
   getAsistencia,
+  getAsistenciaJugador,
   upsertAsistencia,
   getAllActiveClubs,
   marcarEmailEnviado,
