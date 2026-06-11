@@ -665,25 +665,41 @@ async function sendWAHA(to, text) {
 
 // ── Webhook WAHA (POST) ──────────────────────────────────────────────────────
 router.post('/waha', async (req, res) => {
+  // Responder de inmediato para que WAHA no reintente
+  res.status(200).json({ status: 'ok' });
+
   try {
     const { event, payload } = req.body;
-    if (event !== 'message' || !payload?.body || payload?.fromMe) {
-      return res.status(200).json({ status: 'ignored' });
-    }
-    if (isDuplicate(payload.id)) {
-      return res.status(200).json({ status: 'duplicate' });
-    }
-    const from = payload.from.replace('@c.us', '').replace('@s.whatsapp.net', '');
-    const text = payload.body;
-    console.log(`[wa-agent] WAHA mensaje de ${from}: ${text}`);
+    if (event !== 'message' || !payload?.body || payload?.fromMe) return;
 
+    const msgId = payload.id;
+    const from  = payload.from.replace('@c.us', '').replace('@s.whatsapp.net', '');
+    const text  = payload.body;
+
+    // Deduplicar en Supabase — persiste entre instancias serverless
+    if (msgId) {
+      const { data: existing } = await db.supabase
+        .from('wa_sessions')
+        .select('last_msg_id')
+        .eq('phone', from)
+        .single();
+      if (existing?.last_msg_id === msgId) {
+        console.log(`[wa-agent] WAHA duplicado ignorado: ${msgId}`);
+        return;
+      }
+      // Marcar como procesado antes de responder
+      await db.supabase
+        .from('wa_sessions')
+        .upsert({ phone: from, last_msg_id: msgId, updated_at: new Date().toISOString() }, { onConflict: 'phone' });
+    }
+
+    console.log(`[wa-agent] WAHA mensaje de ${from}: ${text}`);
     const reply = await generateReply(from, text);
     if (reply) await sendWAHA(from, reply);
     console.log(`[wa-agent] WAHA procesado OK para ${from}`);
   } catch (err) {
     console.error('[wa-agent] WAHA error:', err.message);
   }
-  res.status(200).json({ status: 'ok' });
 });
 
 // ── Webhook Twilio sandbox (POST) ────────────────────────────────────────────
