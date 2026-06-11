@@ -166,9 +166,16 @@ const TOOLS_BASE = [
   },
 ];
 
+// obtener_carnet: SOLO jugadores — genera el link del carnet digital
+const TOOL_OBTENER_CARNET = {
+  name: 'obtener_carnet',
+  description: 'Genera el link del carnet digital del jugador autenticado. Retorna la URL de verificación y la foto si existe.',
+  input_schema: { type: 'object', properties: {} },
+};
+
 // Herramientas por rol — jugadores y visitantes NO pueden buscar datos de otras personas
 const TOOLS_ADMIN     = [TOOL_BUSCAR_JUGADOR, ...TOOLS_BASE];
-const TOOLS_JUGADOR   = TOOLS_BASE.filter(t => !['registrar_lead', 'consultar_pagos_club', 'consultar_morosos', 'enviar_recordatorio_pago', 'consultar_asistencia_hoy'].includes(t.name));
+const TOOLS_JUGADOR   = [TOOL_OBTENER_CARNET, ...TOOLS_BASE.filter(t => !['registrar_lead', 'consultar_pagos_club', 'consultar_morosos', 'enviar_recordatorio_pago', 'consultar_asistencia_hoy'].includes(t.name))];
 const TOOLS_VISITANTE = TOOLS_BASE.filter(t => ['registrar_lead', 'info_zensports'].includes(t.name));
 
 // ── Ejecutar herramienta ─────────────────────────────────────────────────────
@@ -408,6 +415,14 @@ async function runTool(name, input, contexto = {}) {
       };
     }
 
+    if (name === 'obtener_carnet') {
+      const { cedula, club_slug, club_nombre, nombre, foto_url } = contexto;
+      if (!cedula || !club_slug) return { error: 'No se encontraron tus datos completos para generar el carnet.' };
+      const url = `https://zensports.zenpra.ai/verificar/${club_slug}/${cedula}`;
+      return { url, foto_url: foto_url || null, nombre, club_nombre,
+               instruccion: 'Envía la URL al jugador y dile que puede abrirla en su celular para ver y guardar su carnet digital.' };
+    }
+
     return { error: 'Herramienta no encontrada' };
   } catch (err) {
     console.error(`[wa-agent] tool ${name} error:`, err.message);
@@ -447,7 +462,8 @@ MENÚ DE BIENVENIDA (usar cuando digan "hola", "menu", "inicio" o sea primera ve
 2️⃣ Ver calendario de entrenamientos
 3️⃣ Ver próximos partidos
 4️⃣ Ver mi asistencia
-5️⃣ Hablar con el administrador del club
+5️⃣ Mi carnet digital
+6️⃣ Hablar con el administrador del club
 
 Escribe el número o cuéntame directamente 😊
 ---
@@ -457,7 +473,8 @@ FLUJO:
 - Para calendario → usa consultar_calendario con club_slug del contexto
 - Para partidos → usa consultar_partidos con club_id del contexto
 - Para asistencia → usa consultar_asistencia con club_id y cedula del contexto
-- "Hablar con el admin" → da el número celular_admin del contexto
+- Para carnet / opción 5 → usa obtener_carnet, luego envía: "🪪 *Tu carnet digital:*\n{url}\n\nÁbrelo desde tu celular para verlo y guardarlo como captura de pantalla."
+- "Hablar con el admin" / opción 6 → da el número celular_admin del contexto
 
 MEDIOS DE PAGO (cuando muestres el resultado de consultar_pagos):
 - Muestra TODOS los medios configurados, salvo que el jugador pida explícitamente solo uno
@@ -564,6 +581,7 @@ async function identificarRol(celular, sessionData) {
         celular_admin: jugador.clubs?.config?.celular_admin,
         categoria:     jugador.categoria,
         equipo:        jugador.equipo,
+        foto_url:      jugador.foto_url || null,
         config:        jugador.clubs?.config || {},
       },
     };
@@ -676,14 +694,25 @@ router.post('/webhook', async (req, res) => {
 });
 
 // ── Enviar mensaje vía WAHA ──────────────────────────────────────────────────
+function wahaHeaders() {
+  const apiKey = process.env.WAHA_API_KEY;
+  const h = { 'Content-Type': 'application/json' };
+  if (apiKey) h['X-Api-Key'] = apiKey;
+  return h;
+}
+function wahaChatId(to) {
+  const numOnly = to.replace(/\D/g, '');
+  return to.includes('@') ? to : `${numOnly.startsWith('57') ? numOnly : '57' + numOnly}@c.us`;
+}
+
 async function sendWAHA(to, text) {
   const wahaUrl = process.env.WAHA_URL;
   const session = process.env.WAHA_SESSION || 'default';
-  const apiKey  = process.env.WAHA_API_KEY;
   if (!wahaUrl) { console.error('[wa-agent] WAHA_URL no configurado'); return; }
-  // Asegurar prefijo de país Colombia (+57) cuando el número no tiene código
-  const numOnly = to.replace(/\D/g, '');
-  const chatId  = to.includes('@') ? to : `${numOnly.startsWith('57') ? numOnly : '57' + numOnly}@c.us`;
+  const chatId  = wahaChatId(to);
+  const apiKey  = process.env.WAHA_API_KEY;
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['X-Api-Key'] = apiKey;
   const headers = { 'Content-Type': 'application/json' };
   if (apiKey) headers['X-Api-Key'] = apiKey;
   const res = await fetch(`${wahaUrl}/api/sendText`, {
@@ -695,6 +724,34 @@ async function sendWAHA(to, text) {
   if (!res.ok) console.error('[wa-agent] sendWAHA error:', res.status, JSON.stringify(data));
   else console.log('[wa-agent] sendWAHA ok:', data.id || 'sent');
   return data;
+}
+
+// ── Enviar imagen/archivo vía WAHA ───────────────────────────────────────────
+async function sendWAHAImage(to, imageUrl, caption = '') {
+  const wahaUrl = process.env.WAHA_URL;
+  const session = process.env.WAHA_SESSION || 'default';
+  if (!wahaUrl || !imageUrl) return;
+  try {
+    const chatId = wahaChatId(to);
+    const res = await fetch(`${wahaUrl}/api/sendImage`, {
+      method: 'POST',
+      headers: wahaHeaders(),
+      body: JSON.stringify({ chatId, file: { url: imageUrl }, caption, session }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      console.error('[wa-agent] sendWAHAImage error:', res.status, err);
+    } else console.log('[wa-agent] sendWAHAImage ok');
+  } catch (e) {
+    console.error('[wa-agent] sendWAHAImage exception:', e.message);
+  }
+}
+
+// ── Reenviar media (foto/comprobante) al admin del club ──────────────────────
+async function reenviarMediaAlAdmin(adminCelular, playerNombre, mediaUrl, mediaCaption) {
+  if (!adminCelular || !mediaUrl) return;
+  const msg = `📎 *${playerNombre || 'Un jugador'}* envió una imagen:\n${mediaCaption || ''}\n${mediaUrl}`;
+  await sendWAHA(adminCelular, msg);
 }
 
 // ── Resolver @lid al número real de teléfono via WAHA ────────────────────────
@@ -718,13 +775,14 @@ async function resolverLid(lidId) {
 router.post('/waha', async (req, res) => {
   try {
     const { event, payload } = req.body;
-    if (event !== 'message' || !payload?.body || payload?.fromMe) {
+    if (event !== 'message' || payload?.fromMe) {
       return res.status(200).json({ status: 'ignored' });
     }
 
     const msgId   = payload.id;
+    const msgType = payload.type || 'text'; // text, image, audio, video, document, etc.
 
-    // Capa 1: in-memory (misma instancia Vercel, sincrónico — sin I/O)
+    // Capa 1: in-memory dedup (misma instancia Vercel, sincrónico)
     if (isDuplicate(msgId)) {
       return res.status(200).json({ status: 'duplicate' });
     }
@@ -732,18 +790,33 @@ router.post('/waha', async (req, res) => {
     const rawFrom = payload.from;
     let from      = rawFrom.replace('@c.us', '').replace('@s.whatsapp.net', '');
 
-    // Si WAHA envía en formato @lid, resolver al número real
     if (rawFrom.includes('@lid') || rawFrom.includes('@s.whatsapp.net')) {
       const resolved = await resolverLid(rawFrom);
       if (resolved) from = resolved;
     }
 
+    // ── Mensajes no-texto (imagen, audio, video, documento) ──────────────────
+    if (msgType !== 'text' || !payload?.body) {
+      // Identificar al remitente para saber si es jugador (para reenviar al admin)
+      const { rol, contexto } = await identificarRol(from, null);
+      const mediaUrl  = payload?.media?.url || payload?.fileUrl || null;
+      const mediaCaption = payload?.caption || '';
+
+      if (rol === 'jugador' && contexto.celular_admin && mediaUrl) {
+        // Reenviar imagen/comprobante al admin del club
+        await reenviarMediaAlAdmin(contexto.celular_admin, contexto.nombre, mediaUrl, mediaCaption);
+        await sendWAHA(from, `✅ Tu imagen fue enviada al administrador de *${contexto.club_nombre}*. Te contactarán pronto.`);
+      } else {
+        await sendWAHA(from, 'Solo puedo procesar mensajes de texto por ahora. Escríbeme lo que necesitas 😊');
+      }
+      return res.status(200).json({ status: 'ok' });
+    }
+
     const text = payload.body;
 
-    // Capa 2: Supabase atómico — INSERT, si falla por conflicto en msg_id es duplicado
+    // Capa 2: Supabase dedup atómico
     if (msgId) {
       try {
-        // Intentar update solo si last_msg_id es diferente
         const { data: updated } = await db.supabase
           .from('wa_sessions')
           .update({ last_msg_id: msgId, updated_at: new Date().toISOString() })
@@ -752,17 +825,14 @@ router.post('/waha', async (req, res) => {
           .select('phone');
 
         if (updated !== null && updated.length === 0) {
-          // El update no aplicó — verificar si ya existe con este msgId (duplicado cross-instancia)
           const { data: existing } = await db.supabase
             .from('wa_sessions')
             .select('last_msg_id')
             .eq('phone', from)
             .single();
           if (existing?.last_msg_id === msgId) {
-            console.log(`[wa-agent] WAHA duplicado cross-instancia ignorado: ${msgId}`);
             return res.status(200).json({ status: 'duplicate' });
           }
-          // No existe sesión aún → upsert inicial
           await db.supabase
             .from('wa_sessions')
             .upsert({ phone: from, last_msg_id: msgId, updated_at: new Date().toISOString() }, { onConflict: 'phone' });
@@ -773,11 +843,21 @@ router.post('/waha', async (req, res) => {
     }
 
     console.log(`[wa-agent] WAHA mensaje de ${from}: ${text}`);
-    const reply = await generateReply(from, text);
+
+    let reply;
+    try {
+      reply = await generateReply(from, text);
+    } catch (claudeErr) {
+      // Fallback cuando Claude API falla (timeout, rate limit, outage)
+      console.error('[wa-agent] Claude error:', claudeErr.message);
+      reply = 'En este momento tengo problemas para procesar tu mensaje. Por favor intenta en unos minutos 🙏';
+    }
+
     if (reply) await sendWAHA(from, reply);
     console.log(`[wa-agent] WAHA procesado OK para ${from}`);
   } catch (err) {
     console.error('[wa-agent] WAHA error:', err.message);
+    // No respondemos al usuario en error inesperado — evitar bucles
   }
   res.status(200).json({ status: 'ok' });
 });
