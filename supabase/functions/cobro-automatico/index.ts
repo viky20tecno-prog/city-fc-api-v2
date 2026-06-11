@@ -71,6 +71,14 @@ async function procesarClub(
   const nombreClub    = String(club.config?.nombre            ?? club.slug);
   const stats         = { mensajes: 0, mora_aplicada: 0, mensualidades_creadas: 0 };
 
+  const diaCobro      = Math.min(25, Math.max(1, Number(club.config?.dia_cobro      ?? 1)));
+  const diasGracia    = Math.max(1,              Number(club.config?.dias_gracia_mora ?? 7));
+  const diaPreventivo = diaCobro > 4 ? diaCobro - 4 : 27;
+  const diaRecord     = diaCobro + 3;
+  const diaVenc       = diaCobro + diasGracia - 1;
+  const diaMora       = diaCobro + diasGracia;
+  const diaReenganche = diaCobro + diasGracia + 1;
+
   // Jugadores activos con celular (test_cedula restringe a uno solo en pruebas)
   let query = supabase
     .from('players')
@@ -83,10 +91,10 @@ async function procesarClub(
 
   if (!jugadores?.length) return stats;
 
-  // ── DÍA 27 — Preventivo (para el mes SIGUIENTE) ──────────────────────────
-  if (dia === 27) {
-    const mesDest  = mes === 12 ? 1  : mes + 1;
-    const anioDest = mes === 12 ? anio + 1 : anio;
+  // ── DÍA (diaCobro - 4 ó 27) — Preventivo (para el mes SIGUIENTE) ─────────
+  if (dia === diaPreventivo) {
+    const mesDest  = (diaPreventivo >= diaCobro || diaCobro <= 4) ? (mes === 12 ? 1 : mes + 1) : mes;
+    const anioDest = mesDest === 1 && mes === 12 ? anio + 1 : anio;
     const nombreM  = mesTexto(mesDest);
 
     for (const j of jugadores) {
@@ -94,7 +102,7 @@ async function procesarClub(
       const nombre = nombreCompleto(j);
       await enviarWA(j.celular,
         `⚽ *${nombreClub} te avisa con tiempo*\n\n` +
-        `Hola ${nombre}, tu cuota de *${nombreM} ${anioDest}* se activará pronto.\n\n` +
+        `Hola ${nombre}, tu cuota de *${nombreM} ${anioDest}* se activará el día ${diaCobro}.\n\n` +
         `💰 Valor: *$${valorMensual.toLocaleString('es-CO')}*\n\n` +
         `⏳ Organízate desde ya y evita recargos innecesarios.\n\n` +
         `En ${nombreClub} jugamos en equipo… y estar al día es parte del juego 💙⚽`,
@@ -105,8 +113,8 @@ async function procesarClub(
     }
   }
 
-  // ── DÍA 1 — Cobro activo: generar mensualidades + avisar ─────────────────
-  if (dia === 1) {
+  // ── DÍA diaCobro — Cobro activo: generar mensualidades + avisar ──────────
+  if (dia === diaCobro) {
     const nombreM = mesTexto(mes);
 
     for (const j of jugadores) {
@@ -144,7 +152,6 @@ async function procesarClub(
 
       if (await yaEnviado(supabase, club.id, j.cedula, 'activacion', mes, anio)) continue;
       const nombre = nombreCompleto(j);
-      const diasGracia = Number(club.config?.dias_gracia_mora ?? 7);
       const textoValor = descuento > 0
         ? `$${valorJugador.toLocaleString('es-CO')} *(beca ${descuento}%)*`
         : `$${valorJugador.toLocaleString('es-CO')}`;
@@ -152,7 +159,7 @@ async function procesarClub(
         `📢⚽ *${nombreClub} — Cuota activa*\n\n` +
         `Hola ${nombre}, tu cuota de *${nombreM}* ya está activa.\n\n` +
         `💰 Valor: *${textoValor}*\n` +
-        `📅 Tienes hasta el *día ${diasGracia}* para pagar sin penalidad\n\n` +
+        `📅 Tienes hasta el *día ${diaVenc}* para pagar sin penalidad\n\n` +
         (llavePago ? `📲 Paga con la llave:\n🔑 ${llavePago}\n\n` : '') +
         `💪 Paga hoy y juega tranquilo todo el mes ⚽🔥`,
         !!qrPagoUrl, qrPagoUrl,
@@ -162,8 +169,8 @@ async function procesarClub(
     }
   }
 
-  // ── DÍA 4 — Recordatorio: solo quienes NO han pagado ────────────────────
-  if (dia === 4) {
+  // ── DÍA diaRecord — Recordatorio: solo quienes NO han pagado ─────────────
+  if (dia === diaRecord) {
     const pendientes = await jugadoresConDeuda(supabase, club.id, jugadores, mes, anio);
     const nombreM    = mesTexto(mes);
 
@@ -184,8 +191,8 @@ async function procesarClub(
     }
   }
 
-  // ── DÍA 7 — Vencimiento: último aviso antes de mora ──────────────────────
-  if (dia === 7) {
+  // ── DÍA diaVenc — Vencimiento: último aviso antes de mora ────────────────
+  if (dia === diaVenc) {
     const pendientes = await jugadoresConDeuda(supabase, club.id, jugadores, mes, anio);
     const nombreM    = mesTexto(mes);
 
@@ -206,8 +213,8 @@ async function procesarClub(
     }
   }
 
-  // ── DÍA 8 — Mora: aplicar penalidad + notificar jugador + alertar admin ──
-  if (dia === 8) {
+  // ── DÍA diaMora — Mora: aplicar penalidad + notificar jugador + alertar admin ──
+  if (dia === diaMora) {
     const pendientes = await jugadoresConDeuda(supabase, club.id, jugadores, mes, anio);
     const nombreM    = mesTexto(mes);
     const morosos: string[] = [];
@@ -276,8 +283,8 @@ async function procesarClub(
     }
   }
 
-  // ── DÍA 9 — Reenganche: 24h después de mora, solo quienes siguen en mora ─
-  if (dia === 9) {
+  // ── DÍA diaReenganche — Reenganche: 24h después de mora ─────────────────
+  if (dia === diaReenganche) {
     const enMora  = await jugadoresEnMora(supabase, club.id, jugadores, mes, anio);
     const nombreM = mesTexto(mes);
 
