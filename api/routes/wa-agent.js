@@ -192,10 +192,11 @@ async function runTool(name, input) {
       const al_dia     = del_anio.filter(m => m.estado === 'AL_DIA');
       const total_deuda = pendientes.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
       const { data: clubData } = await db.supabase.from('clubs').select('config').eq('id', input.club_id).single();
-      const qr_pago_url = clubData?.config?.qr_pago_url || null;
-      const llave_pago  = clubData?.config?.llave_pago  || null;
+      const qr_pago_url    = clubData?.config?.qr_pago_url    || null;
+      const llave_pago     = clubData?.config?.llave_pago     || null;
+      const cuenta_bancaria = clubData?.config?.cuenta_bancaria || null;
       return { anio, al_dia: al_dia.length, pendientes: pendientes.length, total_deuda,
-               qr_pago_url, llave_pago,
+               qr_pago_url, llave_pago, cuenta_bancaria,
                detalle: del_anio.map(m => ({ mes: m.mes, estado: m.estado, saldo: m.saldo_pendiente })) };
     }
 
@@ -438,10 +439,12 @@ FLUJO:
 - "Hablar con el admin" → da el número celular_admin del contexto
 
 MEDIOS DE PAGO (cuando muestres el resultado de consultar_pagos):
-- Si hay qr_pago_url Y llave_pago → muestra AMBOS siempre, salvo que el jugador pida solo uno
-- qr_pago_url → preséntalo como "📷 QR de pago: <url>"
-- llave_pago → preséntalo como "🔑 Llave / cuenta: <valor>" (puede ser Nequi, Daviplata, cuenta bancaria, etc.)
-- Si solo existe uno de los dos, muestra solo ese`;
+- Muestra TODOS los medios configurados, salvo que el jugador pida explícitamente solo uno
+- qr_pago_url → "📷 QR de pago: <url>"
+- llave_pago → "🔑 Nequi / llave: <valor>"
+- cuenta_bancaria → si existe, muestra: "🏦 Transferencia bancaria:\n  Banco: <banco>\n  Tipo: <tipo>\n  Cuenta: <numero>"
+- Si un campo de cuenta_bancaria es null, omítelo
+- Si ningún medio está configurado, dile al jugador que contacte al administrador`;
 
 const SYSTEM_ADMIN = `${SYSTEM_BASE}
 
