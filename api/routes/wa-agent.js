@@ -532,6 +532,7 @@ async function identificarRol(celular, sessionData) {
         celular_admin: jugador.clubs?.config?.celular_admin,
         categoria:     jugador.categoria,
         equipo:        jugador.equipo,
+        config:        jugador.clubs?.config || {},
       },
     };
   }
@@ -543,13 +544,10 @@ async function identificarRol(celular, sessionData) {
 // ── Verificar si el agente WA está activo para el club ───────────────────────
 function agenteActivoParaClub(contexto) {
   if (!contexto?.club_id) return true; // visitante → siempre activo
-  const plan    = contexto.config?.plan || 'trial';
   const modulos = contexto.config?.modulos || {};
-  // Plan pro/scale/total → activo por defecto salvo que esté explícitamente apagado
-  const porPlan = ['pro', 'scale', 'total'].includes(plan);
-  // starter → solo si fue habilitado manualmente desde el panel admin
+  // Activo por defecto; solo se desactiva si el admin lo apaga explícitamente desde el panel
   if (typeof modulos.whatsapp === 'boolean') return modulos.whatsapp;
-  return porPlan;
+  return true;
 }
 
 // ── Generar respuesta del agente (compartida entre todos los canales) ─────────
