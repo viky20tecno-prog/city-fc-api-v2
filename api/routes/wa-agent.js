@@ -663,6 +663,23 @@ async function sendWAHA(to, text) {
   return data;
 }
 
+// ── Resolver @lid al número real de teléfono via WAHA ────────────────────────
+async function resolverLid(lidId) {
+  const wahaUrl = process.env.WAHA_URL;
+  const apiKey  = process.env.WAHA_API_KEY;
+  const session = process.env.WAHA_SESSION || 'default';
+  if (!wahaUrl) return null;
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (apiKey) headers['X-Api-Key'] = apiKey;
+    const res  = await fetch(`${wahaUrl}/api/contacts?contactId=${encodeURIComponent(lidId)}&session=${session}`, { headers });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data?.number) return data.number.replace(/^57/, ''); // retorna sin prefijo 57
+  } catch { /* ignorar */ }
+  return null;
+}
+
 // ── Webhook WAHA (POST) ──────────────────────────────────────────────────────
 router.post('/waha', async (req, res) => {
   try {
@@ -671,9 +688,17 @@ router.post('/waha', async (req, res) => {
       return res.status(200).json({ status: 'ignored' });
     }
 
-    const msgId = payload.id;
-    const from  = payload.from.replace('@c.us', '').replace('@s.whatsapp.net', '');
-    const text  = payload.body;
+    const msgId   = payload.id;
+    const rawFrom = payload.from;
+    let from      = rawFrom.replace('@c.us', '').replace('@s.whatsapp.net', '');
+
+    // Si WAHA envía en formato @lid, resolver al número real
+    if (rawFrom.includes('@lid') || rawFrom.includes('@s.whatsapp.net')) {
+      const resolved = await resolverLid(rawFrom);
+      if (resolved) from = resolved;
+    }
+
+    const text = payload.body;
 
     // Deduplicar en Supabase — persiste entre instancias serverless
     if (msgId) {
