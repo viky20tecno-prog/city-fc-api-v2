@@ -10,6 +10,10 @@ const supabase = createClient(
  * Rutas públicas (sin este middleware): /health, /inscripcion, /debug
  */
 async function requireAuth(req, res, next) {
+  if (req.path && req.path.startsWith('/wa-agent')) {
+    return next();
+  }
+
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
