@@ -305,11 +305,14 @@ router.post('/webhook', async (req, res) => {
 async function sendWAHA(to, text) {
   const wahaUrl = process.env.WAHA_URL;
   const session = process.env.WAHA_SESSION || 'default';
+  const apiKey  = process.env.WAHA_API_KEY;
   if (!wahaUrl) { console.error('[wa-agent] WAHA_URL no configurado'); return; }
   const chatId = to.includes('@') ? to : `${to}@c.us`;
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['X-Api-Key'] = apiKey;
   const res = await fetch(`${wahaUrl}/api/sendText`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ chatId, text, session }),
   });
   const data = await res.json();
