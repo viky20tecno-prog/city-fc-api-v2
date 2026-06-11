@@ -527,6 +527,18 @@ async function identificarRol(celular, sessionData) {
   return { rol: 'visitante', contexto: {} };
 }
 
+// ── Verificar si el agente WA está activo para el club ───────────────────────
+function agenteActivoParaClub(contexto) {
+  if (!contexto?.club_id) return true; // visitante → siempre activo
+  const plan    = contexto.config?.plan || 'trial';
+  const modulos = contexto.config?.modulos || {};
+  // Plan pro/scale/total → activo por defecto salvo que esté explícitamente apagado
+  const porPlan = ['pro', 'scale', 'total'].includes(plan);
+  // starter → solo si fue habilitado manualmente desde el panel admin
+  if (typeof modulos.whatsapp === 'boolean') return modulos.whatsapp;
+  return porPlan;
+}
+
 // ── Generar respuesta del agente (compartida entre todos los canales) ─────────
 async function generateReply(from, text) {
   const session = await db.getWaSession(from);
@@ -534,6 +546,11 @@ async function generateReply(from, text) {
 
   // Identificar quién es
   const { rol, contexto } = await identificarRol(from, session);
+
+  // Verificar si el agente está habilitado para este club
+  if (!agenteActivoParaClub(contexto)) {
+    return null; // ignorar silenciosamente — el admin lo desactivó
+  }
 
   const systemMap = { admin: SYSTEM_ADMIN, jugador: SYSTEM_JUGADOR, visitante: SYSTEM_VISITANTE };
   const system    = `${systemMap[rol]}\n\nCONTEXTO DEL USUARIO:\n${JSON.stringify({ rol, ...contexto })}`;
