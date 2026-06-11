@@ -5,6 +5,19 @@ const db = require('../services/db');
 const router = express.Router();
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// Deduplicación: evita procesar el mismo mensaje dos veces (WAHA CORE dispara doble)
+const processedIds = new Set();
+function isDuplicate(id) {
+  if (!id) return false;
+  if (processedIds.has(id)) return true;
+  processedIds.add(id);
+  if (processedIds.size > 500) {
+    const first = processedIds.values().next().value;
+    processedIds.delete(first);
+  }
+  return false;
+}
+
 const MESES = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio',
                'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
@@ -656,6 +669,9 @@ router.post('/waha', async (req, res) => {
     const { event, payload } = req.body;
     if (event !== 'message' || !payload?.body || payload?.fromMe) {
       return res.status(200).json({ status: 'ignored' });
+    }
+    if (isDuplicate(payload.id)) {
+      return res.status(200).json({ status: 'duplicate' });
     }
     const from = payload.from.replace('@c.us', '').replace('@s.whatsapp.net', '');
     const text = payload.body;
