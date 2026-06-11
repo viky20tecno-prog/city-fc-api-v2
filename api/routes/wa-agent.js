@@ -780,7 +780,9 @@ router.post('/waha', async (req, res) => {
     }
 
     const msgId   = payload.id;
-    const msgType = payload.type || 'text'; // text, image, audio, video, document, etc.
+    const msgType = payload.type || 'chat';
+    // WAHA CORE usa 'chat' para texto; otros tipos: 'image', 'audio', 'video', 'document', 'ptt'
+    const isText  = (msgType === 'chat' || msgType === 'text') && !!payload?.body;
 
     // Capa 1: in-memory dedup (misma instancia Vercel, sincrónico)
     if (isDuplicate(msgId)) {
@@ -796,7 +798,7 @@ router.post('/waha', async (req, res) => {
     }
 
     // ── Mensajes no-texto (imagen, audio, video, documento) ──────────────────
-    if (msgType !== 'text' || !payload?.body) {
+    if (!isText) {
       // Identificar al remitente para saber si es jugador (para reenviar al admin)
       const { rol, contexto } = await identificarRol(from, null);
       const mediaUrl  = payload?.media?.url || payload?.fileUrl || null;
