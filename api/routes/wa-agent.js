@@ -346,7 +346,7 @@ async function runTool(name, input, contexto = {}) {
       const pdf_url = mesParam
         ? `${API_BASE}/api/publico/morosos-pdf/${input.club_id}/${mesParam}?token=${token}`
         : `${API_BASE}/api/publico/morosos-pdf/${input.club_id}?token=${token}`;
-      return { morosos: morosos.slice(0, 15), total_deuda, pdf_url };
+      return { total_morosos: morosos.length, morosos: morosos.slice(0, 5), total_deuda, pdf_url };
     }
 
     if (name === 'enviar_recordatorio_pago') {
@@ -538,7 +538,7 @@ FLUJO:
 - "eventos" o "calendario" / opción 5 → usa consultar_calendario con club_slug del contexto
 
 REPORTE PDF DE MOROSOS:
-- La tool consultar_morosos devuelve un JSON con: morosos[], total_deuda, y pdf_url.
+- La tool consultar_morosos devuelve un JSON con: total_morosos (número real de morosos), morosos[] (muestra parcial), total_deuda, y pdf_url.
 - El campo pdf_url contiene la URL EXACTA y COMPLETA del reporte. NO la modifiques, NO la reemplaces, NO inventes ninguna URL. Cópiala tal cual está en el resultado de la tool.
 - Cuando el admin pide morosos o el reporte PDF, primero pregúntale:
   "¿Quieres el reporte completo del año o de un mes en particular?
@@ -547,7 +547,7 @@ REPORTE PDF DE MOROSOS:
 - Si elige año completo: llama consultar_morosos sin parámetro mes.
 - Si elige un mes: llama consultar_morosos con mes=número (Enero=1, Feb=2, ... Dic=12).
 - Tu respuesta debe tener SOLO DOS LÍNEAS, nada más:
-  Línea 1: "📋 Reporte listo — X morosos · Total: $Y"
+  Línea 1: "📋 Reporte listo — X morosos · Total: $Y"  (X = total_morosos del tool result, NO morosos.length)
   Línea 2: el valor EXACTO de pdf_url del tool result (solo la URL, sin texto adicional)
 - NO listes los nombres de los jugadores. NO agregues explicaciones. SOLO las dos líneas.
 - NUNCA escribas una URL que no venga del tool result. El dominio correcto empieza siempre por https://api.zensports.zenpra.ai`;
