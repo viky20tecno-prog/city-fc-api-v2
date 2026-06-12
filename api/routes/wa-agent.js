@@ -27,7 +27,7 @@ function generarTokenMorosos(clubId, mes = '') {
   return crypto.createHmac('sha256', secret).update(`pdf:${clubId}:${mes}:${dia}`).digest('hex').slice(0, 32);
 }
 
-const API_BASE = 'https://city-fc-api-v2.vercel.app';
+const API_BASE = 'https://api.zensports.zenpra.ai';
 
 const MESES = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio',
                'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -548,7 +548,7 @@ REPORTE PDF DE MOROSOS:
   "📋 Morosos [período]: X jugadores · Total: $Y"
 - DESPUÉS del resumen, en línea separada, escribe EXACTAMENTE:
   📄 Reporte PDF: [el valor de pdf_url del tool result, sin cambios]
-- NUNCA escribas una URL que no venga del tool result. El dominio correcto empieza siempre por https://city-fc-api-v2.vercel.app`;
+- NUNCA escribas una URL que no venga del tool result. El dominio correcto empieza siempre por https://api.zensports.zenpra.ai`;
 
 const SYSTEM_VISITANTE = `${SYSTEM_BASE}
 
