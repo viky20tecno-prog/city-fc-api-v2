@@ -99,11 +99,11 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
 });
 
 // ── PDF de morosos vía WhatsApp ──────────────────────────────────────────────
-// Token HMAC-SHA256 diario — válido 48h (hoy y ayer)
-// Usa SUPABASE_SERVICE_ROLE_KEY como secreto — mismo valor que en wa-agent.js
+const PDF_HMAC_SECRET = process.env.PDF_HMAC_SECRET || 'zs-pdf-2026-x9k';
+
 function validarTokenMorosos(clubId, token) {
   const dia = Math.floor(Date.now() / 86400000);
-  const ok = (d) => crypto.createHmac('sha256', 'zs-pdf-2026-x9k').update(`pdf:${clubId}:${d}`).digest('hex').slice(0, 32);
+  const ok = (d) => crypto.createHmac('sha256', PDF_HMAC_SECRET).update(`pdf:${clubId}:${d}`).digest('hex');
   for (let i = 0; i < 7; i++) {
     if (token === ok(dia - i)) return true;
   }
@@ -128,17 +128,11 @@ async function handleMorososPdf(req, res) {
     const mesParam = req.params.mes ? String(parseInt(req.params.mes) || '') : '';
 
     if (!token || !validarTokenMorosos(clubId, token)) {
-      const dia = Math.floor(Date.now() / 86400000);
-      const esperado = require('crypto').createHmac('sha256', 'zs-pdf-2026-x9k').update(`pdf:${clubId}:${dia}`).digest('hex').slice(0, 32);
-      console.error('[morosos-pdf] 403 — clubId:', clubId, '| tok:', token, '| exp:', esperado, '| dia:', dia);
-      return res.status(403).send(`<!DOCTYPE html><html><body style="font-family:monospace;padding:24px">
-        <h2>Enlace inválido o expirado</h2>
-        <p style="color:#888;font-size:12px">
-          club: ${clubId?.slice(0,8)}<br>
-          tok:  ${token?.slice(0,8) || '(vacío)'}<br>
-          exp:  ${esperado?.slice(0,8)}<br>
-          dia:  ${dia}
-        </p></body></html>`);
+      console.error('[morosos-pdf] 403 — clubId:', clubId?.slice(0, 8), '| tok:', token?.slice(0, 8) || '(vacío)');
+      return res.status(403).send(`<!DOCTYPE html><html><body style="font-family:sans-serif;padding:48px;text-align:center">
+        <h2 style="color:#c0392b">Enlace no válido</h2>
+        <p style="color:#666">Este enlace ha expirado o no es válido. Solicita uno nuevo desde el bot de WhatsApp.</p>
+      </body></html>`);
     }
 
     // Obtener club

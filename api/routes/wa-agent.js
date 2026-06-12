@@ -19,11 +19,11 @@ function isDuplicate(id) {
   return false;
 }
 
-// Token HMAC diario para el PDF público de morosos (válido 48h)
-// Usa SUPABASE_SERVICE_ROLE_KEY como secreto — siempre disponible en Vercel
+const PDF_HMAC_SECRET = process.env.PDF_HMAC_SECRET || 'zs-pdf-2026-x9k';
+
 function generarTokenMorosos(clubId) {
   const dia = Math.floor(Date.now() / 86400000);
-  return crypto.createHmac('sha256', 'zs-pdf-2026-x9k').update(`pdf:${clubId}:${dia}`).digest('hex').slice(0, 32);
+  return crypto.createHmac('sha256', PDF_HMAC_SECRET).update(`pdf:${clubId}:${dia}`).digest('hex');
 }
 
 const API_BASE = 'https://api.zensports.zenpra.ai';
@@ -195,18 +195,15 @@ const TOOLS_VISITANTE = TOOLS_BASE.filter(t => ['registrar_lead', 'info_zensport
 async function runTool(name, input, contexto = {}) {
   try {
     if (name === 'buscar_jugador') {
-      const jugador = await db.getPlayerByCelularGlobal(input.celular);
+      const jugador = await db.getPlayerByCelular(contexto.club_id, input.celular);
       if (!jugador) return { encontrado: false };
       return {
-        encontrado:  true,
-        nombre:      `${jugador.nombre} ${jugador.apellidos}`.trim(),
-        cedula:      jugador.cedula,
-        club_id:     jugador.club_id,
-        club_slug:   jugador.clubs?.slug,
-        club_nombre: jugador.clubs?.name,
-        categoria:   jugador.categoria,
-        equipo:      jugador.equipo,
-        posicion:    jugador.posicion,
+        encontrado: true,
+        nombre:     `${jugador.nombre} ${jugador.apellidos}`.trim(),
+        cedula:     jugador.cedula,
+        categoria:  jugador.categoria,
+        equipo:     jugador.equipo,
+        posicion:   jugador.posicion,
       };
     }
 
@@ -712,7 +709,7 @@ async function generateReply(from, text) {
 router.get('/version', (req, res) => {
   const clubId = '2b728ed9-6ee2-4faf-a7f5-b001762c9cba';
   const token = generarTokenMorosos(clubId);
-  res.json({ token_prefix: token.slice(0, 8), secret_check: 'zs-pdf-2026-x9k' });
+  res.json({ token_prefix: token.slice(0, 8), secret_source: process.env.PDF_HMAC_SECRET ? 'env' : 'fallback' });
 });
 
 // ── Webhook verification (GET) ───────────────────────────────────────────────

@@ -15,7 +15,7 @@ const MESES = {
 
 // Validar webhook secret enviado por Make.com
 router.use((req, res, next) => {
-  const secret = req.headers['x-webhook-secret'] || req.query.secret;
+  const secret = req.headers['x-webhook-secret'];
   if (!process.env.WHATSAPP_WEBHOOK_SECRET || secret !== process.env.WHATSAPP_WEBHOOK_SECRET) {
     return res.status(401).json({ success: false, error: 'No autorizado' });
   }
