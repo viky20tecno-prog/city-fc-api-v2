@@ -343,7 +343,9 @@ async function runTool(name, input, contexto = {}) {
       const total_deuda = morosos.reduce((s, m) => s + m.deuda, 0);
       const mesParam = mesNum ? String(mesNum) : '';
       const token = generarTokenMorosos(input.club_id, mesParam);
-      const pdf_url = `${API_BASE}/api/publico/morosos-pdf/${input.club_id}?token=${token}${mesParam ? `&mes=${mesParam}` : ''}`;
+      const pdf_url = mesParam
+        ? `${API_BASE}/api/publico/morosos-pdf/${input.club_id}/${mesParam}?token=${token}`
+        : `${API_BASE}/api/publico/morosos-pdf/${input.club_id}?token=${token}`;
       return { morosos: morosos.slice(0, 15), total_deuda, pdf_url };
     }
 

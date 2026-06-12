@@ -69,7 +69,7 @@ app.use(express.json());
 
 // Security headers
 app.use((req, res, next) => {
-  const isHtmlReport = req.path.startsWith('/api/publico/morosos-pdf');
+  const isHtmlReport = /^\/api\/publico\/morosos-pdf(\/|$)/.test(req.path);
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', isHtmlReport ? 'SAMEORIGIN' : 'DENY');
   res.setHeader('X-XSS-Protection', '1; mode=block');

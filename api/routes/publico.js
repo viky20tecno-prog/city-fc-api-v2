@@ -117,12 +117,13 @@ function formatCOP(n) {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(parseInt(n) || 0);
 }
 
-// GET /api/publico/morosos-pdf/:clubId?token=xxx[&mes=N]
-router.get('/morosos-pdf/:clubId', async (req, res) => {
+// GET /api/publico/morosos-pdf/:clubId[/:mes]?token=xxx
+// El mes va en el path para que WhatsApp no rompa el link en el &
+async function handleMorososPdf(req, res) {
   try {
     const { clubId } = req.params;
-    const { token, mes } = req.query;
-    const mesParam = mes ? String(parseInt(mes) || '') : '';
+    const { token } = req.query;
+    const mesParam = req.params.mes ? String(parseInt(req.params.mes) || '') : '';
 
     if (!token || !validarTokenMorosos(clubId, token, mesParam)) {
       return res.status(403).send('<h2>Enlace inválido o expirado</h2>');
@@ -349,6 +350,9 @@ router.get('/morosos-pdf/:clubId', async (req, res) => {
     console.error('Error en GET /publico/morosos-pdf:', error);
     res.status(500).send('<h2>Error generando el reporte</h2>');
   }
-});
+}
+
+router.get('/morosos-pdf/:clubId', handleMorososPdf);
+router.get('/morosos-pdf/:clubId/:mes', handleMorososPdf);
 
 module.exports = router;
