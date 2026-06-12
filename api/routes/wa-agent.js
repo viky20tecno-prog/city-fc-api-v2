@@ -315,19 +315,21 @@ async function runTool(name, input, contexto = {}) {
 
     if (name === 'consultar_morosos') {
       const anio = new Date().getFullYear();
-      // mes: null = año completo (morosos acumulados), número 1-12 = solo ese mes
+      // Siempre usar el club_id del contexto autenticado, no el que pasa el LLM
+      const clubId = contexto.club_id;
+      if (!clubId) return { error: 'No se encontró el club en el contexto' };
       const mesNum = input.mes ? parseInt(input.mes) : null;
       const supabase = db.supabase;
       const { data: players } = await supabase
         .from('players')
         .select('cedula, nombre, apellidos, celular, equipo')
-        .eq('club_id', input.club_id)
+        .eq('club_id', clubId)
         .eq('activo', true);
       if (!players?.length) return { morosos: [], total_deuda: 0, pdf_url: null };
 
       const morosos = [];
       for (const p of players) {
-        const mens = await db.getMensualidades(input.club_id, p.cedula);
+        const mens = await db.getMensualidades(clubId, p.cedula);
         const pend = mens.filter(m => {
           if (String(m.anio) !== String(anio)) return false;
           if (m.estado === 'AL_DIA') return false;
@@ -342,10 +344,10 @@ async function runTool(name, input, contexto = {}) {
       morosos.sort((a, b) => b.deuda - a.deuda);
       const total_deuda = morosos.reduce((s, m) => s + m.deuda, 0);
       const mesParam = mesNum ? String(mesNum) : '';
-      const token = generarTokenMorosos(input.club_id);
+      const token = generarTokenMorosos(clubId);
       const pdf_url = mesParam
-        ? `${API_BASE}/api/publico/morosos-pdf/${input.club_id}/${mesParam}?token=${token}`
-        : `${API_BASE}/api/publico/morosos-pdf/${input.club_id}?token=${token}`;
+        ? `${API_BASE}/api/publico/morosos-pdf/${clubId}/${mesParam}?token=${token}`
+        : `${API_BASE}/api/publico/morosos-pdf/${clubId}?token=${token}`;
       return { total_morosos: morosos.length, morosos: morosos.slice(0, 5), total_deuda, pdf_url };
     }
 
