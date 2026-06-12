@@ -701,6 +701,13 @@ async function generateReply(from, text) {
   return reply;
 }
 
+// ── Versión del código desplegado (debug) ────────────────────────────────────
+router.get('/version', (req, res) => {
+  const clubId = '2b728ed9-6ee2-4faf-a7f5-b001762c9cba';
+  const token = generarTokenMorosos(clubId);
+  res.json({ token_prefix: token.slice(0, 8), secret_check: 'zs-pdf-2026-x9k' });
+});
+
 // ── Webhook verification (GET) ───────────────────────────────────────────────
 router.get('/webhook', (req, res) => {
   const mode      = req.query['hub.mode'];
