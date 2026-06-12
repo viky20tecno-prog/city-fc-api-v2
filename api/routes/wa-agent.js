@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const Anthropic = require('@anthropic-ai/sdk');
 const db = require('../services/db');
 
@@ -17,6 +18,15 @@ function isDuplicate(id) {
   }
   return false;
 }
+
+// Token HMAC diario para el PDF público de morosos (válido 48h)
+function generarTokenMorosos(clubId) {
+  const dia = Math.floor(Date.now() / 86400000);
+  const secret = process.env.INTERNAL_API_SECRET || 'zensports';
+  return crypto.createHmac('sha256', secret).update(`morosos:${clubId}:${dia}`).digest('hex').slice(0, 32);
+}
+
+const API_BASE = 'https://city-fc-api-v2.vercel.app';
 
 const MESES = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio',
                'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -117,7 +127,7 @@ const TOOLS_BASE = [
   },
   {
     name: 'consultar_morosos',
-    description: 'SOLO ADMIN. Lista de jugadores con pagos pendientes, ordenados por deuda mayor.',
+    description: 'SOLO ADMIN. Lista de jugadores con pagos pendientes, ordenados por deuda mayor. Devuelve morosos[] y pdf_url para que el admin pueda descargar el reporte completo.',
     input_schema: {
       type: 'object',
       properties: { club_id: { type: 'string' } },
@@ -307,7 +317,7 @@ async function runTool(name, input, contexto = {}) {
         .select('cedula, nombre, apellidos, celular, equipo')
         .eq('club_id', input.club_id)
         .eq('activo', true);
-      if (!players?.length) return { morosos: [] };
+      if (!players?.length) return { morosos: [], pdf_url: null };
 
       const morosos = [];
       for (const p of players) {
@@ -319,7 +329,9 @@ async function runTool(name, input, contexto = {}) {
         }
       }
       morosos.sort((a, b) => b.deuda - a.deuda);
-      return { morosos: morosos.slice(0, 15) };
+      const token = generarTokenMorosos(input.club_id);
+      const pdf_url = `${API_BASE}/api/publico/morosos-pdf/${input.club_id}?token=${token}`;
+      return { morosos: morosos.slice(0, 15), pdf_url };
     }
 
     if (name === 'enviar_recordatorio_pago') {
@@ -508,7 +520,14 @@ FLUJO:
 - "morosos" / opción 2 → usa consultar_morosos
 - "recordatorio" / opción 3 → usa enviar_recordatorio_pago
 - "asistencia" / opción 4 → usa consultar_asistencia_hoy
-- "eventos" o "calendario" / opción 5 → usa consultar_calendario con club_slug del contexto`;
+- "eventos" o "calendario" / opción 5 → usa consultar_calendario con club_slug del contexto
+
+REPORTE PDF DE MOROSOS:
+- La tool consultar_morosos devuelve dos campos: morosos (lista) y pdf_url (link al reporte).
+- Si el admin pide el PDF, el reporte, o si hay morosos, SIEMPRE incluye el pdf_url al final del mensaje así:
+  "📄 Reporte completo: <pdf_url>"
+- Si el admin solo pregunta cuántos morosos hay (resumen rápido), puedes omitir el link. Pero si pide el reporte o el PDF, es obligatorio enviarlo.
+- El link abre una página web con el reporte formateado — el admin puede imprimirlo o guardarlo como PDF desde el navegador.`;
 
 const SYSTEM_VISITANTE = `${SYSTEM_BASE}
 
