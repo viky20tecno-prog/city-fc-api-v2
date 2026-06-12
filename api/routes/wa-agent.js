@@ -21,10 +21,10 @@ function isDuplicate(id) {
 
 // Token HMAC diario para el PDF público de morosos (válido 48h)
 // Usa SUPABASE_SERVICE_ROLE_KEY como secreto — siempre disponible en Vercel
-function generarTokenMorosos(clubId, mes = '') {
+function generarTokenMorosos(clubId) {
   const dia = Math.floor(Date.now() / 86400000);
   const secret = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').slice(0, 40) || 'zensports';
-  return crypto.createHmac('sha256', secret).update(`pdf:${clubId}:${mes}:${dia}`).digest('hex').slice(0, 32);
+  return crypto.createHmac('sha256', secret).update(`pdf:${clubId}:${dia}`).digest('hex').slice(0, 32);
 }
 
 const API_BASE = 'https://api.zensports.zenpra.ai';
@@ -342,7 +342,7 @@ async function runTool(name, input, contexto = {}) {
       morosos.sort((a, b) => b.deuda - a.deuda);
       const total_deuda = morosos.reduce((s, m) => s + m.deuda, 0);
       const mesParam = mesNum ? String(mesNum) : '';
-      const token = generarTokenMorosos(input.club_id, mesParam);
+      const token = generarTokenMorosos(input.club_id);
       const pdf_url = mesParam
         ? `${API_BASE}/api/publico/morosos-pdf/${input.club_id}/${mesParam}?token=${token}`
         : `${API_BASE}/api/publico/morosos-pdf/${input.club_id}?token=${token}`;

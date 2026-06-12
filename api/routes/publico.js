@@ -101,10 +101,10 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
 // ── PDF de morosos vía WhatsApp ──────────────────────────────────────────────
 // Token HMAC-SHA256 diario — válido 48h (hoy y ayer)
 // Usa SUPABASE_SERVICE_ROLE_KEY como secreto — mismo valor que en wa-agent.js
-function validarTokenMorosos(clubId, token, mes = '') {
+function validarTokenMorosos(clubId, token) {
   const secret = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').slice(0, 40) || 'zensports';
   const dia = Math.floor(Date.now() / 86400000);
-  const ok = (d) => crypto.createHmac('sha256', secret).update(`pdf:${clubId}:${mes}:${d}`).digest('hex').slice(0, 32);
+  const ok = (d) => crypto.createHmac('sha256', secret).update(`pdf:${clubId}:${d}`).digest('hex').slice(0, 32);
   return token === ok(dia) || token === ok(dia - 1);
 }
 
@@ -125,7 +125,7 @@ async function handleMorososPdf(req, res) {
     const { token } = req.query;
     const mesParam = req.params.mes ? String(parseInt(req.params.mes) || '') : '';
 
-    if (!token || !validarTokenMorosos(clubId, token, mesParam)) {
+    if (!token || !validarTokenMorosos(clubId, token)) {
       return res.status(403).send('<h2>Enlace inválido o expirado</h2>');
     }
 
