@@ -127,7 +127,7 @@ const TOOLS_BASE = [
   },
   {
     name: 'consultar_morosos',
-    description: 'SOLO ADMIN. Lista de jugadores con pagos pendientes. Si se pasa "mes" (número 1-12), filtra solo ese mes; si no, muestra todos los morosos del año. Devuelve morosos[], total_deuda y pdf_url.',
+    description: 'SOLO ADMIN. Lista de jugadores con pagos pendientes. Si se pasa "mes" (número 1-12), filtra solo ese mes; si no, muestra todos los morosos del año. Devuelve total_morosos, morosos[] y total_deuda.',
     input_schema: {
       type: 'object',
       properties: {
@@ -539,19 +539,16 @@ FLUJO:
 - "eventos" o "calendario" / opción 5 → usa consultar_calendario con club_slug del contexto
 
 REPORTE PDF DE MOROSOS:
-- La tool consultar_morosos devuelve un JSON con: total_morosos (número real de morosos), morosos[] (muestra parcial), total_deuda, y pdf_url.
-- El campo pdf_url contiene la URL EXACTA y COMPLETA del reporte. NO la modifiques, NO la reemplaces, NO inventes ninguna URL. Cópiala tal cual está en el resultado de la tool.
+- La tool consultar_morosos devuelve un JSON con: total_morosos (número real de morosos), morosos[] (muestra parcial) y total_deuda.
 - Cuando el admin pide morosos o el reporte PDF, primero pregúntale:
   "¿Quieres el reporte completo del año o de un mes en particular?
   1️⃣ Año completo
   2️⃣ Un mes específico (dime cuál)"
 - Si elige año completo: llama consultar_morosos sin parámetro mes.
 - Si elige un mes: llama consultar_morosos con mes=número (Enero=1, Feb=2, ... Dic=12).
-- Tu respuesta debe tener SOLO DOS LÍNEAS, nada más:
-  Línea 1: "📋 Reporte listo — X morosos · Total: $Y"  (X = total_morosos del tool result, NO morosos.length)
-  Línea 2: el valor EXACTO de pdf_url del tool result (solo la URL, sin texto adicional)
-- NO listes los nombres de los jugadores. NO agregues explicaciones. SOLO las dos líneas.
-- NUNCA escribas una URL que no venga del tool result. El dominio correcto empieza siempre por https://api.zensports.zenpra.ai`;
+- Tu respuesta debe ser UNA SOLA LÍNEA: "📋 Reporte listo — X morosos · Total: $Y" (X = total_morosos del tool result)
+- NO escribas ninguna URL en tu respuesta. El enlace se envía automáticamente por separado.
+- NO listes jugadores. NO agregues explicaciones. SOLO esa línea.`;
 
 const SYSTEM_VISITANTE = `${SYSTEM_BASE}
 
@@ -663,6 +660,7 @@ async function generateReply(from, text) {
 
   const messages = [...history, { role: 'user', content: text }];
   let reply      = null;
+  let pdfUrl     = null; // URL real del reporte — se envía por separado, no por el LLM
 
   for (let i = 0; i < 5; i++) {
     const response = await anthropic.messages.create({
@@ -685,6 +683,11 @@ async function generateReply(from, text) {
       for (const block of response.content) {
         if (block.type !== 'tool_use') continue;
         const result = await runTool(block.name, block.input, { rol, ...contexto });
+        // Capturar pdf_url antes de ocultársela al LLM — el LLM nunca ve la URL
+        if (block.name === 'consultar_morosos' && result.pdf_url) {
+          pdfUrl = result.pdf_url;
+          delete result.pdf_url;
+        }
         toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) });
       }
       messages.push({ role: 'user', content: toolResults });
@@ -698,7 +701,7 @@ async function generateReply(from, text) {
     .slice(-MAX_HISTORY);
   await db.upsertWaSession(from, { rol, contexto, messages: historialTexto });
 
-  return reply;
+  return { reply, pdfUrl };
 }
 
 // ── Versión del código desplegado (debug) ────────────────────────────────────
@@ -900,15 +903,21 @@ router.post('/waha', async (req, res) => {
     const text = payload.body;
     console.log(`[wa-agent] WAHA mensaje de ${from}: ${text}`);
 
-    let reply;
+    let reply, pdfUrl;
     try {
-      reply = await generateReply(from, text);
+      const result = await generateReply(from, text);
+      if (!result) return res.status(200).json({ status: 'ok' }); // agente inactivo
+      ({ reply, pdfUrl } = result);
     } catch (claudeErr) {
       console.error('[wa-agent] Claude error:', claudeErr.message);
       reply = 'En este momento tengo problemas para procesar tu mensaje. Por favor intenta en unos minutos 🙏';
     }
 
     if (reply) await sendWAHA(from, reply);
+    if (pdfUrl) {
+      await sendWAHA(from, pdfUrl);
+      console.log(`[wa-agent] PDF URL enviada: ${pdfUrl}`);
+    }
     console.log(`[wa-agent] WAHA procesado OK para ${from}`);
   } catch (err) {
     console.error('[wa-agent] WAHA error:', err.message);
