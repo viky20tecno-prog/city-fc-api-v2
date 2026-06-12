@@ -769,13 +769,11 @@ async function resolverLid(lidId) {
 
 // ── Webhook WAHA (POST) ──────────────────────────────────────────────────────
 router.post('/waha', async (req, res) => {
-  // Responder 200 inmediatamente — evita que WAHA reintente el webhook
-  // mientras Claude API procesa (puede tardar 3-8 s y WAHA reintenta antes)
-  res.status(200).json({ status: 'ok' });
-
   try {
     const { event, payload } = req.body;
-    if (event !== 'message' || payload?.fromMe) return;
+    if (event !== 'message' || payload?.fromMe) {
+      return res.status(200).json({ status: 'ignored' });
+    }
 
     const msgId   = payload.id;
     const msgType = payload.type || 'chat';
@@ -783,7 +781,9 @@ router.post('/waha', async (req, res) => {
     const isText  = (msgType === 'chat' || msgType === 'text') && !!payload?.body;
 
     // Capa 1: in-memory dedup (misma instancia Vercel, sincrónico)
-    if (isDuplicate(msgId)) return;
+    if (isDuplicate(msgId)) {
+      return res.status(200).json({ status: 'duplicate' });
+    }
 
     const rawFrom = payload.from;
     let from      = rawFrom.replace('@c.us', '').replace('@s.whatsapp.net', '');
@@ -793,7 +793,7 @@ router.post('/waha', async (req, res) => {
       if (resolved) from = resolved;
     }
 
-    // Capa 2: Supabase dedup — compara last_msg_id de la sesión existente
+    // Capa 2: Supabase dedup — atómico para usuarios nuevos y existentes
     if (msgId) {
       try {
         const { data: sesion } = await db.supabase
@@ -803,19 +803,30 @@ router.post('/waha', async (req, res) => {
           .maybeSingle();
 
         if (sesion?.last_msg_id === msgId) {
-          console.log(`[wa-agent] dedup Supabase: ya procesado ${msgId}`);
-          return;
+          // Ya procesado por esta u otra instancia
+          return res.status(200).json({ status: 'duplicate' });
         }
 
-        // Actualizar last_msg_id de forma atómica (solo si la fila existe)
         if (sesion) {
-          await db.supabase
+          // Usuario conocido: UPDATE atómico — si devuelve 0 filas, otra instancia ya lo tomó
+          const { data: updated } = await db.supabase
             .from('wa_sessions')
             .update({ last_msg_id: msgId, updated_at: new Date().toISOString() })
             .eq('phone', from)
-            .neq('last_msg_id', msgId);
+            .neq('last_msg_id', msgId)
+            .select('phone');
+          if (updated !== null && updated.length === 0) {
+            return res.status(200).json({ status: 'duplicate' });
+          }
+        } else {
+          // Usuario nuevo: INSERT — si falla por unique constraint (otra instancia llegó primero) → skip
+          const { error: insErr } = await db.supabase
+            .from('wa_sessions')
+            .insert({ phone: from, last_msg_id: msgId, messages: [], updated_at: new Date().toISOString() });
+          if (insErr?.code === '23505') {
+            return res.status(200).json({ status: 'duplicate' });
+          }
         }
-        // Si no hay fila aún (usuario nuevo), se crea al final de generateReply
       } catch (dedupErr) {
         console.warn('[wa-agent] dedup error (ignorado):', dedupErr.message);
       }
@@ -833,7 +844,7 @@ router.post('/waha', async (req, res) => {
       } else {
         await sendWAHA(from, 'Solo puedo procesar mensajes de texto por ahora. Escríbeme lo que necesitas 😊');
       }
-      return;
+      return res.status(200).json({ status: 'ok' });
     }
 
     const text = payload.body;
@@ -852,6 +863,7 @@ router.post('/waha', async (req, res) => {
   } catch (err) {
     console.error('[wa-agent] WAHA error:', err.message);
   }
+  res.status(200).json({ status: 'ok' });
 });
 
 // ── Webhook Twilio sandbox (POST) ────────────────────────────────────────────
