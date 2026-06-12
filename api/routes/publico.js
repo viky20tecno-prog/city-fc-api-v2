@@ -102,10 +102,9 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
 // Token HMAC-SHA256 diario — válido 48h (hoy y ayer)
 // Usa SUPABASE_SERVICE_ROLE_KEY como secreto — mismo valor que en wa-agent.js
 function validarTokenMorosos(clubId, token) {
-  const secret = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').slice(0, 40) || 'zensports';
+  const secret = process.env.PDF_SECRET || 'zensports-pdf-fallback';
   const dia = Math.floor(Date.now() / 86400000);
   const ok = (d) => crypto.createHmac('sha256', secret).update(`pdf:${clubId}:${d}`).digest('hex').slice(0, 32);
-  // Válido por 7 días (tolerancia a despliegues y reenvíos)
   for (let i = 0; i < 7; i++) {
     if (token === ok(dia - i)) return true;
   }
@@ -131,9 +130,9 @@ async function handleMorososPdf(req, res) {
 
     if (!token || !validarTokenMorosos(clubId, token)) {
       const dia = Math.floor(Date.now() / 86400000);
-      const secret = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').slice(0, 40) || 'zensports';
+      const secret = process.env.PDF_SECRET || 'zensports-pdf-fallback';
       const esperado = require('crypto').createHmac('sha256', secret).update(`pdf:${clubId}:${dia}`).digest('hex').slice(0, 32);
-      console.error('[morosos-pdf] 403 — clubId:', clubId, '| token recibido:', token, '| token esperado:', esperado, '| dia:', dia);
+      console.error('[morosos-pdf] 403 — clubId:', clubId, '| tok:', token, '| exp:', esperado, '| dia:', dia);
       return res.status(403).send(`<!DOCTYPE html><html><body style="font-family:monospace;padding:24px">
         <h2>Enlace inválido o expirado</h2>
         <p style="color:#888;font-size:12px">
