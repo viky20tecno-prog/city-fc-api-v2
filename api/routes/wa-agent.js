@@ -544,10 +544,10 @@ REPORTE PDF DE MOROSOS:
   2️⃣ Un mes específico (dime cuál)"
 - Si elige año completo: llama consultar_morosos sin parámetro mes.
 - Si elige un mes: llama consultar_morosos con mes=número (Enero=1, Feb=2, ... Dic=12).
-- SIEMPRE responde con resumen MUY CORTO:
-  "📋 Morosos [período]: X jugadores · Total: $Y"
-- DESPUÉS del resumen, en línea separada, escribe EXACTAMENTE:
-  📄 Reporte PDF: [el valor de pdf_url del tool result, sin cambios]
+- Tu respuesta debe tener SOLO DOS LÍNEAS, nada más:
+  Línea 1: "📋 Reporte listo — X morosos · Total: $Y"
+  Línea 2: el valor EXACTO de pdf_url del tool result (solo la URL, sin texto adicional)
+- NO listes los nombres de los jugadores. NO agregues explicaciones. SOLO las dos líneas.
 - NUNCA escribas una URL que no venga del tool result. El dominio correcto empieza siempre por https://api.zensports.zenpra.ai`;
 
 const SYSTEM_VISITANTE = `${SYSTEM_BASE}

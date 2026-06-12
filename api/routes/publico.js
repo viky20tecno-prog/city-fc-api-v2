@@ -239,61 +239,106 @@ router.get('/morosos-pdf/:clubId', async (req, res) => {
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Morosos — ${esc(clubNombre)}</title>
-  <style>* { margin:0; padding:0; box-sizing:border-box; } body { font-family:Arial,sans-serif; color:#111; background:#fff; } @media print { .no-print { display:none !important; } }</style>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:Arial,sans-serif; color:#111; background:#fff; }
+    .header { background:${color}; padding:16px 20px; display:flex; flex-direction:column; gap:10px; }
+    .header-top { display:flex; align-items:center; gap:10px; }
+    .header-bottom { text-align:left; }
+    .kpis { display:flex; gap:10px; margin-bottom:20px; }
+    .kpi { flex:1; border:1px solid #e5e7eb; border-radius:10px; padding:12px 8px; text-align:center; }
+    .kpi-label { font-size:10px; color:#6b7280; font-weight:600; text-transform:uppercase; letter-spacing:.04em; margin-bottom:4px; }
+    .kpi-value { font-size:22px; font-weight:800; }
+    .tabla-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    table { width:100%; border-collapse:collapse; min-width:480px; }
+    th, td { padding:9px 10px; font-size:12px; border-bottom:1px solid #e5e7eb; }
+    thead tr { background:#f3f4f6; }
+    th { color:${color}; font-weight:700; font-size:11px; }
+    .footer { margin-top:16px; padding-top:10px; border-top:1px solid #e5e7eb; display:flex; justify-content:space-between; flex-wrap:wrap; gap:4px; }
+    .footer p { font-size:10px; color:#9ca3af; }
+    .btn-print { display:block; width:100%; padding:14px; background:${color}; color:#fff; border:none; border-radius:8px; font-size:15px; font-weight:700; cursor:pointer; margin-top:20px; }
+    @media print { .no-print { display:none !important; } }
+    @media (min-width:600px) {
+      .header { flex-direction:row; align-items:center; justify-content:space-between; padding:18px 32px; }
+      .header-bottom { text-align:right; }
+      .kpi-label { font-size:11px; }
+      .kpi-value { font-size:26px; }
+      th, td { padding:10px 12px; font-size:13px; }
+    }
+  </style>
 </head>
 <body>
-  <div style="background:${color};padding:18px 32px;display:flex;align-items:center;justify-content:space-between">
-    <div style="display:flex;align-items:center">${logoHtml}<div>
-      <p style="font-size:17px;font-weight:800;color:#fff">${esc(clubNombre)}</p>
-      <p style="font-size:11px;color:rgba(255,255,255,0.8);margin-top:2px">ZenSports — Gestión deportiva</p>
-    </div></div>
-    <div style="text-align:right">
+  <div class="header">
+    <div class="header-top">
+      ${logoHtml}
+      <div>
+        <p style="font-size:16px;font-weight:800;color:#fff">${esc(clubNombre)}</p>
+        <p style="font-size:11px;color:rgba(255,255,255,0.8);margin-top:2px">ZenSports — Gestión deportiva</p>
+      </div>
+    </div>
+    <div class="header-bottom">
       <p style="font-size:13px;font-weight:700;color:#fff">Reporte de Morosos</p>
       <p style="font-size:11px;color:rgba(255,255,255,0.8);margin-top:2px">${periodoLabel} · ${fecha}</p>
     </div>
   </div>
-  <div style="padding:28px 32px">
-    <div style="display:flex;gap:14px;margin-bottom:24px">
-      <div style="flex:1;border:1px solid #e5e7eb;border-radius:10px;padding:16px;text-align:center;border-top:3px solid #dc2626">
-        <p style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">En mora</p>
-        <p style="font-size:30px;font-weight:800;color:#dc2626">${morosos.length}</p>
+
+  <div style="padding:20px 16px">
+    <div class="kpis">
+      <div class="kpi" style="border-top:3px solid #dc2626">
+        <p class="kpi-label">En mora</p>
+        <p class="kpi-value" style="color:#dc2626">${morosos.length}</p>
       </div>
-      <div style="flex:1;border:1px solid #e5e7eb;border-radius:10px;padding:16px;text-align:center;border-top:3px solid ${color}">
-        <p style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Total a cobrar</p>
-        <p style="font-size:26px;font-weight:800;color:${color}">${formatCOP(totalSaldo)}</p>
+      <div class="kpi" style="border-top:3px solid ${color}">
+        <p class="kpi-label">Total</p>
+        <p class="kpi-value" style="color:${color};font-size:16px">${formatCOP(totalSaldo)}</p>
       </div>
-      <div style="flex:1;border:1px solid #e5e7eb;border-radius:10px;padding:16px;text-align:center;border-top:3px solid #16a34a">
-        <p style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Promedio/jugador</p>
-        <p style="font-size:26px;font-weight:800;color:#16a34a">${formatCOP(morosos.length ? Math.round(totalSaldo / morosos.length) : 0)}</p>
+      <div class="kpi" style="border-top:3px solid #16a34a">
+        <p class="kpi-label">Promedio</p>
+        <p class="kpi-value" style="color:#16a34a;font-size:16px">${formatCOP(morosos.length ? Math.round(totalSaldo / morosos.length) : 0)}</p>
       </div>
     </div>
+
     ${morosos.length === 0
-      ? `<p style="text-align:center;padding:40px;color:#6b7280;font-size:15px">✅ ¡Sin morosos este mes!</p>`
-      : `<table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
-          <thead><tr style="background:#f3f4f6">
-            <th style="padding:10px 12px;text-align:left;font-size:11px;color:${color};font-weight:700;border-bottom:2px solid #e5e7eb">#</th>
-            <th style="padding:10px 12px;text-align:left;font-size:11px;color:${color};font-weight:700;border-bottom:2px solid #e5e7eb">Jugador</th>
-            <th style="padding:10px 12px;text-align:left;font-size:11px;color:${color};font-weight:700;border-bottom:2px solid #e5e7eb">Cédula</th>
-            <th style="padding:10px 12px;text-align:left;font-size:11px;color:${color};font-weight:700;border-bottom:2px solid #e5e7eb">Celular</th>
-            <th style="padding:10px 12px;text-align:center;font-size:11px;color:${color};font-weight:700;border-bottom:2px solid #e5e7eb">Meses</th>
-            <th style="padding:10px 12px;text-align:left;font-size:11px;color:${color};font-weight:700;border-bottom:2px solid #e5e7eb">Detalle</th>
-            <th style="padding:10px 12px;text-align:right;font-size:11px;color:${color};font-weight:700;border-bottom:2px solid #e5e7eb">Saldo</th>
-          </tr></thead>
-          <tbody>${filas}</tbody>
-          <tfoot><tr style="background:#f9fafb">
-            <td colspan="6" style="padding:12px;font-size:13px;font-weight:700;text-align:right;border-top:2px solid #e5e7eb;color:#374151">Total a cobrar</td>
-            <td style="padding:12px;font-size:14px;font-weight:800;color:#dc2626;text-align:right;border-top:2px solid #e5e7eb">${formatCOP(totalSaldo)}</td>
-          </tr></tfoot>
-        </table>`}
-    <div style="margin-top:20px;padding-top:12px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center">
-      <p style="font-size:10px;color:#9ca3af">${esc(clubNombre)} · Documento confidencial — no compartir públicamente</p>
-      <p style="font-size:10px;color:#9ca3af">zensports.zenpra.ai</p>
+      ? `<p style="text-align:center;padding:40px;color:#6b7280;font-size:15px">✅ ¡Sin morosos este período!</p>`
+      : `<div class="tabla-wrap">
+          <table>
+            <thead><tr>
+              <th style="text-align:left">#</th>
+              <th style="text-align:left">Jugador</th>
+              <th style="text-align:left">Cédula</th>
+              <th style="text-align:left">Celular</th>
+              <th style="text-align:center">Meses</th>
+              <th style="text-align:right">Saldo</th>
+            </tr></thead>
+            <tbody>${morosos.map((m, i) => `
+              <tr style="background:${i % 2 === 0 ? '#f9fafb' : '#fff'}">
+                <td style="color:#6b7280">${i + 1}</td>
+                <td style="font-weight:600">${esc(m.nombre)}</td>
+                <td style="color:#6b7280">${esc(m.cedula)}</td>
+                <td style="color:#6b7280">${esc(m.celular) || '—'}</td>
+                <td style="text-align:center">
+                  <span style="background:#fee2e2;color:#dc2626;padding:2px 7px;border-radius:9999px;font-size:11px;font-weight:600;white-space:nowrap">
+                    ${m.meses_mora} mes${m.meses_mora !== 1 ? 'es' : ''}
+                  </span>
+                </td>
+                <td style="font-weight:700;color:#dc2626;text-align:right;white-space:nowrap">${formatCOP(m.saldo_total)}</td>
+              </tr>`).join('')}
+            </tbody>
+            <tfoot><tr style="background:#f9fafb">
+              <td colspan="5" style="padding:11px 10px;font-size:13px;font-weight:700;text-align:right;border-top:2px solid #e5e7eb;color:#374151">Total a cobrar</td>
+              <td style="padding:11px 10px;font-size:14px;font-weight:800;color:#dc2626;text-align:right;border-top:2px solid #e5e7eb;white-space:nowrap">${formatCOP(totalSaldo)}</td>
+            </tfoot>
+          </table>
+        </div>`}
+
+    <div class="footer">
+      <p>${esc(clubNombre)} · Documento confidencial</p>
+      <p>zensports.zenpra.ai</p>
     </div>
-  </div>
-  <div class="no-print" style="padding:0 32px 28px;text-align:center">
-    <button onclick="window.print()" style="background:${color};color:#fff;border:none;padding:12px 32px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer">
-      Imprimir / Guardar PDF
-    </button>
+
+    <div class="no-print">
+      <button class="btn-print" onclick="window.print()">Imprimir / Guardar PDF</button>
+    </div>
   </div>
 </body>
 </html>`;
