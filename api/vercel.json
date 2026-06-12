@@ -14,5 +14,15 @@
       "src": "/(.*)",
       "dest": "index.js"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/emails",
+      "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/cron/cobro",
+      "schedule": "0 13 * * *"
+    }
   ]
 }
