@@ -20,10 +20,11 @@ function isDuplicate(id) {
 }
 
 // Token HMAC diario para el PDF público de morosos (válido 48h)
-function generarTokenMorosos(clubId) {
+// Usa SUPABASE_SERVICE_ROLE_KEY como secreto — siempre disponible en Vercel
+function generarTokenMorosos(clubId, mes = '') {
   const dia = Math.floor(Date.now() / 86400000);
-  const secret = process.env.INTERNAL_API_SECRET || 'zensports';
-  return crypto.createHmac('sha256', secret).update(`morosos:${clubId}:${dia}`).digest('hex').slice(0, 32);
+  const secret = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').slice(0, 40) || 'zensports';
+  return crypto.createHmac('sha256', secret).update(`pdf:${clubId}:${mes}:${dia}`).digest('hex').slice(0, 32);
 }
 
 const API_BASE = 'https://city-fc-api-v2.vercel.app';
@@ -127,10 +128,13 @@ const TOOLS_BASE = [
   },
   {
     name: 'consultar_morosos',
-    description: 'SOLO ADMIN. Lista de jugadores con pagos pendientes, ordenados por deuda mayor. Devuelve morosos[] y pdf_url para que el admin pueda descargar el reporte completo.',
+    description: 'SOLO ADMIN. Lista de jugadores con pagos pendientes. Si se pasa "mes" (número 1-12), filtra solo ese mes; si no, muestra todos los morosos del año. Devuelve morosos[], total_deuda y pdf_url.',
     input_schema: {
       type: 'object',
-      properties: { club_id: { type: 'string' } },
+      properties: {
+        club_id: { type: 'string' },
+        mes: { type: 'number', description: 'Número del mes (1=Enero...12=Diciembre). Omitir para ver todos los morosos del año.' },
+      },
       required: ['club_id'],
     },
   },
@@ -311,27 +315,36 @@ async function runTool(name, input, contexto = {}) {
 
     if (name === 'consultar_morosos') {
       const anio = new Date().getFullYear();
+      // mes: null = año completo (morosos acumulados), número 1-12 = solo ese mes
+      const mesNum = input.mes ? parseInt(input.mes) : null;
       const supabase = db.supabase;
       const { data: players } = await supabase
         .from('players')
         .select('cedula, nombre, apellidos, celular, equipo')
         .eq('club_id', input.club_id)
         .eq('activo', true);
-      if (!players?.length) return { morosos: [], pdf_url: null };
+      if (!players?.length) return { morosos: [], total_deuda: 0, pdf_url: null };
 
       const morosos = [];
       for (const p of players) {
         const mens = await db.getMensualidades(input.club_id, p.cedula);
-        const pend = mens.filter(m => String(m.anio) === String(anio) && m.estado !== 'AL_DIA');
+        const pend = mens.filter(m => {
+          if (String(m.anio) !== String(anio)) return false;
+          if (m.estado === 'AL_DIA') return false;
+          if (mesNum !== null) return parseInt(m.numero_mes) === mesNum;
+          return true;
+        });
         if (pend.length > 0) {
           const deuda = pend.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
           morosos.push({ nombre: `${p.nombre} ${p.apellidos}`.trim(), celular: p.celular, equipo: p.equipo, meses_pendientes: pend.length, deuda });
         }
       }
       morosos.sort((a, b) => b.deuda - a.deuda);
-      const token = generarTokenMorosos(input.club_id);
-      const pdf_url = `${API_BASE}/api/publico/morosos-pdf/${input.club_id}?token=${token}`;
-      return { morosos: morosos.slice(0, 15), pdf_url };
+      const total_deuda = morosos.reduce((s, m) => s + m.deuda, 0);
+      const mesParam = mesNum ? String(mesNum) : '';
+      const token = generarTokenMorosos(input.club_id, mesParam);
+      const pdf_url = `${API_BASE}/api/publico/morosos-pdf/${input.club_id}?token=${token}${mesParam ? `&mes=${mesParam}` : ''}`;
+      return { morosos: morosos.slice(0, 15), total_deuda, pdf_url };
     }
 
     if (name === 'enviar_recordatorio_pago') {
@@ -523,14 +536,18 @@ FLUJO:
 - "eventos" o "calendario" / opción 5 → usa consultar_calendario con club_slug del contexto
 
 REPORTE PDF DE MOROSOS:
-- La tool consultar_morosos devuelve: morosos[] (lista) y pdf_url (link al reporte PDF).
-- SIEMPRE que uses consultar_morosos, responde con un resumen MUY CORTO (solo el número de morosos y el total en deuda), no listes todos los nombres.
-- SIEMPRE envía el pdf_url al final, en su propia línea, así exactamente:
-  📄 Reporte completo (PDF): <pdf_url>
-- Ejemplo de respuesta ideal:
-  "📋 Morosos del mes: 8 jugadores · Deuda total: $2.400.000
-  📄 Reporte completo (PDF): https://..."
-- El link abre el reporte listo para imprimir o guardar como PDF. No necesita contraseña.`;
+- La tool consultar_morosos devuelve: morosos[] (lista), total_deuda y pdf_url.
+- Cuando el admin pide morosos o el reporte PDF, primero pregúntale:
+  "¿Quieres el reporte completo del año o de un mes en particular?
+  1️⃣ Año completo
+  2️⃣ Un mes específico (dime cuál)"
+- Si elige año completo: llama consultar_morosos sin parámetro mes.
+- Si elige un mes: llama consultar_morosos con mes=número (Enero=1, Feb=2, ... Dic=12).
+- SIEMPRE responde con resumen MUY CORTO, no listes todos los nombres:
+  "📋 Morosos [período]: X jugadores · Total: $Y.YYY.YYY"
+- SIEMPRE incluye el pdf_url en línea propia:
+  "📄 Reporte PDF: <pdf_url>"
+- El link abre el reporte formateado listo para imprimir/guardar como PDF.`;
 
 const SYSTEM_VISITANTE = `${SYSTEM_BASE}
 

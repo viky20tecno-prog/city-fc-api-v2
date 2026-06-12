@@ -100,10 +100,11 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
 
 // ── PDF de morosos vía WhatsApp ──────────────────────────────────────────────
 // Token HMAC-SHA256 diario — válido 48h (hoy y ayer)
-function validarTokenMorosos(clubId, token) {
-  const secret = process.env.INTERNAL_API_SECRET || 'zensports';
+// Usa SUPABASE_SERVICE_ROLE_KEY como secreto — mismo valor que en wa-agent.js
+function validarTokenMorosos(clubId, token, mes = '') {
+  const secret = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').slice(0, 40) || 'zensports';
   const dia = Math.floor(Date.now() / 86400000);
-  const ok = (d) => crypto.createHmac('sha256', secret).update(`morosos:${clubId}:${d}`).digest('hex').slice(0, 32);
+  const ok = (d) => crypto.createHmac('sha256', secret).update(`pdf:${clubId}:${mes}:${d}`).digest('hex').slice(0, 32);
   return token === ok(dia) || token === ok(dia - 1);
 }
 
@@ -116,13 +117,14 @@ function formatCOP(n) {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(parseInt(n) || 0);
 }
 
-// GET /api/publico/morosos-pdf/:clubId?token=xxx
+// GET /api/publico/morosos-pdf/:clubId?token=xxx[&mes=N]
 router.get('/morosos-pdf/:clubId', async (req, res) => {
   try {
     const { clubId } = req.params;
-    const { token } = req.query;
+    const { token, mes } = req.query;
+    const mesParam = mes ? String(parseInt(mes) || '') : '';
 
-    if (!token || !validarTokenMorosos(clubId, token)) {
+    if (!token || !validarTokenMorosos(clubId, token, mesParam)) {
       return res.status(403).send('<h2>Enlace inválido o expirado</h2>');
     }
 
@@ -139,10 +141,10 @@ router.get('/morosos-pdf/:clubId', async (req, res) => {
     const color = (club.config?.color && club.config.color.startsWith('#')) ? club.config.color : '#E14924';
     const logoUrl = club.config?.logo_url || '';
 
-    // Calcular morosos (misma lógica que reports.js /defaulters)
     const anio = new Date().getFullYear();
     const currentMonth = new Date().getMonth() + 1;
     const pastGracePeriod = new Date().getDate() > 7;
+    const filtroMes = mesParam ? parseInt(mesParam) : null; // null = todos
 
     const [jugadores, allInvoices, suspensiones] = await Promise.all([
       db.getPlayers(club.id),
@@ -151,7 +153,7 @@ router.get('/morosos-pdf/:clubId', async (req, res) => {
     ]);
 
     const isSuspendido = (cedula, mesNum) =>
-      suspensiones.some(s =>
+      (suspensiones || []).some(s =>
         s.cedula === String(cedula) &&
         parseInt(s.anio) === anio &&
         s.mes_inicio <= mesNum &&
@@ -159,18 +161,29 @@ router.get('/morosos-pdf/:clubId', async (req, res) => {
       );
 
     const playersMap = {};
-    jugadores.forEach(p => { playersMap[p.cedula] = p; });
+    (jugadores || []).forEach(p => { playersMap[p.cedula] = p; });
 
     const MESES_N = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
     const defaultersMap = {};
-    allInvoices.forEach(inv => {
+    (allInvoices || []).forEach(inv => {
       if (String(inv.anio) !== String(anio)) return;
       if (inv.estado === 'AL_DIA') return;
       const mesNum = parseInt(inv.numero_mes);
       if (isSuspendido(inv.cedula, mesNum)) return;
-      if (inv.estado === 'PARCIAL' && mesNum === currentMonth) return;
-      if (mesNum < currentMonth || (mesNum === currentMonth && pastGracePeriod)) {
+
+      let incluir = false;
+      if (filtroMes !== null) {
+        // Filtro por mes específico: incluir si hay saldo pendiente en ese mes
+        incluir = (mesNum === filtroMes) && (parseFloat(inv.saldo_pendiente) || 0) > 0;
+      } else {
+        // Año completo: solo meses ya vencidos con mora real
+        if (inv.estado === 'PARCIAL' && mesNum === currentMonth) return;
+        incluir = (mesNum < currentMonth) || (mesNum === currentMonth && pastGracePeriod);
+        if (!(parseFloat(inv.saldo_pendiente) || 0 > 0)) incluir = false;
+      }
+
+      if (incluir) {
         if (!defaultersMap[inv.cedula]) {
           const p = playersMap[inv.cedula] || {};
           defaultersMap[inv.cedula] = {
@@ -183,9 +196,11 @@ router.get('/morosos-pdf/:clubId', async (req, res) => {
           };
         }
         const saldo = parseFloat(inv.saldo_pendiente) || 0;
-        defaultersMap[inv.cedula].saldo_total += saldo;
-        defaultersMap[inv.cedula].meses_mora += 1;
-        defaultersMap[inv.cedula].meses_arr.push(MESES_N[mesNum] || inv.mes);
+        if (saldo > 0) {
+          defaultersMap[inv.cedula].saldo_total += saldo;
+          defaultersMap[inv.cedula].meses_mora += 1;
+          defaultersMap[inv.cedula].meses_arr.push(MESES_N[mesNum] || inv.mes);
+        }
       }
     });
 
@@ -193,7 +208,9 @@ router.get('/morosos-pdf/:clubId', async (req, res) => {
     const totalSaldo = morosos.reduce((s, m) => s + m.saldo_total, 0);
 
     const fecha = new Date().toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' });
-    const mesActual = new Date().toLocaleString('es-CO', { month: 'long', year: 'numeric' });
+    const periodoLabel = filtroMes
+      ? `${MESES_N[filtroMes]} ${anio}`
+      : `Año ${anio}`;
 
     const logoHtml = logoUrl
       ? `<img src="${esc(logoUrl)}" alt="" style="height:44px;width:44px;object-fit:contain;border-radius:8px;margin-right:14px;flex-shrink:0" />`
@@ -232,7 +249,7 @@ router.get('/morosos-pdf/:clubId', async (req, res) => {
     </div></div>
     <div style="text-align:right">
       <p style="font-size:13px;font-weight:700;color:#fff">Reporte de Morosos</p>
-      <p style="font-size:11px;color:rgba(255,255,255,0.8);margin-top:2px">${mesActual} · ${fecha}</p>
+      <p style="font-size:11px;color:rgba(255,255,255,0.8);margin-top:2px">${periodoLabel} · ${fecha}</p>
     </div>
   </div>
   <div style="padding:28px 32px">
