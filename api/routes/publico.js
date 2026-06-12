@@ -105,7 +105,11 @@ function validarTokenMorosos(clubId, token) {
   const secret = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').slice(0, 40) || 'zensports';
   const dia = Math.floor(Date.now() / 86400000);
   const ok = (d) => crypto.createHmac('sha256', secret).update(`pdf:${clubId}:${d}`).digest('hex').slice(0, 32);
-  return token === ok(dia) || token === ok(dia - 1);
+  // Válido por 7 días (tolerancia a despliegues y reenvíos)
+  for (let i = 0; i < 7; i++) {
+    if (token === ok(dia - i)) return true;
+  }
+  return false;
 }
 
 function esc(str) {
