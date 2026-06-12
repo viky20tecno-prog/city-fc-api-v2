@@ -23,8 +23,7 @@ function isDuplicate(id) {
 // Usa SUPABASE_SERVICE_ROLE_KEY como secreto — siempre disponible en Vercel
 function generarTokenMorosos(clubId) {
   const dia = Math.floor(Date.now() / 86400000);
-  const secret = process.env.PDF_SECRET || 'zensports-pdf-fallback';
-  return crypto.createHmac('sha256', secret).update(`pdf:${clubId}:${dia}`).digest('hex').slice(0, 32);
+  return crypto.createHmac('sha256', 'zs-pdf-2026-x9k').update(`pdf:${clubId}:${dia}`).digest('hex').slice(0, 32);
 }
 
 const API_BASE = 'https://api.zensports.zenpra.ai';
