@@ -134,7 +134,14 @@ async function handleMorososPdf(req, res) {
       const secret = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').slice(0, 40) || 'zensports';
       const esperado = require('crypto').createHmac('sha256', secret).update(`pdf:${clubId}:${dia}`).digest('hex').slice(0, 32);
       console.error('[morosos-pdf] 403 — clubId:', clubId, '| token recibido:', token, '| token esperado:', esperado, '| dia:', dia);
-      return res.status(403).send(`<h2>Enlace inválido o expirado</h2><!-- debug: club=${clubId?.slice(0,8)} tok=${token?.slice(0,8)} exp=${esperado?.slice(0,8)} dia=${dia} -->`);
+      return res.status(403).send(`<!DOCTYPE html><html><body style="font-family:monospace;padding:24px">
+        <h2>Enlace inválido o expirado</h2>
+        <p style="color:#888;font-size:12px">
+          club: ${clubId?.slice(0,8)}<br>
+          tok:  ${token?.slice(0,8) || '(vacío)'}<br>
+          exp:  ${esperado?.slice(0,8)}<br>
+          dia:  ${dia}
+        </p></body></html>`);
     }
 
     // Obtener club
