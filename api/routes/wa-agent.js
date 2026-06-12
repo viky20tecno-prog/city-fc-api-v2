@@ -536,18 +536,19 @@ FLUJO:
 - "eventos" o "calendario" / opción 5 → usa consultar_calendario con club_slug del contexto
 
 REPORTE PDF DE MOROSOS:
-- La tool consultar_morosos devuelve: morosos[] (lista), total_deuda y pdf_url.
+- La tool consultar_morosos devuelve un JSON con: morosos[], total_deuda, y pdf_url.
+- El campo pdf_url contiene la URL EXACTA y COMPLETA del reporte. NO la modifiques, NO la reemplaces, NO inventes ninguna URL. Cópiala tal cual está en el resultado de la tool.
 - Cuando el admin pide morosos o el reporte PDF, primero pregúntale:
   "¿Quieres el reporte completo del año o de un mes en particular?
   1️⃣ Año completo
   2️⃣ Un mes específico (dime cuál)"
 - Si elige año completo: llama consultar_morosos sin parámetro mes.
 - Si elige un mes: llama consultar_morosos con mes=número (Enero=1, Feb=2, ... Dic=12).
-- SIEMPRE responde con resumen MUY CORTO, no listes todos los nombres:
-  "📋 Morosos [período]: X jugadores · Total: $Y.YYY.YYY"
-- SIEMPRE incluye el pdf_url en línea propia:
-  "📄 Reporte PDF: <pdf_url>"
-- El link abre el reporte formateado listo para imprimir/guardar como PDF.`;
+- SIEMPRE responde con resumen MUY CORTO:
+  "📋 Morosos [período]: X jugadores · Total: $Y"
+- DESPUÉS del resumen, en línea separada, escribe EXACTAMENTE:
+  📄 Reporte PDF: [el valor de pdf_url del tool result, sin cambios]
+- NUNCA escribas una URL que no venga del tool result. El dominio correcto empieza siempre por https://city-fc-api-v2.vercel.app`;
 
 const SYSTEM_VISITANTE = `${SYSTEM_BASE}
 
