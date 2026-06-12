@@ -281,9 +281,6 @@ router.get('/morosos-pdf/:clubId', async (req, res) => {
 </body>
 </html>`;
 
-    // Override CSP para permitir inline styles e imágenes externas (logo del club)
-    res.setHeader('Content-Security-Policy', "default-src 'self'; style-src 'unsafe-inline'; img-src * data:; script-src 'unsafe-inline'");
-    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
   } catch (error) {

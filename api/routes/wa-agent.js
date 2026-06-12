@@ -523,11 +523,14 @@ FLUJO:
 - "eventos" o "calendario" / opción 5 → usa consultar_calendario con club_slug del contexto
 
 REPORTE PDF DE MOROSOS:
-- La tool consultar_morosos devuelve dos campos: morosos (lista) y pdf_url (link al reporte).
-- Si el admin pide el PDF, el reporte, o si hay morosos, SIEMPRE incluye el pdf_url al final del mensaje así:
-  "📄 Reporte completo: <pdf_url>"
-- Si el admin solo pregunta cuántos morosos hay (resumen rápido), puedes omitir el link. Pero si pide el reporte o el PDF, es obligatorio enviarlo.
-- El link abre una página web con el reporte formateado — el admin puede imprimirlo o guardarlo como PDF desde el navegador.`;
+- La tool consultar_morosos devuelve: morosos[] (lista) y pdf_url (link al reporte PDF).
+- SIEMPRE que uses consultar_morosos, responde con un resumen MUY CORTO (solo el número de morosos y el total en deuda), no listes todos los nombres.
+- SIEMPRE envía el pdf_url al final, en su propia línea, así exactamente:
+  📄 Reporte completo (PDF): <pdf_url>
+- Ejemplo de respuesta ideal:
+  "📋 Morosos del mes: 8 jugadores · Deuda total: $2.400.000
+  📄 Reporte completo (PDF): https://..."
+- El link abre el reporte listo para imprimir o guardar como PDF. No necesita contraseña.`;
 
 const SYSTEM_VISITANTE = `${SYSTEM_BASE}
 
