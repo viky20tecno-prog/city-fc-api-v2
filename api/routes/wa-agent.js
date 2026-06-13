@@ -31,6 +31,16 @@ const API_BASE = 'https://api.zensports.zenpra.ai';
 const MESES = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio',
                'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
+const TEMPLATE_RECORDATORIO_DEFAULT = '⚽ *{club_nombre}*\n\nHola {nombre}, tienes *{meses} mensualidad(es)* pendiente(s) por un total de *{deuda}*.\n\nPor favor ponte al día para seguir disfrutando del club. ¡Gracias! 🙏';
+
+function aplicarTemplate(template, vars) {
+  return template
+    .replace(/{nombre}/g, vars.nombre || '')
+    .replace(/{deuda}/g, vars.deuda != null ? `$${Math.round(vars.deuda).toLocaleString('es-CO')}` : '')
+    .replace(/{meses}/g, String(vars.meses || ''))
+    .replace(/{club_nombre}/g, vars.club_nombre || '');
+}
+
 // ── Enviar mensaje de vuelta al usuario vía Meta API ─────────────────────────
 async function sendWA(to, text) {
   const url = `https://graph.facebook.com/v20.0/${process.env.WA_PHONE_NUMBER_ID}/messages`;
@@ -58,13 +68,14 @@ async function sendWA(to, text) {
 // buscar_jugador: SOLO admins — jugadores/visitantes no pueden ver datos de otras personas
 const TOOL_BUSCAR_JUGADOR = {
   name: 'buscar_jugador',
-  description: 'SOLO ADMIN. Busca un jugador del club por su número de celular. Retorna nombre, cédula, categoría y equipo.',
+  description: 'SOLO ADMIN. Busca un jugador del club. Puede buscar por celular, cédula o nombre. Pasa UNO de los tres parámetros.',
   input_schema: {
     type: 'object',
     properties: {
       celular: { type: 'string', description: 'Número de celular, ej: 3001234567' },
+      cedula:  { type: 'string', description: 'Número de cédula del jugador' },
+      nombre:  { type: 'string', description: 'Nombre o apellido (puede devolver varios resultados)' },
     },
-    required: ['celular'],
   },
 };
 
@@ -139,12 +150,21 @@ const TOOLS_BASE = [
   },
   {
     name: 'enviar_recordatorio_pago',
-    description: 'SOLO ADMIN. Envía un mensaje de WhatsApp a todos los jugadores con deuda pendiente.',
+    description: 'SOLO ADMIN. Envía un mensaje de WhatsApp a todos los jugadores con deuda pendiente. Puedes personalizar el texto con las variables {nombre}, {deuda} y {meses}.',
     input_schema: {
       type: 'object',
-      properties: { club_id: { type: 'string' }, club_nombre: { type: 'string' } },
+      properties: {
+        club_id:               { type: 'string' },
+        club_nombre:           { type: 'string' },
+        mensaje_personalizado: { type: 'string', description: 'Mensaje personalizado. Variables disponibles: {nombre}, {deuda}, {meses}. Si no se envía, usa el mensaje estándar.' },
+      },
       required: ['club_id', 'club_nombre'],
     },
+  },
+  {
+    name: 'consultar_metricas_wa',
+    description: 'SOLO ADMIN. Muestra métricas del bot de WhatsApp del club: último recordatorio masivo enviado.',
+    input_schema: { type: 'object', properties: {} },
   },
   {
     name: 'consultar_asistencia_hoy',
@@ -186,8 +206,23 @@ const TOOL_OBTENER_CARNET = {
   input_schema: { type: 'object', properties: {} },
 };
 
+// enviar_mensaje_jugador: SOLO admins — envía WA individual a un jugador del club
+const TOOL_ENVIAR_MENSAJE_JUGADOR = {
+  name: 'enviar_mensaje_jugador',
+  description: 'SOLO ADMIN. Envía un mensaje de WhatsApp personalizado a un jugador específico del club. Busca por cédula (exacto) o nombre (parcial).',
+  input_schema: {
+    type: 'object',
+    properties: {
+      cedula:  { type: 'string', description: 'Cédula del jugador (recomendado para exactitud)' },
+      nombre:  { type: 'string', description: 'Nombre o apellido si no tienes la cédula' },
+      mensaje: { type: 'string', description: 'Texto del mensaje a enviar' },
+    },
+    required: ['mensaje'],
+  },
+};
+
 // Herramientas por rol — jugadores y visitantes NO pueden buscar datos de otras personas
-const TOOLS_ADMIN     = [TOOL_BUSCAR_JUGADOR, ...TOOLS_BASE];
+const TOOLS_ADMIN     = [TOOL_BUSCAR_JUGADOR, TOOL_ENVIAR_MENSAJE_JUGADOR, ...TOOLS_BASE];
 const TOOLS_JUGADOR   = [TOOL_OBTENER_CARNET, ...TOOLS_BASE.filter(t => !['registrar_lead', 'consultar_pagos_club', 'consultar_morosos', 'enviar_recordatorio_pago', 'consultar_asistencia_hoy'].includes(t.name))];
 const TOOLS_VISITANTE = TOOLS_BASE.filter(t => ['registrar_lead', 'info_zensports'].includes(t.name));
 
@@ -195,16 +230,27 @@ const TOOLS_VISITANTE = TOOLS_BASE.filter(t => ['registrar_lead', 'info_zensport
 async function runTool(name, input, contexto = {}) {
   try {
     if (name === 'buscar_jugador') {
+      if (input.cedula) {
+        const jugador = await db.getPlayerByCedula(contexto.club_id, input.cedula);
+        if (!jugador) return { encontrado: false };
+        return { encontrado: true, nombre: `${jugador.nombre} ${jugador.apellidos}`.trim(),
+          cedula: jugador.cedula, categoria: jugador.categoria, equipo: jugador.equipo,
+          posicion: jugador.posicion, celular: jugador.celular };
+      }
+      if (input.nombre) {
+        const resultados = await db.searchPlayersByQuery(contexto.club_id, input.nombre);
+        if (!resultados.length) return { encontrado: false, resultados: [] };
+        return { encontrado: true, resultados: resultados.map(j => ({
+          nombre: `${j.nombre} ${j.apellidos}`.trim(), cedula: j.cedula,
+          categoria: j.categoria, equipo: j.equipo, celular: j.celular,
+        })) };
+      }
+      // buscar por celular (comportamiento original)
       const jugador = await db.getPlayerByCelular(contexto.club_id, input.celular);
       if (!jugador) return { encontrado: false };
-      return {
-        encontrado: true,
-        nombre:     `${jugador.nombre} ${jugador.apellidos}`.trim(),
-        cedula:     jugador.cedula,
-        categoria:  jugador.categoria,
-        equipo:     jugador.equipo,
-        posicion:   jugador.posicion,
-      };
+      return { encontrado: true, nombre: `${jugador.nombre} ${jugador.apellidos}`.trim(),
+        cedula: jugador.cedula, categoria: jugador.categoria, equipo: jugador.equipo,
+        posicion: jugador.posicion, celular: jugador.celular };
     }
 
     if (name === 'consultar_pagos') {
@@ -224,8 +270,11 @@ async function runTool(name, input, contexto = {}) {
       const qr_pago_url    = clubData?.config?.qr_pago_url    || null;
       const llave_pago     = clubData?.config?.llave_pago     || null;
       const cuenta_bancaria = clubData?.config?.cuenta_bancaria || null;
+      const portal_url = (contexto.club_slug && contexto.cedula)
+        ? `https://zensports.zenpra.ai/p/${contexto.club_slug}/${contexto.cedula}`
+        : null;
       return { anio, al_dia: al_dia.length, pendientes: pendientes.length, total_deuda,
-               qr_pago_url, llave_pago, cuenta_bancaria,
+               qr_pago_url, llave_pago, cuenta_bancaria, portal_url,
                detalle: del_anio.map(m => ({ mes: m.mes, estado: m.estado, saldo: m.saldo_pendiente })) };
     }
 
@@ -358,27 +407,33 @@ async function runTool(name, input, contexto = {}) {
         .not('celular', 'is', null);
       if (!players?.length) return { enviados: 0 };
 
+      if (!process.env.WAHA_URL) return { error: 'WAHA no configurado' };
+
+      const template = input.mensaje_personalizado || TEMPLATE_RECORDATORIO_DEFAULT;
       let enviados = 0;
-      const wahaUrl = process.env.WAHA_URL;
-      const apiKey  = process.env.WAHA_API_KEY;
-      const session = process.env.WAHA_SESSION || 'default';
-      if (!wahaUrl) return { error: 'WAHA no configurado' };
 
       for (const p of players) {
         const mens = await db.getMensualidades(input.club_id, p.cedula);
         const pend = mens.filter(m => String(m.anio) === String(anio) && m.estado !== 'AL_DIA');
         if (!pend.length) continue;
         const deuda = pend.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
-        const msg = `⚽ *${input.club_nombre}*\n\nHola ${p.nombre}, tienes *${pend.length} mensualidad(es)* pendiente(s) por un total de *$${deuda.toLocaleString('es-CO')}*.\n\nPor favor ponerte al día para seguir disfrutando del club. ¡Gracias! 🙏`;
-        const chatId = `57${String(p.celular).replace(/\D/g, '').replace(/^57/, '')}@c.us`;
+        const msg = aplicarTemplate(template, { nombre: p.nombre, deuda, meses: pend.length, club_nombre: input.club_nombre });
         try {
-          const headers = { 'Content-Type': 'application/json' };
-          if (apiKey) headers['X-Api-Key'] = apiKey;
-          await fetch(`${wahaUrl}/api/sendText`, { method: 'POST', headers, body: JSON.stringify({ chatId, text: msg, session }) });
+          await sendWAHA(p.celular, msg);
           enviados++;
         } catch (e) { /* continuar con el siguiente */ }
       }
-      return { enviados, mensaje: `Se enviaron recordatorios a ${enviados} jugadores con deuda pendiente.` };
+
+      // Guardar métricas en clubs.config
+      try {
+        const { data: clubData } = await supabase.from('clubs').select('config').eq('id', input.club_id).single();
+        const waMetrics = clubData?.config?.wa_metrics || {};
+        waMetrics.ultimo_recordatorio = { fecha: new Date().toISOString(), enviados };
+        waMetrics.total_recordatorios = (waMetrics.total_recordatorios || 0) + 1;
+        await supabase.from('clubs').update({ config: { ...(clubData?.config || {}), wa_metrics: waMetrics } }).eq('id', input.club_id);
+      } catch (e) { /* no crítico */ }
+
+      return { enviados, mensaje: `Recordatorio enviado a ${enviados} jugador(es) con deuda pendiente.` };
     }
 
     if (name === 'consultar_asistencia_hoy') {
@@ -448,6 +503,47 @@ async function runTool(name, input, contexto = {}) {
                instruccion: 'Envía la URL al jugador y dile que puede abrirla en su celular para ver y guardar su carnet digital.' };
     }
 
+    if (name === 'enviar_mensaje_jugador') {
+      const clubId = contexto.club_id;
+      let jugador = null;
+
+      if (input.cedula) {
+        jugador = await db.getPlayerByCedula(clubId, input.cedula);
+      } else if (input.nombre) {
+        const resultados = await db.searchPlayersByQuery(clubId, input.nombre);
+        if (resultados.length > 1) {
+          return {
+            ambiguo: true,
+            mensaje: 'Encontré varios jugadores con ese nombre. Dame la cédula para ser exacto.',
+            resultados: resultados.map(j => ({ nombre: `${j.nombre} ${j.apellidos}`.trim(), cedula: j.cedula })),
+          };
+        }
+        jugador = resultados[0] || null;
+      }
+
+      if (!jugador) return { error: 'Jugador no encontrado en el club.' };
+      if (!jugador.celular) return { error: `${jugador.nombre} no tiene celular registrado.` };
+
+      await sendWAHA(jugador.celular, input.mensaje);
+      return { enviado: true, destinatario: `${jugador.nombre} ${jugador.apellidos}`.trim(), celular: jugador.celular };
+    }
+
+    if (name === 'consultar_metricas_wa') {
+      const supabase = db.supabase;
+      const { data: clubData } = await supabase.from('clubs').select('config').eq('id', contexto.club_id).single();
+      const waMetrics = clubData?.config?.wa_metrics || {};
+      const ultimo = waMetrics.ultimo_recordatorio;
+      return {
+        ultimo_recordatorio: ultimo
+          ? {
+              fecha: new Date(ultimo.fecha).toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+              enviados: ultimo.enviados,
+            }
+          : null,
+        total_recordatorios_enviados: waMetrics.total_recordatorios || 0,
+      };
+    }
+
     return { error: 'Herramienta no encontrada' };
   } catch (err) {
     console.error(`[wa-agent] tool ${name} error:`, err.message);
@@ -505,6 +601,12 @@ FLUJO:
 - Para carnet / opción 5 → usa obtener_carnet, luego envía: "🪪 *Tu carnet digital:*\n{url}\n\nÁbrelo desde tu celular para verlo y guardarlo como captura de pantalla."
 - "Hablar con el admin" / opción 6 → da el número celular_admin del contexto
 
+PORTAL DEL ATLETA — OBLIGATORIO:
+Al responder consultar_pagos, la ÚLTIMA línea de tu mensaje SIEMPRE debe ser exactamente:
+🔗 *Tu portal:* https://zensports.zenpra.ai/p/CLUB_SLUG/CEDULA
+Reemplaza CLUB_SLUG con el valor de club_slug del CONTEXTO y CEDULA con el valor de cedula del CONTEXTO.
+Esta línea es MANDATORIA. Si olvidas incluirla, tu respuesta está incompleta.
+
 MEDIOS DE PAGO (cuando muestres el resultado de consultar_pagos):
 - Muestra TODOS los medios configurados, salvo que el jugador pida explícitamente solo uno
 - qr_pago_url → "📷 QR de pago: <url>"
@@ -528,6 +630,8 @@ MENÚ DE ADMIN (usar cuando digan "hola", "menu" o sea primera vez):
 3️⃣ Enviar recordatorio de pago masivo
 4️⃣ Ver asistencia del día
 5️⃣ Ver próximos eventos del club
+6️⃣ Métricas del bot
+7️⃣ Enviar mensaje a un jugador
 
 Escribe el número o dime directamente 💼
 ---
@@ -535,9 +639,16 @@ Escribe el número o dime directamente 💼
 FLUJO:
 - "pagos pendientes" / opción 1 → usa consultar_pagos_club
 - "morosos" / opción 2 → usa consultar_morosos
-- "recordatorio" / opción 3 → usa enviar_recordatorio_pago
+- "recordatorio" / opción 3 → usa enviar_recordatorio_pago; si el admin quiere personalizar el mensaje pregúntale el texto antes de llamarla
 - "asistencia" / opción 4 → usa consultar_asistencia_hoy
 - "eventos" o "calendario" / opción 5 → usa consultar_calendario con club_slug del contexto
+- "métricas" / opción 6 → usa consultar_metricas_wa
+- "enviar mensaje a [nombre/cédula]" / opción 7 → usa enviar_mensaje_jugador con la cédula o nombre y el texto
+
+RECORDATORIO PERSONALIZADO:
+- Si el admin dice "envía recordatorio con mensaje: [texto]", usa ese texto como mensaje_personalizado
+- Variables disponibles que el admin puede usar: {nombre} = nombre del jugador, {deuda} = monto, {meses} = meses pendientes
+- Ejemplo: "Hola {nombre}, tu cuota de ${'{deuda}'} está vencida. Comunícate con nosotros."
 
 REPORTE PDF DE MOROSOS:
 - La tool consultar_morosos devuelve un JSON con: total_morosos (número real de morosos), morosos[] (muestra parcial) y total_deuda.
@@ -737,8 +848,18 @@ router.post('/webhook', async (req, res) => {
     const text = message.text.body;
     console.log(`[wa-agent] Meta mensaje de ${from}: ${text}`);
 
-    const reply = await generateReply(from, text);
+    let reply, pdfUrl;
+    try {
+      const result = await generateReply(from, text);
+      if (!result) return res.status(200).json({ status: 'ok' });
+      ({ reply, pdfUrl } = result);
+    } catch (claudeErr) {
+      console.error('[wa-agent] Claude error (Meta):', claudeErr.message);
+      reply = 'En este momento tengo problemas para procesar tu mensaje. Por favor intenta en unos minutos 🙏';
+    }
+
     if (reply) await sendWA(from, reply);
+    if (pdfUrl) await sendWA(from, pdfUrl);
     console.log(`[wa-agent] Procesado OK para ${from}`);
   } catch (err) {
     console.error('[wa-agent] error:', err.message);

@@ -50,11 +50,13 @@ function shell({ preheader = '', body }) {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <title>ZenSports</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
 <style>
   body,table,td,p,a{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%}
   table,td{mso-table-lspace:0pt;mso-table-rspace:0pt}
-  body{margin:0;padding:0;background:#07080f}
+  body{margin:0;padding:0;background:#0B0D1A}
   @media only screen and (max-width:620px){
     .wrap{width:100%!important;padding:0 16px!important}
     .card{padding:28px 22px!important}
@@ -63,12 +65,12 @@ function shell({ preheader = '', body }) {
   }
 </style>
 </head>
-<body style="margin:0;padding:0;background:#07080f;font-family:'Inter',system-ui,-apple-system,BlinkMacSystemFont,sans-serif;">
+<body style="margin:0;padding:0;background:#0B0D1A;font-family:'Space Grotesk','Inter',system-ui,sans-serif;">
 
 <!-- preheader invisible -->
-<div style="display:none;max-height:0;overflow:hidden;font-size:1px;color:#07080f;">${preheader}&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>
+<div style="display:none;max-height:0;overflow:hidden;font-size:1px;color:#0B0D1A;">${preheader}&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>
 
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#07080f;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0B0D1A;">
 <tr><td align="center" style="padding:32px 12px 56px;">
 
   <table class="wrap" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;">
@@ -78,7 +80,7 @@ function shell({ preheader = '', body }) {
       <td style="padding:0 0 28px;">
         <table cellpadding="0" cellspacing="0" border="0">
           <tr>
-            <td style="background:linear-gradient(135deg,#E14924 0%,#bf3b1c 100%);border-radius:11px;width:38px;height:38px;text-align:center;vertical-align:middle;font-size:20px;">⚡</td>
+            <td style="background:linear-gradient(135deg,#6A00FF 0%,#AE68FF 100%);border-radius:11px;width:38px;height:38px;text-align:center;vertical-align:middle;font-size:20px;">⚡</td>
             <td style="padding-left:10px;vertical-align:middle;">
               <span style="font-size:17px;font-weight:900;color:#fff;letter-spacing:-0.4px;">ZenSports</span>
             </td>
@@ -117,7 +119,7 @@ function shell({ preheader = '', body }) {
 
 // ─── Componentes reutilizables ───────────────────────────────────────────────
 
-function mainCard({ badge, badgeColor = '#E14924', title, body, ctaText, ctaUrl, ctaColor = '#E14924', bgColor = 'rgba(255,255,255,0.03)', borderColor = 'rgba(255,255,255,0.08)' }) {
+function mainCard({ badge, badgeColor = '#6A00FF', title, body, ctaText, ctaUrl, ctaColor = '#6A00FF', bgColor = 'rgba(255,255,255,0.03)', borderColor = 'rgba(255,255,255,0.08)' }) {
   return `
 <tr>
   <td class="card" style="background:${bgColor};border:1px solid ${borderColor};border-radius:18px;padding:38px 34px;">
@@ -171,7 +173,7 @@ function sendWelcomeClub({ nombre_club, nombre_admin, email, club_slug }) {
     ${mainCard({
       badge: 'Bienvenido al equipo',
       title: `${nombre_club} ya está en ZenSports 🏆`,
-      body: `Hola <strong style="color:rgba(255,255,255,0.85);">${nombre_admin}</strong>, tu panel está listo. Tienes <strong style="color:#E14924;">5 días de prueba gratuita</strong> — sin tarjeta de crédito, sin letra pequeña.`,
+      body: `Hola <strong style="color:rgba(255,255,255,0.85);">${nombre_admin}</strong>, tu panel está listo. Tienes <strong style="color:#6A00FF;">5 días de prueba gratuita</strong> — sin tarjeta de crédito, sin letra pequeña.`,
       ctaText: 'Abrir mi panel',
       ctaUrl: panelUrl,
     })}
@@ -185,9 +187,9 @@ function sendWelcomeClub({ nombre_club, nombre_admin, email, club_slug }) {
     })}
     ${spacer(12)}
     <tr>
-      <td style="background:rgba(225,73,36,0.06);border:1px solid rgba(225,73,36,0.14);border-radius:12px;padding:18px 24px;">
+      <td style="background:rgba(106,0,255,0.06);border:1px solid rgba(106,0,255,0.14);border-radius:12px;padding:18px 24px;">
         <p style="margin:0;font-size:13px;color:rgba(255,255,255,0.45);line-height:1.6;">
-          ¿Necesitas ayuda para empezar? <a href="${WA_SOPORTE}" style="color:#E14924;text-decoration:none;font-weight:600;">Escríbenos por WhatsApp</a> — respondemos en minutos.
+          ¿Necesitas ayuda para empezar? <a href="${WA_SOPORTE}" style="color:#6A00FF;text-decoration:none;font-weight:600;">Escríbenos por WhatsApp</a> — respondemos en minutos.
         </p>
       </td>
     </tr>`,
@@ -252,7 +254,7 @@ function sendTrialExpiring({ nombre_club, nombre_admin, email, dias_restantes })
         : `Hola <strong style="color:rgba(255,255,255,0.85);">${nombre_admin}</strong>, te quedan <strong style="color:#F59E0B;">${dias_restantes} días</strong> de prueba gratuita. Activa tu plan ahora y no pierdas el ritmo que llevas.`,
       ctaText: 'Elegir mi plan',
       ctaUrl: `${BASE_URL}/#precios`,
-      ctaColor: esUltimoDia ? '#EF4444' : '#E14924',
+      ctaColor: esUltimoDia ? '#EF4444' : '#6A00FF',
     })}
     ${secondaryCard({
       title: 'Lo que incluye cualquier plan',
@@ -283,7 +285,7 @@ function sendTrialExpired({ nombre_club, nombre_admin, email }) {
       body: `El acceso a <strong style="color:rgba(255,255,255,0.8);">${nombre_club}</strong> está pausado, pero <strong style="color:rgba(255,255,255,0.8);">todos tus datos siguen guardados</strong>. Activa un plan y retoma exactamente donde lo dejaste — sin perder nada.`,
       ctaText: 'Activar mi plan ahora',
       ctaUrl: `${BASE_URL}/#precios`,
-      ctaColor: '#E14924',
+      ctaColor: '#6A00FF',
     })}
     ${secondaryCard({
       title: 'Qué pasa si no activas hoy',
@@ -297,7 +299,7 @@ function sendTrialExpired({ nombre_club, nombre_admin, email }) {
     <tr>
       <td style="text-align:center;padding:8px 0;">
         <p style="margin:0;font-size:13px;color:rgba(255,255,255,0.3);">
-          ¿Dudas sobre qué plan elegir? <a href="${WA_SOPORTE}" style="color:#E14924;text-decoration:none;font-weight:600;">Hablemos por WhatsApp</a>
+          ¿Dudas sobre qué plan elegir? <a href="${WA_SOPORTE}" style="color:#6A00FF;text-decoration:none;font-weight:600;">Hablemos por WhatsApp</a>
         </p>
       </td>
     </tr>`,

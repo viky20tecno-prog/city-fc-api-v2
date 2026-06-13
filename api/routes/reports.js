@@ -61,9 +61,11 @@ router.get('/summary', async (req, res) => {
       );
     }
 
-    // Lógica morosos
+    // Lógica morosos — solo jugadores activos
+    const cedulasActivas = new Set(jugadores.map(j => String(j.cedula)));
     const morososMap = {};
     invoicesAnio.forEach(inv => {
+      if (!cedulasActivas.has(String(inv.cedula))) return;
       const mesNum = parseInt(inv.numero_mes);
       const saldo  = parseFloat(inv.saldo_pendiente) || 0;
       if (inv.estado === 'AL_DIA' || saldo <= 0) return;
@@ -189,16 +191,15 @@ router.get('/defaulters', async (req, res) => {
 
     const defaultersMap = {};
     invoices.forEach(inv => {
+      const player = playersMap[inv.cedula];
+      if (!player) return; // excluir jugadores archivados
       if (!defaultersMap[inv.cedula]) {
         defaultersMap[inv.cedula] = {
-          cedula: inv.cedula, nombre_completo: '', celular: '',
+          cedula: inv.cedula,
+          nombre_completo: `${player.nombre || ''} ${player.apellidos || ''}`.trim(),
+          celular: player.celular,
           total_deuda: 0, meses_en_mora: [],
         };
-      }
-      const player = playersMap[inv.cedula];
-      if (player) {
-        defaultersMap[inv.cedula].nombre_completo = `${player.nombre || ''} ${player.apellidos || ''}`.trim();
-        defaultersMap[inv.cedula].celular = player.celular;
       }
       const deuda = parseFloat(inv.saldo_pendiente) || 0;
       defaultersMap[inv.cedula].total_deuda += deuda;
