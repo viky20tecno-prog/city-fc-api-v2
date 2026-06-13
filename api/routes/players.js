@@ -14,7 +14,8 @@ router.get('/', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Club no encontrado' });
     }
 
-    const jugadores = await db.getPlayers(club.id);
+    const incluirArchivados = req.query.incluir_archivados === 'true';
+    const jugadores = await db.getPlayers(club.id, { incluirArchivados });
     res.json({ success: true, total: jugadores.length, data: jugadores });
   } catch (error) {
     console.error('Error in GET /players:', error);

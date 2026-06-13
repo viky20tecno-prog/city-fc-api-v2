@@ -12,13 +12,10 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 /**
  * Obtener todos los jugadores activos de un club
  */
-async function getPlayers(club_id) {
-  const { data, error } = await supabase
-    .from('players')
-    .select('*')
-    .eq('club_id', club_id)
-    .eq('activo', true);
-
+async function getPlayers(club_id, { incluirArchivados = false } = {}) {
+  let query = supabase.from('players').select('*').eq('club_id', club_id);
+  if (!incluirArchivados) query = query.eq('activo', true);
+  const { data, error } = await query;
   if (error) throw error;
   return data;
 }
