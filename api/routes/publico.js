@@ -361,4 +361,21 @@ async function handleMorososPdf(req, res) {
 router.get('/morosos-pdf/:clubId', handleMorososPdf);
 router.get('/morosos-pdf/:clubId/:mes', handleMorososPdf);
 
+// GET /api/publico/stats — métricas públicas para la landing
+router.get('/stats', async (req, res) => {
+  try {
+    const { supabase } = require('../services/db');
+    const [{ count: totalJugadores }, { count: totalClubs }] = await Promise.all([
+      supabase.from('jugadores').select('*', { count: 'exact', head: true }),
+      supabase.from('clubs').select('*', { count: 'exact', head: true }).neq('estado', 'expired'),
+    ]);
+    res.json({
+      jugadores: totalJugadores || 0,
+      clubs: totalClubs || 0,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Stats unavailable' });
+  }
+});
+
 module.exports = router;
