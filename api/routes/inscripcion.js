@@ -25,6 +25,7 @@ router.post('/', inscripcionLimiter, async (req, res) => {
       estatura, peso, direccion, municipio, barrio,
       familiar_emergencia, celular_contacto,
       categoria, equipo, categorias,
+      deporte,
       tipo_descuento = 'NA',
       website = '',           // honeypot — bots lo rellenan, humanos no lo ven
     } = req.body;
@@ -52,6 +53,10 @@ router.post('/', inscripcionLimiter, async (req, res) => {
 
     const CUOTA   = parseFloat(club.config?.valor_mensualidad) || 65000;
     const TORNEOS = Array.isArray(club.config?.torneos_iniciales) ? club.config.torneos_iniciales : [];
+
+    // Deporte: usa el enviado por el form; si no viene, toma el único deporte del club
+    const deportesClub = db.getDeportesClub(club);
+    const deporteJugador = deporte || (deportesClub.length === 1 ? deportesClub[0] : null);
 
     // Verificar duplicado por cédula
     const existente = await db.getPlayerByCedula(club.id, cedula);
@@ -88,6 +93,7 @@ router.post('/', inscripcionLimiter, async (req, res) => {
       equipo:              equipo              || null,
       categorias:          Array.isArray(categorias) ? categorias
                            : (categoria ? [{ categoria, equipo: equipo || '' }] : []),
+      deporte:             deporteJugador,
       activo:              true,
     });
 
