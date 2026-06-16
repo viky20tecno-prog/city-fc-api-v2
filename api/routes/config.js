@@ -48,7 +48,10 @@ router.get('/', async (req, res) => {
       redes_sociales:             club.config?.redes_sociales             || {},
       llave_pago:                 club.config?.llave_pago                 || '',
       qr_pago_url:                club.config?.qr_pago_url                || '',
-      deporte:                    club.config?.deporte                    || 'futbol',
+      deporte:   club.config?.deporte   || 'futbol',
+      deportes:  Array.isArray(club.config?.deportes) && club.config.deportes.length > 0
+        ? club.config.deportes
+        : [club.config?.deporte || 'futbol'],
     });
   } catch (error) {
     console.error('Error in GET /config:', error);

@@ -274,6 +274,7 @@ async function updatePlayer(club_id, cedula, updates) {
     'municipio', 'barrio', 'direccion',
     'familiar_emergencia', 'celular_contacto', 'notas',
     'categoria', 'equipo', 'categorias',
+    'deporte',
   ];
   const fields = Object.fromEntries(
     Object.entries(updates).filter(([k]) => allowed.includes(k))
@@ -872,6 +873,17 @@ async function upsertWaSession(phone, { rol, contexto, messages }) {
   if (error) console.error('[db] upsertWaSession error:', error.message);
 }
 
+/**
+ * Normaliza el campo de deportes del club: acepta string legacy o array nuevo.
+ * Siempre devuelve un array no vacío.
+ */
+function getDeportesClub(club) {
+  const config = club?.config || {};
+  if (Array.isArray(config.deportes) && config.deportes.length > 0) return config.deportes;
+  if (typeof config.deporte === 'string' && config.deporte) return [config.deporte];
+  return ['futbol'];
+}
+
 module.exports = {
   supabase,
   supabase,
@@ -944,4 +956,5 @@ module.exports = {
   upsertAsistencia,
   getAllActiveClubs,
   marcarEmailEnviado,
+  getDeportesClub,
 };

@@ -15,7 +15,10 @@ router.get('/', async (req, res) => {
     }
 
     const incluirArchivados = req.query.incluir_archivados === 'true';
-    const jugadores = await db.getPlayers(club.id, { incluirArchivados });
+    let jugadores = await db.getPlayers(club.id, { incluirArchivados });
+    if (req.query.deporte) {
+      jugadores = jugadores.filter(j => j.deporte === req.query.deporte);
+    }
     res.json({ success: true, total: jugadores.length, data: jugadores });
   } catch (error) {
     console.error('Error in GET /players:', error);
@@ -105,6 +108,10 @@ router.post('/bulk', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Se requiere un array de jugadores no vacío' });
     }
 
+    // Deporte por defecto para el bulk import: el único deporte del club, o null si hay varios
+    const deportesClub = db.getDeportesClub(club);
+    const deporteDefault = deportesClub.length === 1 ? deportesClub[0] : null;
+
     // Cédulas ya existentes en el club (una sola query)
     const { data: existing } = await db.supabase
       .from('players')
@@ -167,6 +174,7 @@ router.post('/bulk', async (req, res) => {
         categoria:            up(j.categoria),
         equipo:               up(j.equipo),
         categorias:           j.categoria ? [{ categoria: up(j.categoria), equipo: up(j.equipo) || '' }] : [],
+        deporte:              str(j.deporte) || deporteDefault,
         activo:               true,
       });
     });

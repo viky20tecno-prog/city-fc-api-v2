@@ -24,7 +24,12 @@ function generarSlug(nombre) {
 }
 
 router.post('/', async (req, res) => {
-  const { nombre_club, ciudad, email, password, nombre_admin, celular_admin, color, codigo_pais } = req.body || {};
+  const { nombre_club, ciudad, email, password, nombre_admin, celular_admin, color, codigo_pais, deporte, deportes } = req.body || {};
+
+  // Normalizar deportes: acepta array nuevo o string legacy
+  const deportesArray = Array.isArray(deportes) && deportes.length > 0
+    ? deportes
+    : (deporte ? [deporte] : ['futbol']);
 
   if (!nombre_club?.trim() || !email?.trim() || !password) {
     return res.status(400).json({ success: false, error: 'Nombre del club, email y contraseña son requeridos.' });
@@ -76,11 +81,13 @@ router.post('/', async (req, res) => {
       codigo_pais:       codigo_pais || '57',
       plan:              'trial',
       trial_ends_at:     new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
+      deporte:           deportesArray[0],
+      deportes:          deportesArray,
       modulos: {
         dashboard:    true,
         jugadores:    true,
         uniformes:    true,
-        arbitraje:    true,
+        arbitraje:    deportesArray.includes('futbol'),
         cobro:        true,
         whatsapp:     true,
         conciliacion: true,
