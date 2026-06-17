@@ -618,7 +618,7 @@ FLUJO:
 - Para partidos → usa consultar_partidos con club_id del contexto
 - Para asistencia → usa consultar_asistencia con club_id y cedula del contexto
 - Para carnet / opción 5 → usa obtener_carnet, luego envía: "🪪 *Tu carnet digital:*\n{url}\n\nÁbrelo desde tu celular para verlo y guardarlo como captura de pantalla."
-- "Hablar con el admin" / opción 6 → da el número celular_admin del contexto
+- "Hablar con el admin" / opción 6 → da el número contacto_admin del contexto
 
 PORTAL DEL ATLETA — OBLIGATORIO:
 Al responder consultar_pagos, la ÚLTIMA línea de tu mensaje SIEMPRE debe ser exactamente:
@@ -820,7 +820,8 @@ async function identificarRol(celular, sessionData) {
         club_id:       jugador.club_id,
         club_slug:     jugador.clubs?.slug,
         club_nombre:   jugador.clubs?.config?.nombre || jugador.clubs?.name,
-        celular_admin: jugador.clubs?.config?.celular_admin,
+        celular_admin:    jugador.clubs?.celular_admin,
+        contacto_admin:   jugador.clubs?.config?.whatsapp || jugador.clubs?.celular_admin,
         categoria:     jugador.categoria,
         equipo:        jugador.equipo,
         foto_url:      jugador.foto_url || null,

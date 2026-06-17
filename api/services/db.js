@@ -44,7 +44,7 @@ async function getPlayerByCelularGlobal(celular) {
   // Intentar todas las variantes: completo, con/sin +, sin código de país, con prefijo Colombia
   const { data, error } = await supabase
     .from('players')
-    .select('*, clubs(slug, name, config)')
+    .select('*, clubs(slug, name, celular_admin, config)')
     .or(`celular.eq.${digits},celular.eq.+${digits},celular.eq.${local},celular.eq.57${local},celular.eq.+57${local}`)
     .eq('activo', true)
     .limit(1)
