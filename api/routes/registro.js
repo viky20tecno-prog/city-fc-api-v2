@@ -4,6 +4,13 @@ const rateLimit = require('express-rate-limit');
 const { createClient } = require('@supabase/supabase-js');
 const { sendWelcomeClub } = require('../services/email');
 
+// Cliente con service role — creado una vez al arrancar el servidor
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  { auth: { persistSession: false } }
+);
+
 const registroLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,
@@ -38,7 +45,6 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ success: false, error: 'La contraseña debe tener mínimo 8 caracteres.' });
   }
 
-  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
   const slug = generarSlug(nombre_club.trim());
 
   // Verificar que el slug no exista
