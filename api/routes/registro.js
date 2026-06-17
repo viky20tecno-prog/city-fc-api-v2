@@ -47,12 +47,6 @@ router.post('/', async (req, res) => {
 
   const slug = generarSlug(nombre_club.trim());
 
-  // Verificar que el slug no exista
-  const { data: existing } = await supabase.from('clubs').select('id').eq('slug', slug).maybeSingle();
-  if (existing) {
-    return res.status(400).json({ success: false, error: `Ya existe un club con el nombre "${nombre_club}". Intenta con un nombre diferente.` });
-  }
-
   // Crear usuario en Supabase Auth
   const { data: authData, error: authError } = await supabase.auth.admin.createUser({
     email:         email.trim().toLowerCase(),
@@ -70,50 +64,56 @@ router.post('/', async (req, res) => {
   }
 
   const userId = authData.user.id;
+  const emailNorm = email.trim().toLowerCase();
 
-  // Crear el club
-  const { error: clubError } = await supabase.from('clubs').insert({
-    slug,
-    name:          nombre_club.trim(),
-    is_active:     true,
-    owner_user_id: userId,
-    celular_admin: celular_admin || null,
-    config: {
-      nombre:            nombre_club.trim(),
-      ciudad:            ciudad?.trim() || '',
-      valor_mensualidad: 65000,
-      color:             color || '#00AAFF',
-      subtitulo:         '',
-      codigo_pais:       codigo_pais || '57',
-      plan:              'trial',
-      trial_ends_at:     new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
-      deporte:           deportesArray[0],
-      deportes:          deportesArray,
-      modulos: {
-        dashboard:    true,
-        jugadores:    true,
-        uniformes:    true,
-        arbitraje:    deportesArray.includes('futbol'),
-        cobro:        true,
-        whatsapp:     true,
-        conciliacion: true,
+  // Crear club + sign-in en paralelo (ambos dependen de userId pero no entre sí)
+  const [{ error: clubError }, signInResult] = await Promise.all([
+    supabase.from('clubs').insert({
+      slug,
+      name:          nombre_club.trim(),
+      is_active:     true,
+      owner_user_id: userId,
+      celular_admin: celular_admin || null,
+      config: {
+        nombre:            nombre_club.trim(),
+        ciudad:            ciudad?.trim() || '',
+        valor_mensualidad: 65000,
+        color:             color || '#00AAFF',
+        subtitulo:         '',
+        codigo_pais:       codigo_pais || '57',
+        plan:              'trial',
+        trial_ends_at:     new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
+        deporte:           deportesArray[0],
+        deportes:          deportesArray,
+        modulos: {
+          dashboard:    true,
+          jugadores:    true,
+          uniformes:    true,
+          arbitraje:    deportesArray.includes('futbol'),
+          cobro:        true,
+          whatsapp:     true,
+          conciliacion: true,
+        },
       },
-    },
-  });
+    }),
+    supabase.auth.signInWithPassword({ email: emailNorm, password }),
+  ]);
 
   if (clubError) {
     await supabase.auth.admin.deleteUser(userId).catch(() => {});
     return res.status(500).json({ success: false, error: 'Error creando el club: ' + clubError.message });
   }
 
-  // Vincular usuario al club en club_members
-  await supabase.from('club_members').insert({ user_id: userId, club_id: slug }).catch(() => {});
+  // Verificar slug duplicado tras insert (unique constraint)
+  if (clubError?.code === '23505') {
+    await supabase.auth.admin.deleteUser(userId).catch(() => {});
+    return res.status(400).json({ success: false, error: `Ya existe un club con el nombre "${nombre_club}". Intenta con un nombre diferente.` });
+  }
 
-  // Obtener JWT para auto-login
-  const { data: signIn } = await supabase.auth.signInWithPassword({
-    email:    email.trim().toLowerCase(),
-    password,
-  });
+  // Vincular usuario al club (no bloquea la respuesta)
+  supabase.from('club_members').insert({ user_id: userId, club_id: slug }).catch(() => {});
+
+  const signIn = signInResult;
 
   // Enviar email de bienvenida (sin bloquear la respuesta)
   sendWelcomeClub({
