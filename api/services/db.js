@@ -866,10 +866,13 @@ async function getWaSession(phone) {
   return data || null;
 }
 
-async function upsertWaSession(phone, { rol, contexto, messages }) {
+async function upsertWaSession(phone, { rol, contexto, messages, last_interaction, tools_used }) {
+  const payload = { phone, rol, contexto, messages, updated_at: new Date().toISOString() };
+  if (last_interaction) payload.last_interaction = last_interaction;
+  if (tools_used)       payload.tools_used       = tools_used;
   const { error } = await supabase
     .from('wa_sessions')
-    .upsert({ phone, rol, contexto, messages, updated_at: new Date().toISOString() }, { onConflict: 'phone' });
+    .upsert(payload, { onConflict: 'phone' });
   if (error) console.error('[db] upsertWaSession error:', error.message);
 }
 

@@ -483,14 +483,15 @@ async function runTool(name, input, contexto = {}) {
 
     if (name === 'info_zensports') {
       return {
-        descripcion: 'ZenSports es el sistema operativo para clubes deportivos. Gestión de jugadores, cobros automáticos, calendario, arbitraje y más.',
+        descripcion: 'ZenSports es el sistema operativo para clubes deportivos. Gestión de jugadores, cobros automáticos por WhatsApp, calendario, arbitraje, carnet digital y más.',
+        trial: '5 días de prueba completa, sin tarjeta de crédito, sin permanencia. Acceso a todas las funciones desde el primer día.',
         planes: [
-          { nombre: 'FREE',       precio: '$0/mes',         jugadores: 'hasta 30',    features: 'Dashboard + jugadores + asistencia' },
-          { nombre: 'Starter',    precio: '$149.000/mes',   jugadores: 'hasta 80',    features: 'Todo FREE + cobros WA + carnet digital' },
-          { nombre: 'Pro',        precio: '$399.000/mes',   jugadores: 'hasta 200',   features: 'Todo Starter + torneos + arbitraje + finanzas' },
-          { nombre: 'Scale',      precio: '$799.000/mes',   jugadores: 'ilimitados',  features: 'Todo incluido + múltiples admins + soporte prioritario' },
+          { nombre: 'Starter', precio: '$149.000/mes', jugadores: 'hasta 120', features: 'Jugadores + cobros automáticos WA + carnet digital + inscripciones digitales' },
+          { nombre: 'Pro',     precio: '$399.000/mes', jugadores: 'hasta 350', features: 'Todo Starter + torneos + arbitraje + finanzas avanzadas + agente IA' },
+          { nombre: 'Scale',   precio: '$799.000/mes', jugadores: 'hasta 1.000', features: 'Todo incluido + múltiples admins + soporte prioritario + conciliación' },
         ],
-        registro: 'Regístrate gratis en zensports.zenpra.ai — 5 días de prueba completa.',
+        roi: 'La mayoría de clubes recuperan la inversión en el primer mes al reducir la mora en más del 80%.',
+        registro: 'Regístrate en zensports.zenpra.ai — 5 días gratis, sin tarjeta.',
         contacto: 'WhatsApp Zenpra: +57 3204409015',
       };
     }
@@ -530,17 +531,34 @@ async function runTool(name, input, contexto = {}) {
 
     if (name === 'consultar_metricas_wa') {
       const supabase = db.supabase;
-      const { data: clubData } = await supabase.from('clubs').select('config').eq('id', contexto.club_id).single();
+      const [{ data: clubData }, { data: sessions }] = await Promise.all([
+        supabase.from('clubs').select('config').eq('id', contexto.club_id).single(),
+        supabase.from('wa_sessions').select('phone, rol, updated_at, messages').eq('contexto->>club_id', contexto.club_id),
+      ]);
       const waMetrics = clubData?.config?.wa_metrics || {};
       const ultimo = waMetrics.ultimo_recordatorio;
+      const sesiones = sessions || [];
+      const hace24h = new Date(Date.now() - 86400000).toISOString();
+      const hace7d  = new Date(Date.now() - 7 * 86400000).toISOString();
+      const admins     = sesiones.filter(s => s.rol === 'admin').length;
+      const jugadores  = sesiones.filter(s => s.rol === 'jugador').length;
+      const activos24h = sesiones.filter(s => s.updated_at >= hace24h).length;
+      const activos7d  = sesiones.filter(s => s.updated_at >= hace7d).length;
+      const totalMensajes = sesiones.reduce((sum, s) => sum + (Array.isArray(s.messages) ? s.messages.length : 0), 0);
       return {
+        sesiones_total: sesiones.length,
+        admins,
+        jugadores,
+        mensajes_totales: totalMensajes,
+        activos_hoy: activos24h,
+        activos_semana: activos7d,
+        recordatorios_enviados_total: waMetrics.total_recordatorios || 0,
         ultimo_recordatorio: ultimo
           ? {
               fecha: new Date(ultimo.fecha).toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
               enviados: ultimo.enviados,
             }
           : null,
-        total_recordatorios_enviados: waMetrics.total_recordatorios || 0,
       };
     }
 
@@ -552,20 +570,21 @@ async function runTool(name, input, contexto = {}) {
 }
 
 // ── Sistema prompt ───────────────────────────────────────────────────────────
-const SYSTEM_BASE = `Eres *Zen* ⚽, el asistente virtual de ZenSports — la plataforma para gestión de clubes deportivos colombianos.
+const SYSTEM_BASE = `Eres *Zen* ⚽, el asistente virtual de *ZenSports* — la plataforma de gestión deportiva con IA para clubes de Latinoamérica.
 
-REGLAS GENERALES:
-- Responde SIEMPRE en español
-- Sé amigable, cálido y cercano — como un asistente del club de confianza
-- Usa emojis con moderación para dar calidez, no en exceso
-- Respuestas cortas y directas — no hagas párrafos largos innecesarios
+PERSONALIDAD: Eres cercano, directo y útil — como un asistente del club de confianza. Hablas el idioma deportivo colombiano. No eres un robot corporativo.
+
+REGLAS OBLIGATORIAS:
+- Responde SIEMPRE en español colombiano natural
+- Usa emojis con moderación (1-2 por mensaje) para calidez, no en exceso
+- Respuestas cortas y directas — máximo 3-4 líneas por punto. Si tienes mucha info, usa listas
 - NUNCA inventes datos, números, nombres ni fechas — solo usa lo que retornan las herramientas
 - NUNCA construyas ni supongas URLs — si una herramienta no te la da, no la menciones
-- Si no tienes un dato, dilo honestamente: "No tengo esa información en este momento"
-- Si el usuario pregunta algo fuera de tu alcance (pagos, jugadores, reportes del club), usa las herramientas disponibles; si no existe herramienta para eso, indica que esa función no está disponible aún
-- Precios: formato $150.000 (con puntos, sin decimales)
-- Fechas: formato legible "Sábado 15 de junio", no "2026-06-15"
-- No repitas información que el usuario ya sabe — ve al grano`;
+- Si no tienes un dato: "No tengo esa información en este momento, pero puedes verificar en el panel del club"
+- Precios siempre con puntos: $150.000 (no $150000 ni $150,000)
+- Fechas en formato legible: "Sábado 15 de junio" (no "2026-06-15")
+- No repitas información que el usuario ya sabe — ve directo al dato
+- Cuando haya deuda, sé empático con el jugador pero claro con el admin`;
 
 const SYSTEM_JUGADOR = `${SYSTEM_BASE}
 
@@ -664,13 +683,38 @@ REPORTE PDF DE MOROSOS:
 
 const SYSTEM_VISITANTE = `${SYSTEM_BASE}
 
-ROL: Estás atendiendo a alguien que NO está registrado en ningún club de ZenSports.
-Puede ser un admin interesado en registrar su club, o un jugador que aún no ha sido ingresado.
+ROL: Estás atendiendo a alguien que NO está registrado en ZenSports. Puede ser un admin interesado en registrar su club, un jugador cuyo número no coincide con el registrado, o alguien curioso.
 
-FLUJO:
-1. Salúdalo y pregunta si quiere información sobre ZenSports o si es jugador de un club
-2. Si quiere registrar su club → usa info_zensports y luego registrar_lead para recolectar sus datos
-3. Si dice que es jugador → pídele que pregunte a su admin que lo registre, o dile que verifique el número con el que fue inscrito`;
+MENÚ DE BIENVENIDA (usar cuando digan "hola", "info", "buenas" o sea primera vez):
+---
+👋 ¡Hola! Soy *Zen*, el asistente de *ZenSports* ⚽
+
+¿Cómo te puedo ayudar?
+
+1️⃣ Quiero registrar mi club / ver planes y precios
+2️⃣ Soy jugador de un club (problemas de acceso)
+3️⃣ Hablar con un asesor de ZenSports
+
+Escribe el número o cuéntame 😊
+---
+
+FLUJO ADMIN/INTERESADO (opción 1):
+- Usa info_zensports para presentar los planes con sus precios y beneficios
+- Presenta el ROI: "clubes reducen mora 80%, se paga solo en el primer mes"
+- Invita a prueba gratis: "5 días gratis, sin tarjeta, sin permanencia"
+- Recolecta datos con registrar_lead: nombre del club, deporte, ciudad, número de jugadores, nombre del admin, email
+- Al registrar lead, entrega el link de registro y di: "Tu club quedó en nuestra lista. El equipo de ZenSports te contacta en menos de 24 horas para ayudarte a arrancar 🚀"
+
+FLUJO JUGADOR SIN ACCESO (opción 2):
+- Explica amablemente: "Para acceder al bot necesitas estar registrado con este mismo número en tu club."
+- Dile que le pida a su admin que actualice su número en la plataforma
+- Ofrece: "Si quieres, cuéntame tu nombre y el club para que nuestro equipo lo verifique"
+
+FLUJO ASESOR (opción 3):
+- Entrega el número directo: WhatsApp +57 3204409015
+- Di: "El equipo de ZenSports te atiende en horario hábil. También puedes escribir a diego31escobar@gmail.com"
+
+TONO: Entusiasta pero sin presionar. Escucha primero, luego presenta la solución. Usa lenguaje deportivo cercano. NO hagas discursos largos — ve al grano y usa listas cortas.`;
 
 const MAX_HISTORY = 10;
 
@@ -771,8 +815,9 @@ async function generateReply(from, text) {
   const rolTools   = toolsMap[rol] || TOOLS_JUGADOR;
 
   const messages = [...history, { role: 'user', content: text }];
-  let reply      = null;
-  let pdfUrl     = null; // URL real del reporte — se envía por separado, no por el LLM
+  let reply         = null;
+  let pdfUrl        = null; // URL real del reporte — se envía por separado, no por el LLM
+  const toolsUsed   = [];   // tracking de herramientas para métricas
 
   for (let i = 0; i < 5; i++) {
     const response = await anthropic.messages.create({
@@ -794,6 +839,7 @@ async function generateReply(from, text) {
       const toolResults = [];
       for (const block of response.content) {
         if (block.type !== 'tool_use') continue;
+        toolsUsed.push(block.name);
         const result = await runTool(block.name, block.input, { rol, ...contexto });
         // Capturar pdf_url antes de ocultársela al LLM — el LLM nunca ve la URL
         if (block.name === 'consultar_morosos' && result.pdf_url) {
@@ -811,7 +857,22 @@ async function generateReply(from, text) {
   const historialTexto = messages
     .filter(m => typeof m.content === 'string')
     .slice(-MAX_HISTORY);
-  await db.upsertWaSession(from, { rol, contexto, messages: historialTexto });
+
+  // Guardar sesión con tracking de métricas
+  const sessionPayload = {
+    rol,
+    contexto,
+    messages: historialTexto,
+    last_interaction: new Date().toISOString(),
+  };
+  if (toolsUsed.length > 0) {
+    // Actualizar herramientas usadas acumuladas en la sesión
+    const prevSession = await db.getWaSession(from);
+    const prevTools = prevSession?.tools_used || {};
+    toolsUsed.forEach(t => { prevTools[t] = (prevTools[t] || 0) + 1; });
+    sessionPayload.tools_used = prevTools;
+  }
+  await db.upsertWaSession(from, sessionPayload);
 
   return { reply, pdfUrl };
 }
