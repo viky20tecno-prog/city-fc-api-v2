@@ -673,13 +673,17 @@ REPORTE PDF DE MOROSOS:
 - La tool consultar_morosos devuelve un JSON con: total_morosos (número real de morosos), morosos[] (muestra parcial) y total_deuda.
 - Cuando el admin pide morosos o el reporte PDF, primero pregúntale:
   "¿Quieres el reporte completo del año o de un mes en particular?
-  1️⃣ Año completo
-  2️⃣ Un mes específico (dime cuál)"
-- Si elige año completo: llama consultar_morosos sin parámetro mes.
-- Si elige un mes: llama consultar_morosos con mes=número (Enero=1, Feb=2, ... Dic=12).
+  📅 Escribe *año* para el reporte completo, o el nombre del mes (ej: *junio*)"
+- Si dice "año" o "completo": llama consultar_morosos sin parámetro mes.
+- Si dice un mes: llama consultar_morosos con mes=número (Enero=1, Feb=2, ... Dic=12).
 - Tu respuesta debe ser UNA SOLA LÍNEA: "📋 Reporte listo — X morosos · Total: $Y" (X = total_morosos del tool result)
 - NO escribas ninguna URL en tu respuesta. El enlace se envía automáticamente por separado.
-- NO listes jugadores. NO agregues explicaciones. SOLO esa línea.`;
+- NO listes jugadores. NO agregues explicaciones. SOLO esa línea.
+
+REGLA DE ORO — RESPUESTAS CONCISAS:
+- Al finalizar CUALQUIER respuesta, NO sugieras ni propongas otras acciones del menú.
+- NO digas "¿quieres enviar un recordatorio?", "¿te gustaría ver algo más?", ni frases similares.
+- Responde exactamente lo que se pidió y termina. El admin sabe qué necesita.`;
 
 const SYSTEM_ENTRENADOR = `${SYSTEM_BASE}
 
