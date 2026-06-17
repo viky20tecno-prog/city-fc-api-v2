@@ -86,6 +86,25 @@ async function getClubByCelularAdmin(celular) {
   return data || null;
 }
 
+async function getClubByCelularStaff(celular) {
+  const digits = String(celular).replace(/\D/g, '');
+  const local  = digits.slice(-10);
+  const variants = [digits, local, `57${local}`];
+  const { data, error } = await supabase
+    .from('clubs')
+    .select('id, slug, name, celular_admin, config')
+    .eq('is_active', true);
+  if (error) { console.error('[db] getClubByCelularStaff error:', error.message); return null; }
+  return (data || []).find(club => {
+    const staff = club.config?.celulares_staff;
+    if (!Array.isArray(staff)) return false;
+    return staff.some(n => {
+      const nd = String(n).replace(/\D/g, '');
+      return variants.includes(nd) || variants.includes(nd.slice(-10));
+    });
+  }) || null;
+}
+
 /**
  * Buscar un jugador por cédula dentro de un club
  */
@@ -898,6 +917,7 @@ module.exports = {
   getPlayerByCelular,
   getPlayerByCelularGlobal,
   getClubByCelularAdmin,
+  getClubByCelularStaff,
   searchPlayersByQuery,
   updatePlayer,
   deletePlayer,

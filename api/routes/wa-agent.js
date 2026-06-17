@@ -681,6 +681,34 @@ REPORTE PDF DE MOROSOS:
 - NO escribas ninguna URL en tu respuesta. El enlace se envía automáticamente por separado.
 - NO listes jugadores. NO agregues explicaciones. SOLO esa línea.`;
 
+const SYSTEM_ENTRENADOR = `${SYSTEM_BASE}
+
+ROL: Estás atendiendo a un ENTRENADOR / STAFF del club. Sus datos de club están en el CONTEXTO.
+
+REGLA CRÍTICA: Cuando el usuario envíe un número del 1 al 4, SIEMPRE interpreta que está seleccionando esa opción del menú. Ignora cualquier pregunta tuya anterior que esté pendiente y ejecuta la acción del número recibido.
+
+MENÚ DE ENTRENADOR (usar cuando digan "hola", "menu" o sea primera vez):
+---
+👋 ¡Hola! Soy *Zen*, tu asistente de entrenamiento.
+
+¿Qué necesitas hoy?
+
+1️⃣ Ver próximos eventos y entrenamientos
+2️⃣ Ver asistencia del día
+3️⃣ Buscar jugador
+4️⃣ Enviar mensaje a un jugador
+
+Escribe el número o dime directamente 🏋️
+---
+
+FLUJO:
+- "eventos" o "calendario" / opción 1 → usa consultar_calendario con club_slug del contexto
+- "asistencia" / opción 2 → usa consultar_asistencia_hoy con club_id del contexto
+- "buscar jugador" / opción 3 → pregunta nombre o cédula y usa buscar_jugador; muestra nombre, categoría y estado de pagos
+- "mensaje a [nombre/cédula]" / opción 4 → usa enviar_mensaje_jugador con la cédula o nombre y el texto
+
+RESTRICCIONES: NO tienes acceso a datos financieros del club, morosos ni recordatorios de pago. Si te preguntan por eso, responde: "Esa información solo está disponible para el administrador del club."`;
+
 const SYSTEM_VISITANTE = `${SYSTEM_BASE}
 
 ROL: Estás atendiendo a alguien que NO está registrado en ZenSports. Puede ser un admin interesado en registrar su club, un jugador cuyo número no coincide con el registrado, o alguien curioso.
@@ -763,6 +791,20 @@ async function identificarRol(celular, sessionData) {
     };
   }
 
+  // 2b. ¿Es staff/entrenador de algún club?
+  const clubStaff = await db.getClubByCelularStaff(numero);
+  if (clubStaff) {
+    return {
+      rol: 'entrenador',
+      contexto: {
+        club_id:     clubStaff.id,
+        club_slug:   clubStaff.slug,
+        club_nombre: clubStaff.config?.nombre || clubStaff.name,
+        config:      clubStaff.config || {},
+      },
+    };
+  }
+
   // 3. ¿Es jugador registrado?
   const jugador = await db.getPlayerByCelularGlobal(numero);
   if (jugador) {
@@ -809,7 +851,7 @@ async function generateReply(from, text) {
     return null; // ignorar silenciosamente — el admin lo desactivó
   }
 
-  const systemMap  = { admin: SYSTEM_ADMIN, jugador: SYSTEM_JUGADOR, visitante: SYSTEM_VISITANTE };
+  const systemMap  = { admin: SYSTEM_ADMIN, entrenador: SYSTEM_ENTRENADOR, jugador: SYSTEM_JUGADOR, visitante: SYSTEM_VISITANTE };
   const toolsMap   = { admin: TOOLS_ADMIN,  jugador: TOOLS_JUGADOR,  visitante: TOOLS_VISITANTE };
   const system     = `${systemMap[rol]}\n\nCONTEXTO DEL USUARIO:\n${JSON.stringify({ rol, ...contexto })}`;
   const rolTools   = toolsMap[rol] || TOOLS_JUGADOR;
