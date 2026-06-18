@@ -138,17 +138,28 @@ async function getClubBySlug(slug) {
  * Obtener mensualidades de un club (todas o filtradas por cédula)
  */
 async function getMensualidades(club_id, cedula = null) {
-  let query = supabase
-    .from('mensualidades')
-    .select('*')
-    .eq('club_id', club_id)
-    .range(0, 9999);
+  const PAGE = 1000;
+  let all = [];
+  let from = 0;
 
-  if (cedula) query = query.eq('cedula', String(cedula));
+  while (true) {
+    let query = supabase
+      .from('mensualidades')
+      .select('*')
+      .eq('club_id', club_id)
+      .range(from, from + PAGE - 1);
 
-  const { data, error } = await query;
-  if (error) throw error;
-  return data;
+    if (cedula) query = query.eq('cedula', String(cedula));
+
+    const { data, error } = await query;
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    all = all.concat(data);
+    if (data.length < PAGE) break;
+    from += PAGE;
+  }
+
+  return all;
 }
 
 /**
