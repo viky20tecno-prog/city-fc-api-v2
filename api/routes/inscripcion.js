@@ -47,7 +47,8 @@ router.post('/', inscripcionLimiter, async (req, res) => {
       return res.status(400).json({ success: false, error: 'Celular inválido (6-15 dígitos)' });
     }
 
-    const clubSlug = req.query.club_id || req.body?.club_id || 'city-fc';
+    const clubSlug = req.query.club_id || req.body?.club_id;
+    if (!clubSlug) return res.status(400).json({ success: false, error: 'club_id requerido' });
     const club = await db.getClubBySlug(clubSlug);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
@@ -150,8 +151,10 @@ router.get('/verificar', async (req, res) => {
     const { cedula } = req.query;
     if (!cedula) return res.status(400).json({ success: false, error: 'cedula requerida' });
 
-    const club = await db.getClubBySlug('city-fc');
-    if (!club) return res.status(500).json({ success: false, error: 'Club no configurado' });
+    const clubSlug = req.query.club_id;
+    if (!clubSlug) return res.status(400).json({ success: false, error: 'club_id requerido' });
+    const club = await db.getClubBySlug(clubSlug);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
     const jugador = await db.getPlayerByCedula(club.id, cedula);
     res.json({ success: true, existe: !!jugador });

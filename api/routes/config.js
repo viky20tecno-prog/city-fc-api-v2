@@ -9,7 +9,8 @@ const router = express.Router();
  */
 router.get('/', async (req, res) => {
   try {
-    const club_id = req.club_id || req.query.club_id || 'city-fc';
+    const club_id = req.club_id || req.query.club_id;
+    if (!club_id) return res.status(400).json({ success: false, error: 'club_id requerido' });
 
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
