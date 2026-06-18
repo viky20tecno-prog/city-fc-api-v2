@@ -47,8 +47,13 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
     if (!jugador) return res.status(404).json({ success: false, error: 'Atleta no encontrado' });
 
     const anioActual = new Date().getFullYear();
-    const [mensualidades, suspensiones] = await Promise.all([
-      db.getMensualidades(club.id, cedula),
+    // Buscar mensualidades por cedula O player_id — algunos registros solo tienen player_id
+    const [{ data: mensualidades }, suspensiones] = await Promise.all([
+      db.supabase
+        .from('mensualidades')
+        .select('*')
+        .eq('club_id', club.id)
+        .or(`cedula.eq.${cedula},player_id.eq.${jugador.id}`),
       db.getSuspensionesJugador(club.id, cedula),
     ]);
 
