@@ -105,7 +105,7 @@ router.patch('/:cedula/exento', async (req, res) => {
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
-    const { exento, motivo } = req.body;
+    const { exento, motivo, motivoTexto } = req.body;
     if (typeof exento !== 'boolean')
       return res.status(400).json({ success: false, error: 'Campo exento debe ser true o false' });
 
@@ -118,10 +118,12 @@ router.patch('/:cedula/exento', async (req, res) => {
     const cedula = req.params.cedula;
 
     // 1. Actualizar el jugador
-    await db.updatePlayer(club.id, cedula, {
-      descuento_pct:  exento ? 100 : 0,
-      tipo_descuento: tipoDescuento,
-    });
+    const updateFields = { descuento_pct: exento ? 100 : 0, tipo_descuento: tipoDescuento };
+    // Si motivo es OTRO con texto libre, guardarlo en notas
+    if (exento && motivo === 'OTRO' && motivoTexto?.trim()) {
+      updateFields.notas = `[Exento] ${motivoTexto.trim()}`;
+    }
+    await db.updatePlayer(club.id, cedula, updateFields);
 
     // 2. Sincronizar mensualidades del año actual
     if (exento) {
