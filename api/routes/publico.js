@@ -49,19 +49,58 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
     const anioActual = new Date().getFullYear();
     const mensualidades = await db.getMensualidades(club.id, cedula);
 
-    const resumen = mensualidades
-      .filter(m => m.anio >= anioActual - 1)
-      .map(m => ({
-        mes:           m.mes,
-        numero_mes:    parseInt(m.numero_mes) || 0,
-        anio:          m.anio,
-        estado:        mapEstado(m.estado),
-        valor_oficial: parseFloat(m.valor_oficial) || 0,
-        valor_pagado:  parseFloat(m.valor_pagado)  || 0,
-        saldo:         parseFloat(m.saldo_pendiente) || calcSaldo(m),
-        fecha_pago:    m.fecha_pago || null,
-      }))
-      .sort((a, b) => a.anio !== b.anio ? a.anio - b.anio : a.numero_mes - b.numero_mes);
+    // Cuota efectiva del jugador (cuota club − descuento individual)
+    const cuotaBase   = parseFloat(club.config?.valor_mensualidad) || 0;
+    const descuento   = parseFloat(jugador.descuento_mensualidad)  || 0;
+    const cuota       = Math.max(0, cuotaBase - descuento);
+
+    // Índice de registros del año actual por numero_mes
+    const porMes = {};
+    mensualidades
+      .filter(m => parseInt(m.anio) === anioActual)
+      .forEach(m => { porMes[parseInt(m.numero_mes)] = m; });
+
+    // Construir los 12 meses completos
+    const resumen = MESES.map((nombreMes, i) => {
+      const numMes = i + 1;
+      const m      = porMes[numMes];
+
+      if (m) {
+        // Registro existente: usar cuota como valor_oficial cuando está en $0
+        const oficial = parseFloat(m.valor_oficial) > 0
+          ? parseFloat(m.valor_oficial)
+          : cuota;
+        const pagado  = parseFloat(m.valor_pagado) || 0;
+        const estadoM = mapEstado(m.estado);
+        const saldo   = estadoM === 'pagado'
+          ? 0
+          : (estadoM === 'parcial' || estadoM === 'por_validar')
+            ? Math.max(0, oficial - pagado)
+            : oficial;
+        return {
+          mes:           nombreMes,
+          numero_mes:    numMes,
+          anio:          anioActual,
+          estado:        estadoM,
+          valor_oficial: oficial,
+          valor_pagado:  pagado,
+          saldo,
+          fecha_pago:    m.fecha_pago || null,
+        };
+      }
+
+      // Mes sin registro → pendiente con cuota del club
+      return {
+        mes:           nombreMes,
+        numero_mes:    numMes,
+        anio:          anioActual,
+        estado:        'pendiente',
+        valor_oficial: cuota,
+        valor_pagado:  0,
+        saldo:         cuota,
+        fecha_pago:    null,
+      };
+    });
 
     const pendientes      = resumen.filter(m => m.estado !== 'pagado');
     const saldo_pendiente = pendientes.reduce((s, m) => s + m.saldo, 0);
