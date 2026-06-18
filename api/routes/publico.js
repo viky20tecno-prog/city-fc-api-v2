@@ -47,15 +47,17 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
     if (!jugador) return res.status(404).json({ success: false, error: 'Atleta no encontrado' });
 
     const anioActual = new Date().getFullYear();
-    // Buscar mensualidades por cedula O player_id — algunos registros solo tienen player_id
-    const [{ data: mensualidades }, suspensiones] = await Promise.all([
-      db.supabase
-        .from('mensualidades')
-        .select('*')
-        .eq('club_id', club.id)
-        .or(`cedula.eq.${cedula},player_id.eq.${jugador.id}`),
+    // Buscar mensualidades por cedula Y por player_id por separado, luego combinar
+    // (algunos registros solo tienen uno de los dos campos)
+    const [byCedula, byPlayerId, suspensiones] = await Promise.all([
+      db.supabase.from('mensualidades').select('*').eq('club_id', club.id).eq('cedula', String(cedula)),
+      db.supabase.from('mensualidades').select('*').eq('club_id', club.id).eq('player_id', jugador.id),
       db.getSuspensionesJugador(club.id, cedula),
     ]);
+    // Deduplicar por id
+    const mensMap = {};
+    [...(byCedula.data || []), ...(byPlayerId.data || [])].forEach(m => { mensMap[m.id] = m; });
+    const mensualidades = Object.values(mensMap);
 
     // Cuota efectiva del jugador (cuota club − descuento individual)
     const cuotaBase    = parseFloat(club.config?.valor_mensualidad) || 0;
