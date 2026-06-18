@@ -47,13 +47,25 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
     if (!jugador) return res.status(404).json({ success: false, error: 'Atleta no encontrado' });
 
     const anioActual = new Date().getFullYear();
-    const mensualidades = await db.getMensualidades(club.id, cedula);
+    const [mensualidades, suspensiones] = await Promise.all([
+      db.getMensualidades(club.id, cedula),
+      db.getSuspensionesJugador(club.id, cedula),
+    ]);
 
     // Cuota efectiva del jugador (cuota club − descuento individual)
     const cuotaBase    = parseFloat(club.config?.valor_mensualidad) || 0;
     const descuentoPct = parseFloat(jugador.descuento_pct) || 0;
     const cuota        = Math.max(0, cuotaBase * (1 - descuentoPct / 100));
     const esExento     = descuentoPct >= 100;
+
+    // Suspensiones activas del año actual
+    const suspActivas = (suspensiones || []).filter(s =>
+      s.activa && (s.anio == null || parseInt(s.anio) === anioActual)
+    );
+    const esSuspendido = (numMes) =>
+      suspActivas.some(s => s.mes_inicio <= numMes && numMes <= s.mes_fin);
+    const getSusp = (numMes) =>
+      suspActivas.find(s => s.mes_inicio <= numMes && numMes <= s.mes_fin) || null;
 
     // Índice de registros del año actual por numero_mes
     const porMes = {};
@@ -77,6 +89,22 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
           valor_pagado:  0,
           saldo:         0,
           fecha_pago:    m?.fecha_pago || null,
+        };
+      }
+
+      // Mes suspendido: no genera deuda
+      if (esSuspendido(numMes)) {
+        const susp = getSusp(numMes);
+        return {
+          mes:           nombreMes,
+          numero_mes:    numMes,
+          anio:          anioActual,
+          estado:        'suspendido',
+          valor_oficial: parseFloat(m?.valor_oficial) || cuota,
+          valor_pagado:  parseFloat(m?.valor_pagado) || 0,
+          saldo:         0,
+          fecha_pago:    m?.fecha_pago || null,
+          suspension:    { motivo: susp?.motivo || null, detalle: susp?.detalle || null },
         };
       }
 
@@ -117,7 +145,7 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
       };
     });
 
-    const pendientes      = resumen.filter(m => m.estado !== 'pagado' && m.estado !== 'exento');
+    const pendientes      = resumen.filter(m => !['pagado','exento','suspendido'].includes(m.estado));
     const saldo_pendiente = pendientes.reduce((s, m) => s + m.saldo, 0);
     const total_pagado    = esExento ? 0 : resumen.reduce((s, m) => s + m.valor_pagado, 0);
 
