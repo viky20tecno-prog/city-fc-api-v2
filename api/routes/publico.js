@@ -50,9 +50,9 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
     const mensualidades = await db.getMensualidades(club.id, cedula);
 
     // Cuota efectiva del jugador (cuota club − descuento individual)
-    const cuotaBase   = parseFloat(club.config?.valor_mensualidad) || 0;
-    const descuento   = parseFloat(jugador.descuento_mensualidad)  || 0;
-    const cuota       = Math.max(0, cuotaBase - descuento);
+    const cuotaBase    = parseFloat(club.config?.valor_mensualidad) || 0;
+    const descuentoPct = parseFloat(jugador.descuento_pct) || 0;
+    const cuota        = Math.max(0, cuotaBase * (1 - descuentoPct / 100));
 
     // Índice de registros del año actual por numero_mes
     const porMes = {};

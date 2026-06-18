@@ -187,9 +187,9 @@ router.post('/generar-anio', async (req, res) => {
         const key = `${p.cedula}-${mes}`;
         if (yaExiste.has(key)) continue;
 
-        // Descuento individual del jugador
-        const descuento = parseFloat(p.descuento_mensualidad) || 0;
-        const oficial   = Math.max(0, CUOTA - descuento);
+        // Descuento individual del jugador (descuento_pct es porcentaje)
+        const descuentoPct = parseFloat(p.descuento_pct) || 0;
+        const oficial      = Math.max(0, CUOTA * (1 - descuentoPct / 100));
 
         nuevas.push({
           club_id:         club.id,
@@ -345,8 +345,8 @@ router.post('/importar-estados', async (req, res) => {
         continue;
       }
 
-      const descuento = parseFloat(player.descuento_mensualidad) || 0;
-      const oficial   = Math.max(0, CUOTA - descuento);
+      const descuentoPct = parseFloat(player.descuento_pct) || 0;
+      const oficial      = Math.max(0, CUOTA * (1 - descuentoPct / 100));
 
       // Solo procesar meses hasta el actual — los futuros los maneja el flujo automático
       const mesActual = new Date().getMonth() + 1;
