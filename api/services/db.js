@@ -141,7 +141,8 @@ async function getMensualidades(club_id, cedula = null) {
   let query = supabase
     .from('mensualidades')
     .select('*')
-    .eq('club_id', club_id);
+    .eq('club_id', club_id)
+    .range(0, 9999);
 
   if (cedula) query = query.eq('cedula', String(cedula));
 
