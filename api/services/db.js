@@ -294,10 +294,12 @@ async function updatePlayer(club_id, cedula, updates) {
     'familiar_emergencia', 'celular_contacto', 'notas',
     'categoria', 'equipo', 'categorias',
     'deporte',
+    'activo', 'descuento_pct', 'tipo_descuento',
   ];
   const fields = Object.fromEntries(
     Object.entries(updates).filter(([k]) => allowed.includes(k))
   );
+  if (Object.keys(fields).length === 0) throw new Error('No hay campos válidos para actualizar');
   const { data, error } = await supabase
     .from('players')
     .update(fields)
