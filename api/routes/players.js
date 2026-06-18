@@ -131,17 +131,29 @@ router.patch('/:cedula/exento', async (req, res) => {
 
     // 2. Sincronizar mensualidades del año actual
     if (exento) {
-      // Exento: poner todos los meses a $0 AL_DIA
+      // Exento: $0 oficial/pendiente y AL_DIA, pero SIN tocar valor_pagado para no destruir historial de pagos
       await db.supabase.from('mensualidades')
-        .update({ valor_oficial: 0, valor_pagado: 0, saldo_pendiente: 0, estado: 'AL_DIA' })
+        .update({ valor_oficial: 0, saldo_pendiente: 0, estado: 'AL_DIA' })
         .eq('club_id', club.id).eq('cedula', String(cedula)).eq('anio', anio);
     } else {
-      // Quitar exento: restaurar meses sin pago a $cuota PENDIENTE
-      // Solo toca los que tenían valor_oficial=0 (los que se pusieron exentos)
-      await db.supabase.from('mensualidades')
-        .update({ valor_oficial: cuota, saldo_pendiente: cuota, estado: 'PENDIENTE' })
-        .eq('club_id', club.id).eq('cedula', String(cedula)).eq('anio', anio)
-        .eq('valor_pagado', 0);
+      // Quitar exento: restaurar valor_oficial y recalcular estado según valor_pagado real de cada mes
+      const { data: meses } = await db.supabase
+        .from('mensualidades')
+        .select('id, valor_pagado, penalidad')
+        .eq('club_id', club.id).eq('cedula', String(cedula)).eq('anio', anio);
+
+      if (meses && meses.length > 0) {
+        await Promise.all(meses.map(mes => {
+          const pagado    = parseFloat(mes.valor_pagado) || 0;
+          const penalidad = parseFloat(mes.penalidad)   || 0;
+          const total     = cuota + penalidad;
+          const saldo     = Math.max(0, total - pagado);
+          const estado    = pagado >= total ? 'AL_DIA' : pagado > 0 ? 'PARCIAL' : 'PENDIENTE';
+          return db.supabase.from('mensualidades')
+            .update({ valor_oficial: cuota, saldo_pendiente: saldo, estado })
+            .eq('id', mes.id);
+        }));
+      }
     }
 
     res.json({ success: true, exento, cedula, motivo_label: motivoLabel });
