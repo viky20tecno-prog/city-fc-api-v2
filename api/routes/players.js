@@ -97,6 +97,50 @@ router.patch('/:cedula', async (req, res) => {
   }
 });
 
+// PATCH /api/players/:cedula/exento?club_id=city-fc
+// Body: { exento: true|false }
+// Marca o desmarca al jugador como exento y sincroniza sus mensualidades del año actual.
+router.patch('/:cedula/exento', async (req, res) => {
+  try {
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const { exento } = req.body;
+    if (typeof exento !== 'boolean')
+      return res.status(400).json({ success: false, error: 'Campo exento debe ser true o false' });
+
+    const anio   = new Date().getFullYear();
+    const cuota  = parseFloat(club.config?.valor_mensualidad) || 65000;
+    const cedula = req.params.cedula;
+
+    // 1. Actualizar el jugador
+    await db.updatePlayer(club.id, cedula, {
+      descuento_pct:  exento ? 100 : 0,
+      tipo_descuento: exento ? 'EXENTO' : null,
+    });
+
+    // 2. Sincronizar mensualidades del año actual
+    if (exento) {
+      // Exento: poner todos los meses a $0 AL_DIA
+      await db.supabase.from('mensualidades')
+        .update({ valor_oficial: 0, valor_pagado: 0, saldo_pendiente: 0, estado: 'AL_DIA' })
+        .eq('club_id', club.id).eq('cedula', String(cedula)).eq('anio', anio);
+    } else {
+      // Quitar exento: restaurar meses sin pago a $cuota PENDIENTE
+      // Solo toca los que tenían valor_oficial=0 (los que se pusieron exentos)
+      await db.supabase.from('mensualidades')
+        .update({ valor_oficial: cuota, saldo_pendiente: cuota, estado: 'PENDIENTE' })
+        .eq('club_id', club.id).eq('cedula', String(cedula)).eq('anio', anio)
+        .eq('valor_pagado', 0);
+    }
+
+    res.json({ success: true, exento, cedula });
+  } catch (error) {
+    console.error('PATCH /players/:cedula/exento', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // POST /api/players/bulk?club_id=city-fc  — importación masiva desde Excel/CSV
 router.post('/bulk', async (req, res) => {
   try {
