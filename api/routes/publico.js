@@ -53,6 +53,7 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
     const cuotaBase    = parseFloat(club.config?.valor_mensualidad) || 0;
     const descuentoPct = parseFloat(jugador.descuento_pct) || 0;
     const cuota        = Math.max(0, cuotaBase * (1 - descuentoPct / 100));
+    const esExento     = descuentoPct >= 100;
 
     // Índice de registros del año actual por numero_mes
     const porMes = {};
@@ -64,6 +65,20 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
     const resumen = MESES.map((nombreMes, i) => {
       const numMes = i + 1;
       const m      = porMes[numMes];
+
+      // Jugador EXENTO: no debe nada, todos los meses AL_DIA con $0
+      if (esExento) {
+        return {
+          mes:           nombreMes,
+          numero_mes:    numMes,
+          anio:          anioActual,
+          estado:        'exento',
+          valor_oficial: 0,
+          valor_pagado:  0,
+          saldo:         0,
+          fecha_pago:    m?.fecha_pago || null,
+        };
+      }
 
       if (m) {
         // Registro existente: usar cuota como valor_oficial cuando está en $0
@@ -102,12 +117,13 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
       };
     });
 
-    const pendientes      = resumen.filter(m => m.estado !== 'pagado');
+    const pendientes      = resumen.filter(m => m.estado !== 'pagado' && m.estado !== 'exento');
     const saldo_pendiente = pendientes.reduce((s, m) => s + m.saldo, 0);
-    const total_pagado    = resumen.reduce((s, m) => s + m.valor_pagado, 0);
+    const total_pagado    = esExento ? 0 : resumen.reduce((s, m) => s + m.valor_pagado, 0);
 
     res.json({
       success: true,
+      esExento,
       club: {
         nombre:    club.config?.nombre || clubSlug,
         subtitulo: club.config?.subtitulo || '',
