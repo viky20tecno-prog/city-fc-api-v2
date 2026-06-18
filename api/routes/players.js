@@ -109,9 +109,14 @@ router.patch('/:cedula/exento', async (req, res) => {
     if (typeof exento !== 'boolean')
       return res.status(400).json({ success: false, error: 'Campo exento debe ser true o false' });
 
-    const MOTIVOS_VALIDOS = ['BECA', 'SOCIAL', 'DIRECTIVO', 'OTRO'];
-    const motivoSufijo = motivo && MOTIVOS_VALIDOS.includes(motivo) ? `_${motivo}` : '';
-    const tipoDescuento = exento ? `EXENTO${motivoSufijo}` : null;
+    // tipo_descuento solo puede ser 'EXENTO' (constraint en DB)
+    // El motivo se guarda en notas del jugador
+    const tipoDescuento = exento ? 'EXENTO' : null;
+
+    const MOTIVO_LABELS = { BECA: 'Beca deportiva', SOCIAL: 'Caso social', DIRECTIVO: 'Directivo/Staff', OTRO: null };
+    const motivoLabel = motivo && MOTIVO_LABELS[motivo] !== undefined
+      ? (motivo === 'OTRO' ? (motivoTexto?.trim() || 'Otro motivo') : MOTIVO_LABELS[motivo])
+      : null;
 
     const anio   = new Date().getFullYear();
     const cuota  = parseFloat(club.config?.valor_mensualidad) || 65000;
@@ -119,10 +124,7 @@ router.patch('/:cedula/exento', async (req, res) => {
 
     // 1. Actualizar el jugador
     const updateFields = { descuento_pct: exento ? 100 : 0, tipo_descuento: tipoDescuento };
-    // Si motivo es OTRO con texto libre, guardarlo en notas
-    if (exento && motivo === 'OTRO' && motivoTexto?.trim()) {
-      updateFields.notas = `[Exento] ${motivoTexto.trim()}`;
-    }
+    if (exento && motivoLabel) updateFields.notas = `[Exento: ${motivoLabel}]`;
     await db.updatePlayer(club.id, cedula, updateFields);
 
     // 2. Sincronizar mensualidades del año actual
@@ -140,7 +142,7 @@ router.patch('/:cedula/exento', async (req, res) => {
         .eq('valor_pagado', 0);
     }
 
-    res.json({ success: true, exento, cedula, tipo_descuento: tipoDescuento });
+    res.json({ success: true, exento, cedula, tipo_descuento: tipoDescuento, motivo_label: motivoLabel });
   } catch (error) {
     console.error('PATCH /players/:cedula/exento', error.message);
     res.status(500).json({ success: false, error: error.message });
