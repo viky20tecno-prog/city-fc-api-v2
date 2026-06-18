@@ -160,7 +160,10 @@ router.patch('/mensualidad/:id', async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/invoices/generar-anio
-// Crea los registros faltantes de mensualidades para el año actual.
+// Crea los registros faltantes de mensualidades para el año indicado.
+// Body opcional: { anio: 2027, nueva_cuota: 70000 }
+//   - anio:        año a generar (default = año en curso)
+//   - nueva_cuota: si se envía, actualiza clubs.config.valor_mensualidad primero
 // Solo inserta filas que no existan ya (idempotente).
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/generar-anio', async (req, res) => {
@@ -168,13 +171,23 @@ router.post('/generar-anio', async (req, res) => {
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
-    const anio    = new Date().getFullYear();
-    const CUOTA   = parseFloat(club.config?.valor_mensualidad) || 65000;
-    const players = await db.getPlayers(club.id);
+    const { anio: anioParam, nueva_cuota } = req.body || {};
+    const anio = anioParam ? parseInt(anioParam) : new Date().getFullYear();
 
+    // Si viene nueva cuota → actualizarla en el config del club antes de generar
+    let cuotaFinal = parseFloat(club.config?.valor_mensualidad) || 65000;
+    if (nueva_cuota !== undefined && nueva_cuota !== null) {
+      cuotaFinal = Math.max(0, parseFloat(nueva_cuota) || 0);
+      const nuevoConfig = { ...(club.config || {}), valor_mensualidad: cuotaFinal };
+      const { error: cfgErr } = await db.supabase
+        .from('clubs').update({ config: nuevoConfig }).eq('id', club.id);
+      if (cfgErr) throw cfgErr;
+    }
+
+    const players = await db.getPlayers(club.id);
     if (!players.length) return res.json({ success: true, creados: 0, message: 'No hay jugadores activos' });
 
-    // Obtener mensualidades existentes para este año de una sola consulta
+    // Obtener mensualidades existentes para el año objetivo
     const existentes = await db.getMensualidades(club.id);
     const existentesAnio = existentes.filter(m => String(m.anio) === String(anio));
 
@@ -189,7 +202,7 @@ router.post('/generar-anio', async (req, res) => {
 
         // Descuento individual del jugador (descuento_pct es porcentaje)
         const descuentoPct = parseFloat(p.descuento_pct) || 0;
-        const oficial      = Math.max(0, CUOTA * (1 - descuentoPct / 100));
+        const oficial      = Math.max(0, cuotaFinal * (1 - descuentoPct / 100));
 
         nuevas.push({
           club_id:         club.id,
@@ -214,7 +227,9 @@ router.post('/generar-anio', async (req, res) => {
       jugadores: players.length,
       creados: nuevas.length,
       omitidos: players.length * 12 - nuevas.length,
-      message: `${nuevas.length} mensualidades creadas para ${anio}`,
+      cuota_usada: cuotaFinal,
+      cuota_actualizada: nueva_cuota !== undefined && nueva_cuota !== null,
+      message: `${nuevas.length} mensualidades creadas para ${anio} con cuota $${cuotaFinal.toLocaleString('es-CO')}`,
     });
   } catch (err) {
     console.error('POST /invoices/generar-anio', err.message);
