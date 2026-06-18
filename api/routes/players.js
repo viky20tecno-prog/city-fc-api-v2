@@ -109,10 +109,9 @@ router.patch('/:cedula/exento', async (req, res) => {
     if (typeof exento !== 'boolean')
       return res.status(400).json({ success: false, error: 'Campo exento debe ser true o false' });
 
-    // tipo_descuento solo puede ser 'EXENTO' (constraint en DB)
-    // El motivo se guarda en notas del jugador
-    const tipoDescuento = exento ? 'EXENTO' : null;
-
+    // EXENTO = descuento_pct 100 + tipo_descuento null
+    // tipo_descuento NO puede ser 'EXENTO' — check constraint solo permite
+    // BECA_DEPORTIVA, BECA_SOCIAL, CONDICION_ESPECIAL (valores originales de DB)
     const MOTIVO_LABELS = { BECA: 'Beca deportiva', SOCIAL: 'Caso social', DIRECTIVO: 'Directivo/Staff', OTRO: null };
     const motivoLabel = motivo && MOTIVO_LABELS[motivo] !== undefined
       ? (motivo === 'OTRO' ? (motivoTexto?.trim() || 'Otro motivo') : MOTIVO_LABELS[motivo])
@@ -122,8 +121,11 @@ router.patch('/:cedula/exento', async (req, res) => {
     const cuota  = parseFloat(club.config?.valor_mensualidad) || 65000;
     const cedula = req.params.cedula;
 
-    // 1. Actualizar el jugador
-    const updateFields = { descuento_pct: exento ? 100 : 0, tipo_descuento: tipoDescuento };
+    // 1. Actualizar el jugador: descuento_pct=100 es la señal de EXENTO
+    const updateFields = {
+      descuento_pct:  exento ? 100 : 0,
+      tipo_descuento: null,           // siempre null al marcar/desmarcar exento
+    };
     if (exento && motivoLabel) updateFields.notas = `[Exento: ${motivoLabel}]`;
     await db.updatePlayer(club.id, cedula, updateFields);
 
@@ -142,7 +144,7 @@ router.patch('/:cedula/exento', async (req, res) => {
         .eq('valor_pagado', 0);
     }
 
-    res.json({ success: true, exento, cedula, tipo_descuento: tipoDescuento, motivo_label: motivoLabel });
+    res.json({ success: true, exento, cedula, motivo_label: motivoLabel });
   } catch (error) {
     console.error('PATCH /players/:cedula/exento', error.message);
     res.status(500).json({ success: false, error: error.message });
