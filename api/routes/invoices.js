@@ -129,20 +129,22 @@ router.patch('/mensualidad/:id', async (req, res) => {
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
-    const { valor_oficial, valor_pagado, estado } = req.body;
+    const { valor_oficial, valor_pagado, estado, penalidad } = req.body;
     const ESTADOS = ['AL_DIA', 'PENDIENTE', 'PARCIAL', 'MORA'];
     if (estado && !ESTADOS.includes(estado))
       return res.status(400).json({ success: false, error: 'estado inválido' });
 
-    const oficial = valor_oficial !== undefined ? parseFloat(valor_oficial) : undefined;
-    const pagado  = valor_pagado  !== undefined ? parseFloat(valor_pagado)  : undefined;
+    const oficial  = valor_oficial !== undefined ? parseFloat(valor_oficial) : undefined;
+    const pagado   = valor_pagado  !== undefined ? parseFloat(valor_pagado)  : undefined;
+    const penal    = penalidad     !== undefined ? Math.max(0, parseFloat(penalidad) || 0) : undefined;
 
     const updates = {};
-    if (oficial !== undefined) updates.valor_oficial   = oficial;
-    if (pagado  !== undefined) updates.valor_pagado    = pagado;
-    if (oficial !== undefined || pagado !== undefined) {
+    if (oficial !== undefined) updates.valor_oficial = oficial;
+    if (pagado  !== undefined) updates.valor_pagado  = pagado;
+    if (penal   !== undefined) updates.penalidad     = penal;
+    if (oficial !== undefined || pagado !== undefined || penal !== undefined) {
       const { data: actual } = await db.supabase
-        .from('mensualidades').select('valor_oficial,valor_pagado').eq('id', req.params.id).single();
+        .from('mensualidades').select('valor_oficial,valor_pagado,penalidad').eq('id', req.params.id).single();
       const vOficial = oficial ?? parseFloat(actual?.valor_oficial) ?? 0;
       const vPagado  = pagado  ?? parseFloat(actual?.valor_pagado)  ?? 0;
       updates.saldo_pendiente = Math.max(0, vOficial - vPagado);
