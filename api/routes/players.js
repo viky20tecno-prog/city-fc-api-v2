@@ -98,16 +98,20 @@ router.patch('/:cedula', async (req, res) => {
 });
 
 // PATCH /api/players/:cedula/exento?club_id=city-fc
-// Body: { exento: true|false }
+// Body: { exento: true|false, motivo?: 'BECA'|'SOCIAL'|'DIRECTIVO'|'OTRO' }
 // Marca o desmarca al jugador como exento y sincroniza sus mensualidades del año actual.
 router.patch('/:cedula/exento', async (req, res) => {
   try {
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
-    const { exento } = req.body;
+    const { exento, motivo } = req.body;
     if (typeof exento !== 'boolean')
       return res.status(400).json({ success: false, error: 'Campo exento debe ser true o false' });
+
+    const MOTIVOS_VALIDOS = ['BECA', 'SOCIAL', 'DIRECTIVO', 'OTRO'];
+    const motivoSufijo = motivo && MOTIVOS_VALIDOS.includes(motivo) ? `_${motivo}` : '';
+    const tipoDescuento = exento ? `EXENTO${motivoSufijo}` : null;
 
     const anio   = new Date().getFullYear();
     const cuota  = parseFloat(club.config?.valor_mensualidad) || 65000;
@@ -116,7 +120,7 @@ router.patch('/:cedula/exento', async (req, res) => {
     // 1. Actualizar el jugador
     await db.updatePlayer(club.id, cedula, {
       descuento_pct:  exento ? 100 : 0,
-      tipo_descuento: exento ? 'EXENTO' : null,
+      tipo_descuento: tipoDescuento,
     });
 
     // 2. Sincronizar mensualidades del año actual
@@ -134,7 +138,7 @@ router.patch('/:cedula/exento', async (req, res) => {
         .eq('valor_pagado', 0);
     }
 
-    res.json({ success: true, exento, cedula });
+    res.json({ success: true, exento, cedula, tipo_descuento: tipoDescuento });
   } catch (error) {
     console.error('PATCH /players/:cedula/exento', error.message);
     res.status(500).json({ success: false, error: error.message });
@@ -283,7 +287,7 @@ router.post('/bulk', async (req, res) => {
   }
 });
 
-// DELETE /api/players/:cedula?club_id=city-fc  — desactiva el jugador (soft delete)
+// DELETE /api/players/:cedula?club_id=city-fc  — eliminación definitiva (hard delete)
 router.delete('/:cedula', async (req, res) => {
   try {
     const club = await db.getClubBySlug(req.club_id);

@@ -615,9 +615,13 @@ async function updateArbitrajePago(id, updates) {
 }
 
 async function deletePlayer(club_id, cedula) {
+  // Limpiar datos asociados antes de borrar el jugador
+  await supabase.from('mensualidades').delete().eq('club_id', club_id).eq('cedula', String(cedula));
+  await supabase.from('suspensiones').delete().eq('club_id', club_id).eq('cedula', String(cedula));
+  // Hard delete — eliminación definitiva de la base de datos
   const { error } = await supabase
     .from('players')
-    .update({ activo: false })
+    .delete()
     .eq('club_id', club_id)
     .eq('cedula', String(cedula));
   if (error) throw error;
