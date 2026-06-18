@@ -249,6 +249,7 @@ async function handleMorososPdf(req, res) {
 
     const isSuspendido = (cedula, mesNum) =>
       (suspensiones || []).some(s =>
+        s.activa &&
         s.cedula === String(cedula) &&
         parseInt(s.anio) === anio &&
         s.mes_inicio <= mesNum &&
