@@ -48,11 +48,11 @@ router.post('/', async (req, res) => {
   }
 });
 
-// PUT /api/torneos/:id — actualizar pago
+// PUT /api/torneos/:id — actualizar pago y/o descuento
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { valor_pagado } = req.body;
+    const { valor_pagado, descuento, concepto_descuento } = req.body;
 
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
@@ -61,15 +61,18 @@ router.put('/:id', async (req, res) => {
     const torneo = todos.find(t => String(t.id) === String(id));
     if (!torneo) return res.status(404).json({ success: false, error: 'Inscripción no encontrada' });
 
-    const nuevoPagado = parseFloat(valor_pagado) || 0;
-    const saldo = Math.max(0, (parseFloat(torneo.valor_oficial) || 0) - nuevoPagado);
-    const estado = saldo === 0 ? 'AL_DIA' : nuevoPagado > 0 ? 'ABONO' : 'PENDIENTE';
+    // Mantener valor anterior si no se envió el campo
+    const nuevoDesc   = descuento    !== undefined ? parseFloat(descuento)    : parseFloat(torneo.descuento)    || 0;
+    const nuevoPagado = valor_pagado !== undefined ? parseFloat(valor_pagado) : parseFloat(torneo.valor_pagado) || 0;
 
-    const updated = await db.updateTorneo(id, {
-      valor_pagado: nuevoPagado,
-      saldo_pendiente: saldo,
-      estado,
-    });
+    const valorNeto = Math.max(0, (parseFloat(torneo.valor_oficial) || 0) - nuevoDesc);
+    const saldo     = Math.max(0, valorNeto - nuevoPagado);
+    const estado    = saldo === 0 ? 'AL_DIA' : nuevoPagado > 0 ? 'ABONO' : 'PENDIENTE';
+
+    const updates = { valor_pagado: nuevoPagado, descuento: nuevoDesc, saldo_pendiente: saldo, estado };
+    if (concepto_descuento !== undefined) updates.concepto_descuento = concepto_descuento;
+
+    const updated = await db.updateTorneo(id, updates);
     res.json({ success: true, data: updated });
   } catch (error) {
     console.error('Error en PUT /torneos/:id:', error);
