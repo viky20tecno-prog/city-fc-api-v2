@@ -917,6 +917,27 @@ async function upsertWaSession(phone, { rol, contexto, messages, last_interactio
  * Normaliza el campo de deportes del club: acepta string legacy o array nuevo.
  * Siempre devuelve un array no vacío.
  */
+/**
+ * Marca como MORA todas las mensualidades PENDIENTE de meses anteriores al actual.
+ * Los meses del año en curso anteriores al mes actual + todos los años anteriores.
+ */
+async function marcarMensualidadesVencidas(club_id) {
+  const now    = new Date();
+  const mesAct = now.getMonth() + 1; // 1-12
+  const anioAct = now.getFullYear();
+
+  const { data, error } = await supabase
+    .from('mensualidades')
+    .update({ estado: 'MORA', fecha_ultima_actualizacion: now.toISOString() })
+    .eq('club_id', club_id)
+    .eq('estado', 'PENDIENTE')
+    .or(`anio.lt.${anioAct},and(anio.eq.${anioAct},numero_mes.lt.${mesAct})`)
+    .select('id');
+
+  if (error) throw error;
+  return data?.length || 0;
+}
+
 function getDeportesClub(club) {
   const config = club?.config || {};
   if (Array.isArray(config.deportes) && config.deportes.length > 0) return config.deportes;
@@ -941,6 +962,7 @@ module.exports = {
   deletePlayer,
   getMensualidades,
   getMensualidadesPendientes,
+  marcarMensualidadesVencidas,
   updateMensualidad,
   getUniformes,
   getUniformesPendientes,

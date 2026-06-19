@@ -12,6 +12,9 @@ router.get('/', async (req, res) => {
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
+    // Auto-marcar vencidos antes de devolver datos (fire-and-forget)
+    db.marcarMensualidadesVencidas(club.id).catch(e => console.error('[invoices] marcarVencidos:', e.message));
+
     let invoices = await db.getMensualidades(club.id);
     invoices = invoices.filter(inv => String(inv.anio) === String(anio));
     if (mes) invoices = invoices.filter(inv => String(inv.numero_mes) === String(mes));
@@ -413,6 +416,21 @@ router.post('/importar-estados', async (req, res) => {
     });
   } catch (err) {
     console.error('POST /invoices/importar-estados', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/invoices/marcar-vencidos
+// Convierte a MORA todos los PENDIENTE de meses anteriores al actual
+router.post('/marcar-vencidos', async (req, res) => {
+  try {
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const actualizados = await db.marcarMensualidadesVencidas(club.id);
+    res.json({ success: true, actualizados, message: `${actualizados} mensualidades marcadas como MORA` });
+  } catch (err) {
+    console.error('POST /invoices/marcar-vencidos', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });

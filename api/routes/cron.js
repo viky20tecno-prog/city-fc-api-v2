@@ -98,8 +98,18 @@ router.all('/emails', async (req, res) => {
       }
     }
 
-    console.log(`[cron] Ejecutado: ${resultados.enviados.length} enviados, ${resultados.omitidos.length} omitidos, ${resultados.errores.length} errores`);
-    res.json({ success: true, timestamp: ahora.toISOString(), ...resultados });
+    // Marcar mensualidades vencidas de todos los clubs
+    let vencidosTotal = 0;
+    for (const club of clubs) {
+      try {
+        vencidosTotal += await db.marcarMensualidadesVencidas(club.id);
+      } catch (e) {
+        console.error(`[cron] marcarVencidos ${club.slug}:`, e.message);
+      }
+    }
+
+    console.log(`[cron] Ejecutado: ${resultados.enviados.length} enviados, ${resultados.omitidos.length} omitidos, ${resultados.errores.length} errores, ${vencidosTotal} mensualidades marcadas vencidas`);
+    res.json({ success: true, timestamp: ahora.toISOString(), vencidos_marcados: vencidosTotal, ...resultados });
 
   } catch (err) {
     console.error('[cron] Error fatal:', err.message);
