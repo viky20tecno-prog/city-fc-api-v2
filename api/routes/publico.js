@@ -49,10 +49,11 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
     const anioActual = new Date().getFullYear();
     // Buscar mensualidades por cedula Y por player_id por separado, luego combinar
     // (algunos registros solo tienen uno de los dos campos)
-    const [byCedula, byPlayerId, suspensiones] = await Promise.all([
+    const [byCedula, byPlayerId, suspensiones, torneosJugador] = await Promise.all([
       db.supabase.from('mensualidades').select('*').eq('club_id', club.id).eq('cedula', String(cedula)),
       db.supabase.from('mensualidades').select('*').eq('club_id', club.id).eq('player_id', jugador.id),
       db.getSuspensionesJugador(club.id, cedula),
+      db.getTorneos(club.id, String(cedula)),
     ]);
     // Deduplicar por id
     const mensMap = {};
@@ -178,6 +179,14 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
         activo:    jugador.activo,
       },
       mensualidades:    resumen,
+      torneos:          (torneosJugador || []).map(t => ({
+        id:              t.id,
+        nombre_torneo:   t.nombre_torneo,
+        estado:          t.estado,
+        valor_inscrito:  parseFloat(t.valor_inscrito) || parseFloat(t.valor_oficial) || 0,
+        valor_pagado:    parseFloat(t.valor_pagado)   || 0,
+        saldo_pendiente: parseFloat(t.saldo_pendiente) || 0,
+      })),
       saldo_pendiente,
       total_pagado,
       meses_pendientes: pendientes.length,
@@ -578,10 +587,11 @@ router.post('/otp/verificar', otpLimiter, async (req, res) => {
 
     // Reusar la lógica de /atleta/:clubSlug/:cedula
     const anioActual = new Date().getFullYear();
-    const [byCedula, byPlayerId, suspensiones] = await Promise.all([
+    const [byCedula, byPlayerId, suspensiones, torneosJugador2] = await Promise.all([
       db.supabase.from('mensualidades').select('*').eq('club_id', club.id).eq('cedula', String(jugador.cedula)),
       db.supabase.from('mensualidades').select('*').eq('club_id', club.id).eq('player_id', jugador.id),
       db.getSuspensionesJugador(club.id, jugador.cedula),
+      db.getTorneos(club.id, String(jugador.cedula)),
     ]);
     const mensMap = {};
     [...(byCedula.data || []), ...(byPlayerId.data || [])].forEach(m => { mensMap[m.id] = m; });
@@ -617,6 +627,14 @@ router.post('/otp/verificar', otpLimiter, async (req, res) => {
         foto_url:  jugador.foto_url || null,
       },
       mensualidades,
+      torneos: (torneosJugador2 || []).map(t => ({
+        id:              t.id,
+        nombre_torneo:   t.nombre_torneo,
+        estado:          t.estado,
+        valor_inscrito:  parseFloat(t.valor_inscrito) || parseFloat(t.valor_oficial) || 0,
+        valor_pagado:    parseFloat(t.valor_pagado)   || 0,
+        saldo_pendiente: parseFloat(t.saldo_pendiente) || 0,
+      })),
       saldo_pendiente,
       total_pagado,
       meses_pendientes,
