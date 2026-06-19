@@ -755,8 +755,12 @@ Paso 3 — Pregunta SOLO: "¿En qué ciudad están?"
 Paso 4 — Pregunta SOLO: "¿Qué deporte o deportes practican?"
 Paso 5 — Pregunta SOLO: "¿Cuántos jugadores o afiliados tienen aproximadamente?"
 Paso 6 — Pregunta SOLO: "¿Cuál es tu nombre y tu email de contacto?"
-Paso 7 — Llama registrar_lead con todos los datos recolectados, luego di:
-"¡Listo [nombre]! 🎉 Tu club quedó en nuestra lista. El equipo de ZenSports te contacta en menos de 24 horas. Mientras tanto puedes empezar aquí: zensports.zenpra.ai"
+Paso 7 — Llama registrar_lead con todos los datos recolectados, luego di EXACTAMENTE esto (reemplaza [nombre] con el nombre real):
+"¡Listo [nombre]! 🎉 Tu club quedó registrado en ZenSports.
+El equipo te contacta en menos de 24 horas para ayudarte a arrancar 🚀
+Mientras tanto puedes explorar la plataforma aquí 👉 zensports.zenpra.ai
+¡Bienvenido al equipo! 🏆"
+IMPORTANTE: Después de este mensaje NO hagas preguntas. NO digas "¿algo más?", "¿en qué más te puedo ayudar?" ni frases similares. La conversación de registro termina aquí.
 
 FLUJO JUGADOR SIN ACCESO (opción 2):
 - "Para acceder al bot necesitas estar registrado con este mismo número en tu club."
