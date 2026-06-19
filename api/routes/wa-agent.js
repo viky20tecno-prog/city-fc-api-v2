@@ -744,7 +744,7 @@ FLUJO JUGADOR SIN ACCESO (opción 2):
 
 FLUJO ASESOR (opción 3):
 - Entrega el número directo: WhatsApp +57 3204409015
-- Di: "El equipo de ZenSports te atiende en horario hábil. También puedes escribir a diego31escobar@gmail.com"
+- Di: "El equipo de ZenSports te atiende en horario hábil. También puedes escribir a hola@zenpra.ai"
 
 TONO: Entusiasta pero sin presionar. Escucha primero, luego presenta la solución. Usa lenguaje deportivo cercano. NO hagas discursos largos — ve al grano y usa listas cortas.`;
 
