@@ -462,8 +462,8 @@ async function runTool(name, input, contexto = {}) {
       const supabase = db.supabase;
       const leadData = {
         nombre_club:   input.nombre_club,
-        nombre_admin:  input.nombre_admin,
-        celular:       input.celular,
+        nombre:        input.nombre_admin,
+        whatsapp:      input.celular,
         email:         input.email || null,
         ciudad:        input.ciudad || null,
         deporte:       input.deporte || null,
@@ -471,7 +471,7 @@ async function runTool(name, input, contexto = {}) {
         fuente:        'whatsapp',
         created_at:    new Date().toISOString(),
       };
-      await supabase.from('leads').upsert(leadData, { onConflict: 'celular' });
+      await supabase.from('leads').upsert(leadData, { onConflict: 'whatsapp' });
       const params = new URLSearchParams();
       if (input.nombre_club) params.set('club', input.nombre_club);
       if (input.nombre_admin) params.set('admin', input.nombre_admin);
