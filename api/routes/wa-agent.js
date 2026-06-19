@@ -177,19 +177,18 @@ const TOOLS_BASE = [
   },
   {
     name: 'registrar_lead',
-    description: 'Guarda los datos de un club interesado en ZenSports y genera el link de registro prellenado.',
+    description: 'Guarda los datos de un club interesado en ZenSports y genera el link de registro prellenado. El celular se toma automáticamente del número de WhatsApp del visitante.',
     input_schema: {
       type: 'object',
       properties: {
-        nombre_club:  { type: 'string' },
-        deporte:      { type: 'string' },
-        ciudad:       { type: 'string' },
+        nombre_club:   { type: 'string' },
+        deporte:       { type: 'string' },
+        ciudad:        { type: 'string' },
         num_jugadores: { type: 'string' },
-        nombre_admin: { type: 'string' },
-        email:        { type: 'string' },
-        celular:      { type: 'string' },
+        nombre_admin:  { type: 'string' },
+        email:         { type: 'string' },
       },
-      required: ['nombre_club', 'nombre_admin', 'celular'],
+      required: ['nombre_club', 'nombre_admin'],
     },
   },
   {
@@ -463,7 +462,7 @@ async function runTool(name, input, contexto = {}) {
       const leadData = {
         nombre_club:   input.nombre_club,
         nombre:        input.nombre_admin,
-        whatsapp:      input.celular,
+        whatsapp:      contexto.from || from,
         email:         input.email || null,
         ciudad:        input.ciudad || null,
         deporte:       input.deporte || null,
@@ -858,6 +857,14 @@ async function generateReply(from, text) {
     return null; // ignorar silenciosamente — el admin lo desactivó
   }
 
+  // Captura silenciosa: cualquier visitante queda en leads con su número
+  if (rol === 'visitante') {
+    db.supabase.from('leads').upsert(
+      { whatsapp: from, fuente: 'whatsapp' },
+      { onConflict: 'whatsapp', ignoreDuplicates: true }
+    ).then(() => {}).catch(() => {});
+  }
+
   const systemMap  = { admin: SYSTEM_ADMIN, entrenador: SYSTEM_ENTRENADOR, jugador: SYSTEM_JUGADOR, visitante: SYSTEM_VISITANTE };
   const toolsMap   = { admin: TOOLS_ADMIN,  jugador: TOOLS_JUGADOR,  visitante: TOOLS_VISITANTE };
   const system     = `${systemMap[rol]}\n\nCONTEXTO DEL USUARIO:\n${JSON.stringify({ rol, ...contexto })}`;
@@ -889,7 +896,7 @@ async function generateReply(from, text) {
       for (const block of response.content) {
         if (block.type !== 'tool_use') continue;
         toolsUsed.push(block.name);
-        const result = await runTool(block.name, block.input, { rol, ...contexto });
+        const result = await runTool(block.name, block.input, { rol, from, ...contexto });
         // Capturar pdf_url antes de ocultársela al LLM — el LLM nunca ve la URL
         if (block.name === 'consultar_morosos' && result.pdf_url) {
           pdfUrl = result.pdf_url;
