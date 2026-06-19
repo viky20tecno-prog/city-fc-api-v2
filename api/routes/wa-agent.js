@@ -497,9 +497,10 @@ async function runTool(name, input, contexto = {}) {
     if (name === 'obtener_carnet') {
       const { cedula, club_slug, club_nombre, nombre, foto_url } = contexto;
       if (!cedula || !club_slug) return { error: 'No se encontraron tus datos completos para generar el carnet.' };
-      const url = `https://zensports.zenpra.ai/verificar/${club_slug}/${cedula}`;
-      return { url, foto_url: foto_url || null, nombre, club_nombre,
-               instruccion: 'Envía la URL al jugador y dile que puede abrirla en su celular para ver y guardar su carnet digital.' };
+      const fecha = new Date().toISOString().split('T')[0];
+      const url = `https://zensports.zenpra.ai/verificar/${club_slug}/${cedula}?fecha=${fecha}`;
+      return { url, foto_url: foto_url || null, nombre, club_nombre, fecha,
+               instruccion: 'El carnet muestra la fecha de hoy en verde — solo es válido el día que se solicita.' };
     }
 
     if (name === 'enviar_mensaje_jugador') {
@@ -616,7 +617,8 @@ FLUJO:
 - Para calendario → usa consultar_calendario con club_slug del contexto
 - Para partidos → usa consultar_partidos con club_id del contexto
 - Para asistencia → usa consultar_asistencia con club_id y cedula del contexto
-- Para carnet / opción 5 → usa obtener_carnet, luego envía: "🪪 *Tu carnet digital:*\n{url}\n\nÁbrelo desde tu celular para verlo y guardarlo como captura de pantalla."
+- Para carnet / opción 5 → usa obtener_carnet, luego envía exactamente:
+  "🪪 *Tu carnet digital — válido hoy:*\n{url}\n\n📌 Muéstralo en tiendas aliadas y patrocinadores. La fecha verde al pie confirma que es de hoy — un carnet de otro día no es válido."
 - "Hablar con el admin" / opción 6 → da el número contacto_admin del contexto
 
 FORMATO DE RESPUESTA — ESTADO DE CUENTA (opción 1 / consultar_pagos):
