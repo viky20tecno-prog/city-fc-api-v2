@@ -188,7 +188,7 @@ const TOOLS_BASE = [
         nombre_admin:  { type: 'string' },
         email:         { type: 'string' },
       },
-      required: ['nombre_club', 'nombre_admin'],
+      required: ['nombre_admin'],
     },
   },
   {
@@ -459,18 +459,17 @@ async function runTool(name, input, contexto = {}) {
 
     if (name === 'registrar_lead') {
       const supabase = db.supabase;
+      const phone = contexto.from || from;
       const leadData = {
-        nombre_club:   input.nombre_club,
-        nombre:        input.nombre_admin,
-        whatsapp:      contexto.from || from,
-        email:         input.email || null,
-        ciudad:        input.ciudad || null,
-        deporte:       input.deporte || null,
-        num_jugadores: input.num_jugadores || null,
-        fuente:        'whatsapp',
-        created_at:    new Date().toISOString(),
+        nombre_club: input.nombre_club  || null,
+        nombre:      input.nombre_admin || null,
+        whatsapp:    phone,
+        email:       input.email        || null,
+        ciudad:      input.ciudad       || null,
+        fuente:      'whatsapp',
       };
-      await supabase.from('leads').upsert(leadData, { onConflict: 'whatsapp' });
+      const { error: leadErr } = await supabase.from('leads').upsert(leadData, { onConflict: 'whatsapp' });
+      if (leadErr) console.error('[registrar_lead] error:', leadErr.message);
       const params = new URLSearchParams();
       if (input.nombre_club) params.set('club', input.nombre_club);
       if (input.nombre_admin) params.set('admin', input.nombre_admin);
@@ -750,11 +749,10 @@ Paso 1 — Presenta los planes (usa los precios de arriba, NO llames info_zenspo
 La mayoría de clubes recuperan la inversión en el primer mes 💪
 Para activar tu prueba gratis necesito algunos datos rápidos 📋"
 
-Paso 2 — Pregunta SOLO: "¿Cuál es el nombre de tu club?"
-Paso 3 — Pregunta SOLO: "¿En qué ciudad están?"
-Paso 4 — Pregunta SOLO: "¿Qué deporte o deportes practican?"
-Paso 5 — Pregunta SOLO: "¿Cuántos jugadores o afiliados tienen aproximadamente?"
-Paso 6 — Pregunta SOLO: "¿Cuál es tu nombre y tu email de contacto?"
+Paso 2 — Pregunta SOLO: "¿Cuál es tu nombre?"
+Paso 3 — Pregunta SOLO: "¿Cuál es tu email de contacto?"
+Paso 4 — Pregunta SOLO: "¿Cuál es el nombre de tu club y en qué ciudad están?"
+Paso 5 — Pregunta SOLO: "¿Qué deporte practican y cuántos jugadores tienen aproximadamente?"
 Paso 7 — Llama registrar_lead con todos los datos recolectados, luego di EXACTAMENTE esto (reemplaza [nombre] con el nombre real):
 "¡Listo [nombre]! 🎉 Tu club quedó registrado en ZenSports.
 El equipo te contacta en menos de 24 horas para ayudarte a arrancar 🚀
