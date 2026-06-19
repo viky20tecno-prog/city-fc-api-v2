@@ -17,7 +17,7 @@ router.get('/', async (req, res) => {
 // POST /api/torneos — inscribir jugadores en un torneo
 router.post('/', async (req, res) => {
   try {
-    const { cedulas, nombre_torneo, valor_oficial } = req.body;
+    const { cedulas, nombre_torneo, valor_oficial, valor_inscrito } = req.body;
     if (!cedulas || !nombre_torneo) {
       return res.status(400).json({ success: false, error: 'cedulas y nombre_torneo son requeridos' });
     }
@@ -34,9 +34,10 @@ router.post('/', async (req, res) => {
         player_id:       player.id,
         cedula:          String(cedula),
         nombre_torneo,
-        valor_oficial:   parseFloat(valor_oficial) || 0,
+        valor_oficial:   parseFloat(valor_oficial)  || 0,
+        valor_inscrito:  parseFloat(valor_inscrito) || parseFloat(valor_oficial) || 0,
         valor_pagado:    0,
-        saldo_pendiente: parseFloat(valor_oficial) || 0,
+        saldo_pendiente: parseFloat(valor_inscrito) || parseFloat(valor_oficial) || 0,
         estado:          'PENDIENTE',
       });
     }
@@ -65,8 +66,9 @@ router.put('/:id', async (req, res) => {
     const nuevoDesc   = descuento    !== undefined ? parseFloat(descuento)    : parseFloat(torneo.descuento)    || 0;
     const nuevoPagado = valor_pagado !== undefined ? parseFloat(valor_pagado) : parseFloat(torneo.valor_pagado) || 0;
 
-    const valorNeto = Math.max(0, (parseFloat(torneo.valor_oficial) || 0) - nuevoDesc);
-    const saldo     = Math.max(0, valorNeto - nuevoPagado);
+    const baseInscrito = parseFloat(torneo.valor_inscrito) || parseFloat(torneo.valor_oficial) || 0;
+    const valorNeto    = Math.max(0, baseInscrito - nuevoDesc);
+    const saldo        = Math.max(0, valorNeto - nuevoPagado);
     const estado    = saldo === 0 ? 'AL_DIA' : nuevoPagado > 0 ? 'ABONO' : 'PENDIENTE';
 
     const updates = { valor_pagado: nuevoPagado, descuento: nuevoDesc, saldo_pendiente: saldo, estado };
