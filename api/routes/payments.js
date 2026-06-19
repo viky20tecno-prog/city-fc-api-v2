@@ -76,6 +76,14 @@ router.post('/', async (req, res) => {
 
     const conceptoAplicado = resultado.excedente < montoNum;
 
+    db.logClubActivity({
+      club_id: club.id, club_slug: req.club_id,
+      user_id: req.user?.id, user_email: req.user?.email, user_role: req.userRole, user_name: req.memberName,
+      action: 'PAGO_REGISTRADO', entity_type: 'pago', entity_id: pago.id,
+      entity_label: `${player.nombre || ''} ${player.apellidos || ''}`.trim(),
+      details: { cedula, monto: montoNum, banco, concepto: conceptoTipo, referencia },
+    });
+
     res.json({
       success: true,
       club_id: req.club_id,

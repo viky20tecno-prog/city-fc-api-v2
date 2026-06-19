@@ -945,6 +945,27 @@ function getDeportesClub(club) {
   return ['futbol'];
 }
 
+// Fire-and-forget: no lanza error ni bloquea la respuesta principal
+async function logClubActivity({ club_id, club_slug, user_id, user_email, user_role, user_name, action, entity_type, entity_id, entity_label, details }) {
+  try {
+    await supabase.from('club_activity_logs').insert({
+      club_id,
+      club_slug,
+      user_id:      user_id      || null,
+      user_email:   user_email   || 'desconocido',
+      user_role:    user_role    || null,
+      user_name:    user_name    || null,
+      action,
+      entity_type:  entity_type  || null,
+      entity_id:    entity_id != null ? String(entity_id) : null,
+      entity_label: entity_label || null,
+      details:      details      || null,
+    });
+  } catch (e) {
+    console.error('[activity-log]', e.message);
+  }
+}
+
 module.exports = {
   supabase,
   supabase,
@@ -1020,4 +1041,5 @@ module.exports = {
   getAllActiveClubs,
   marcarEmailEnviado,
   getDeportesClub,
+  logClubActivity,
 };

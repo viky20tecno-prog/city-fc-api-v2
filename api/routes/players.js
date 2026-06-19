@@ -55,6 +55,14 @@ router.patch('/:cedula', async (req, res) => {
 
     const updated = await db.updatePlayer(club.id, req.params.cedula, req.body);
 
+    db.logClubActivity({
+      club_id: club.id, club_slug: req.club_id,
+      user_id: req.user?.id, user_email: req.user?.email, user_role: req.userRole, user_name: req.memberName,
+      action: 'JUGADOR_EDITADO', entity_type: 'jugador', entity_id: req.params.cedula,
+      entity_label: `${updated?.nombre || ''} ${updated?.apellidos || ''}`.trim(),
+      details: { campos: Object.keys(req.body) },
+    });
+
     // Si se modificó el descuento, recalcular la mensualidad del mes actual (si no está AL_DIA)
     if (req.body.descuento_pct !== undefined) {
       const mesActual  = new Date().getMonth() + 1;
@@ -94,6 +102,80 @@ router.patch('/:cedula', async (req, res) => {
   } catch (error) {
     console.error('Error in PATCH /players/:cedula:', error);
     res.status(500).json({ success: false, error: 'Error updating player', message: error.message });
+  }
+});
+
+// PATCH /api/players/:cedula/completar?club_id=...
+// Actualiza todos los datos del jugador incluyendo la cédula real.
+// Hace cascade: mensualidades, suspensiones y torneos pasan a la nueva cédula.
+router.patch('/:cedula/completar', async (req, res) => {
+  try {
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const cedulaAnterior = req.params.cedula;
+    const { nueva_cedula, ...otrosCampos } = req.body;
+
+    if (!nueva_cedula || String(nueva_cedula).trim() === '')
+      return res.status(400).json({ success: false, error: 'nueva_cedula requerida' });
+
+    const cedulaNueva = String(nueva_cedula).trim();
+
+    // Verificar que la nueva cédula no exista ya en el club
+    if (cedulaNueva !== cedulaAnterior) {
+      const { data: existe } = await db.supabase
+        .from('players').select('id').eq('club_id', club.id).eq('cedula', cedulaNueva).maybeSingle();
+      if (existe)
+        return res.status(409).json({ success: false, error: `Ya existe un jugador con cédula ${cedulaNueva}` });
+    }
+
+    // 1. Actualizar el jugador: cédula + todos los demás campos
+    const ALLOWED = [
+      'nombre', 'apellidos', 'celular', 'correo_electronico', 'instagram',
+      'tipo_id', 'fecha_nacimiento', 'lugar_de_nacimiento', 'tipo_sangre', 'eps',
+      'estatura', 'peso', 'municipio', 'barrio', 'direccion',
+      'familiar_emergencia', 'celular_contacto', 'notas',
+      'categoria', 'equipo', 'categorias', 'posicion', 'numero_camiseta',
+      'deporte', 'foto_url',
+    ];
+    const fields = Object.fromEntries(Object.entries(otrosCampos).filter(([k]) => ALLOWED.includes(k)));
+    fields.cedula = cedulaNueva;
+
+    const { data: updatedPlayer, error: ep } = await db.supabase
+      .from('players').update(fields)
+      .eq('club_id', club.id).eq('cedula', cedulaAnterior)
+      .select().single();
+    if (ep) throw ep;
+
+    // 2. Cascade: mensualidades
+    if (cedulaNueva !== cedulaAnterior) {
+      await db.supabase.from('mensualidades')
+        .update({ cedula: cedulaNueva })
+        .eq('club_id', club.id).eq('cedula', cedulaAnterior);
+
+      // 3. Cascade: suspensiones
+      await db.supabase.from('suspensiones')
+        .update({ cedula: cedulaNueva })
+        .eq('club_id', club.id).eq('cedula', cedulaAnterior);
+
+      // 4. Cascade: torneos
+      await db.supabase.from('torneos')
+        .update({ cedula: cedulaNueva })
+        .eq('club_id', club.id).eq('cedula', cedulaAnterior);
+    }
+
+    db.logClubActivity({
+      club_id: club.id, club_slug: req.club_id,
+      user_id: req.user?.id, user_email: req.user?.email, user_role: req.userRole, user_name: req.memberName,
+      action: 'JUGADOR_EDITADO', entity_type: 'jugador', entity_id: cedulaNueva,
+      entity_label: `${updatedPlayer?.nombre || ''} ${updatedPlayer?.apellidos || ''}`.trim(),
+      details: cedulaNueva !== cedulaAnterior ? { cedula_anterior: cedulaAnterior, cedula_nueva: cedulaNueva } : { campos: Object.keys(fields) },
+    });
+
+    res.json({ success: true, data: updatedPlayer, cedula_anterior: cedulaAnterior, cedula_nueva: cedulaNueva });
+  } catch (error) {
+    console.error('PATCH /players/:cedula/completar', error.message);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -315,6 +397,14 @@ router.delete('/:cedula', async (req, res) => {
     if (!player) return res.status(404).json({ success: false, error: 'Jugador no encontrado' });
 
     await db.deletePlayer(club.id, req.params.cedula);
+
+    db.logClubActivity({
+      club_id: club.id, club_slug: req.club_id,
+      user_id: req.user?.id, user_email: req.user?.email, user_role: req.userRole, user_name: req.memberName,
+      action: 'JUGADOR_ELIMINADO', entity_type: 'jugador', entity_id: req.params.cedula,
+      entity_label: `${player.nombre || ''} ${player.apellidos || ''}`.trim(),
+    });
+
     res.json({ success: true, mensaje: 'Jugador eliminado correctamente' });
   } catch (error) {
     console.error('Error in DELETE /players/:cedula:', error);

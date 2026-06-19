@@ -75,6 +75,14 @@ router.post('/', async (req, res) => {
       estado:          'PENDIENTE',
     });
 
+    db.logClubActivity({
+      club_id: club.id, club_slug: req.club_id,
+      user_id: req.user?.id, user_email: req.user?.email, user_role: req.userRole, user_name: req.memberName,
+      action: 'UNIFORME_PEDIDO', entity_type: 'uniforme', entity_id: pedido.id,
+      entity_label: `${nombre} #${numero}`,
+      details: { cedula, nombre, talla, numero, prendas, total: total ? Number(total) : 0 },
+    });
+
     res.json({
       success: true,
       message: 'Pedido de uniforme registrado exitosamente',
@@ -112,6 +120,14 @@ router.put('/:id', async (req, res) => {
       ...(nombre_estampar !== undefined && { nombre_estampar }),
       ...(total           !== undefined && { total: Number(total) }),
       ...(estado          !== undefined && { estado }),
+    });
+
+    db.logClubActivity({
+      club_id: club.id, club_slug: req.club_id,
+      user_id: req.user?.id, user_email: req.user?.email, user_role: req.userRole, user_name: req.memberName,
+      action: 'UNIFORME_ACTUALIZADO', entity_type: 'uniforme', entity_id: id,
+      entity_label: `${pedido.nombre} #${pedido.numero_estampar}`,
+      details: { ...(estado && { estado }), ...(talla && { talla }), ...(numero && { numero }) },
     });
 
     res.json({ success: true, message: 'Pedido actualizado', data: updated });

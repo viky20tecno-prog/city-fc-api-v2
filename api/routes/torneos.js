@@ -42,6 +42,16 @@ router.post('/', async (req, res) => {
       });
     }
     if (rows.length > 0) await db.createTorneosInscripcion(rows);
+
+    const club2 = club || await db.getClubBySlug(req.club_id);
+    db.logClubActivity({
+      club_id: club2.id, club_slug: req.club_id,
+      user_id: req.user?.id, user_email: req.user?.email, user_role: req.userRole, user_name: req.memberName,
+      action: 'TORNEO_INSCRIPCION', entity_type: 'torneo', entity_id: nombre_torneo,
+      entity_label: nombre_torneo,
+      details: { cedulas: cedulasArr, inscritos: rows.length, valor_oficial, valor_inscrito },
+    });
+
     res.json({ success: true, enrolled: rows.length, skipped: cedulasArr.length - rows.length });
   } catch (error) {
     console.error('Error en POST /torneos:', error);
@@ -75,6 +85,15 @@ router.put('/:id', async (req, res) => {
     if (concepto_descuento !== undefined) updates.concepto_descuento = concepto_descuento;
 
     const updated = await db.updateTorneo(id, updates);
+
+    db.logClubActivity({
+      club_id: club.id, club_slug: req.club_id,
+      user_id: req.user?.id, user_email: req.user?.email, user_role: req.userRole, user_name: req.memberName,
+      action: 'TORNEO_PAGO_ACTUALIZADO', entity_type: 'torneo', entity_id: id,
+      entity_label: torneo.nombre_torneo,
+      details: { cedula: torneo.cedula, valor_pagado: nuevoPagado, descuento: nuevoDesc, estado },
+    });
+
     res.json({ success: true, data: updated });
   } catch (error) {
     console.error('Error en PUT /torneos/:id:', error);
