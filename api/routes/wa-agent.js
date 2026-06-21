@@ -471,7 +471,7 @@ async function runTool(name, input, contexto = {}) {
 
     if (name === 'consultar_asistencia_hoy') {
       const supabase = db.supabase;
-      const hoy = new Date().toISOString().split('T')[0];
+      const hoy = new Date(Date.now() - 5 * 3600000).toISOString().split('T')[0]; // UTC-5 Colombia
       const { data: eventos } = await supabase
         .from('calendario')
         .select('id, titulo, tipo, equipo')
@@ -564,11 +564,11 @@ async function runTool(name, input, contexto = {}) {
 
     if (name === 'listar_eventos_hoy') {
       const supabase = db.supabase;
-      const hoy = new Date().toISOString().split('T')[0];
+      const hoy = new Date(Date.now() - 5 * 3600000).toISOString().split('T')[0]; // UTC-5 Colombia
       const { data: eventos } = await supabase
         .from('calendario')
         .select('id, titulo, tipo, equipo, fecha_inicio')
-        .eq('club_id', contexto.club_slug)
+        .eq('club_id', contexto.club_id)
         .gte('fecha_inicio', `${hoy}T00:00:00`)
         .lte('fecha_inicio', `${hoy}T23:59:59`)
         .or('suspendido.eq.false,suspendido.is.null')
