@@ -49,6 +49,8 @@ const ALLOWED_ORIGINS = [
   'https://zensports-admin.vercel.app',
   'https://zensports.zenpra.ai',
   'https://admin-zensports.zenpra.ai',
+  'https://dashboard.zensports.zenpra.ai',
+  'https://city-fc-dashboard.vercel.app',
 ];
 
 const corsOptions = {
