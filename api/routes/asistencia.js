@@ -9,8 +9,8 @@ router.get('/jugador/:cedula', async (req, res) => {
   try {
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
-    const data = await db.getAsistenciaJugador(club.id, req.params.cedula);
-    res.json({ success: true, data });
+    const { registros, total_eventos } = await db.getAsistenciaJugador(club.id, req.params.cedula);
+    res.json({ success: true, data: registros, total_eventos });
   } catch (err) {
     console.error('GET /asistencia/jugador:', err.message);
     res.status(500).json({ success: false, error: err.message });

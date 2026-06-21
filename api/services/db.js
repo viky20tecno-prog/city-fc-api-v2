@@ -869,16 +869,28 @@ async function getAsistencia(club_id, evento_id) {
   }));
 }
 
-async function getAsistenciaJugador(club_id, cedula) {
-  const { data, error } = await supabase
-    .from('asistencia')
-    .select('estado, evento_id, created_at')
+async function getTotalEventosClub(club_id) {
+  const { data } = await supabase
+    .from('calendario')
+    .select('id')
     .eq('club_id', club_id)
-    .eq('cedula', String(cedula))
-    .order('created_at', { ascending: false })
-    .limit(30);
+    .or('suspendido.eq.false,suspendido.is.null');
+  return (data || []).length;
+}
+
+async function getAsistenciaJugador(club_id, cedula) {
+  const [{ data, error }, totalEventos] = await Promise.all([
+    supabase
+      .from('asistencia')
+      .select('estado, evento_id, created_at')
+      .eq('club_id', club_id)
+      .eq('cedula', String(cedula))
+      .order('created_at', { ascending: false })
+      .limit(200),
+    getTotalEventosClub(club_id),
+  ]);
   if (error) throw error;
-  if (!data || data.length === 0) return [];
+  if (!data || data.length === 0) return { registros: [], total_eventos: totalEventos };
 
   const eventoIds = [...new Set(data.map(r => r.evento_id).filter(Boolean))];
   const { data: eventos } = await supabase
@@ -889,17 +901,20 @@ async function getAsistenciaJugador(club_id, cedula) {
   const evMap = {};
   (eventos || []).forEach(e => { evMap[e.id] = e; });
 
-  return data
+  const registros = data
     .map(r => ({ ...r, calendario: evMap[r.evento_id] || null }))
     .filter(r => r.calendario !== null && !r.calendario.suspendido);
+
+  return { registros, total_eventos: totalEventos };
 }
 
 async function getAsistenciaStatsClub(club_id) {
-  const { data, error } = await supabase
-    .from('asistencia')
-    .select('cedula, estado, evento_id')
-    .eq('club_id', club_id);
+  const [{ data, error }, totalEventos] = await Promise.all([
+    supabase.from('asistencia').select('cedula, estado, evento_id').eq('club_id', club_id),
+    getTotalEventosClub(club_id),
+  ]);
   if (error) throw error;
+  if (!totalEventos) return [];
 
   const eventoIds = [...new Set((data || []).map(r => r.evento_id).filter(Boolean))];
   let eventosVivos = new Set();
@@ -911,18 +926,15 @@ async function getAsistenciaStatsClub(club_id) {
   const map = {};
   (data || []).forEach(({ cedula, estado, evento_id }) => {
     if (!eventosVivos.has(evento_id)) return;
-    if (!map[cedula]) map[cedula] = { marcados: 0, presentes: 0 };
-    if (estado !== 'PENDIENTE') {
-      map[cedula].marcados++;
-      if (estado === 'PRESENTE') map[cedula].presentes++;
-    }
+    if (!map[cedula]) map[cedula] = { presentes: 0 };
+    if (estado === 'PRESENTE') map[cedula].presentes++;
   });
 
   return Object.entries(map).map(([cedula, s]) => ({
     cedula,
-    marcados:   s.marcados,
-    presentes:  s.presentes,
-    porcentaje: s.marcados > 0 ? Math.round((s.presentes / s.marcados) * 100) : null,
+    presentes:      s.presentes,
+    total_eventos:  totalEventos,
+    porcentaje:     Math.round((s.presentes / totalEventos) * 100),
   }));
 }
 
@@ -1083,6 +1095,7 @@ module.exports = {
   updateCalendarioEvent,
   deleteCalendarioEvent,
   getAsistencia,
+  getTotalEventosClub,
   getAsistenciaJugador,
   getAsistenciaStatsClub,
   upsertAsistencia,
