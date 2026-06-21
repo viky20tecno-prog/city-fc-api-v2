@@ -460,7 +460,7 @@ async function runTool(name, input, contexto = {}) {
           morosos.push({ nombre: `${p.nombre} ${p.apellidos}`.trim(), celular: p.celular, equipo: p.equipo, meses_pendientes: pend.length, deuda });
         }
       }
-      morosos.sort((a, b) => b.deuda - a.deuda);
+      morosos.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
       const total_deuda = morosos.reduce((s, m) => s + m.deuda, 0);
       const mesParam = mesNum ? String(mesNum) : '';
       const token = generarTokenMorosos(clubId);

@@ -311,7 +311,7 @@ async function handleMorososPdf(req, res) {
       }
     });
 
-    const morosos = Object.values(defaultersMap).sort((a, b) => b.saldo_total - a.saldo_total);
+    const morosos = Object.values(defaultersMap).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
     const totalSaldo = morosos.reduce((s, m) => s + m.saldo_total, 0);
 
     const fecha = new Date().toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' });
