@@ -606,15 +606,21 @@ async function runTool(name, input, contexto = {}) {
     if (name === 'ver_lista_asistencia') {
       const lista = await db.getAsistencia(contexto.club_id, input.evento_id);
       if (!lista?.length) return { mensaje: 'No hay jugadores registrados en este evento.', jugadores: [] };
+      const MAX = 60;
+      const jugadores = lista.slice(0, MAX).map((j, i) => ({
+        numero:  i + 1,
+        cedula:  j.cedula,
+        nombre:  `${j.nombre} ${j.apellidos}`.trim(),
+        estado:  j.estado || 'PENDIENTE',
+        equipo:  j.equipo,
+      }));
       return {
         total: lista.length,
-        jugadores: lista.map((j, i) => ({
-          numero:   i + 1,
-          cedula:   j.cedula,
-          nombre:   `${j.nombre} ${j.apellidos}`.trim(),
-          estado:   j.estado || 'PENDIENTE',
-          equipo:   j.equipo,
-        })),
+        mostrando: jugadores.length,
+        nota: lista.length > MAX
+          ? `Lista grande (${lista.length} jugadores). Para marcar a todos presentes usa marcar_todos_presentes=true. Para registrar ausencias dime las cédulas de los que NO asistieron.`
+          : null,
+        jugadores,
       };
     }
 
@@ -788,7 +794,7 @@ const SYSTEM_ADMIN = `${SYSTEM_BASE}
 
 ROL: Estás atendiendo al ADMINISTRADOR del club. Sus datos de club están en el CONTEXTO.
 
-REGLA CRÍTICA: Cuando el usuario envíe un número del 1 al 6, SIEMPRE interpreta que está seleccionando esa opción del menú. Ignora cualquier pregunta tuya anterior que esté pendiente y ejecuta la acción del número recibido.
+REGLA CRÍTICA: Cuando el usuario envíe un número del 1 al 7 Y no estés en medio de un flujo de asistencia, interpreta que está seleccionando esa opción del menú. Si ya llamaste listar_eventos_hoy y estás esperando que el admin elija un evento, interpreta el número como selección del evento (no del menú).
 
 MENÚ DE ADMIN (usar cuando digan "hola", "menu" o sea primera vez):
 PERSONALIZACIÓN OBLIGATORIA: usa el campo "club_nombre" del CONTEXTO en el saludo. Ejemplo: si club_nombre="City FC", el saludo es "👋 ¡Hola! Soy *Zen*, el asistente de administración de *City FC*."
@@ -820,16 +826,24 @@ FLUJO:
 FLUJO DE ASISTENCIA (opción 7 o cuando el admin mencione "asistencia" o "pasar lista"):
 Paso 1 — llama listar_eventos_hoy. Muestra la lista numerada de eventos de hoy.
   Si no hay eventos: "No hay eventos programados para hoy."
-Paso 2 — Pregunta: "¿De cuál evento quieres pasar la asistencia?" (el admin responde con el número o nombre del evento)
-Paso 3 — llama ver_lista_asistencia con el evento_id seleccionado. Muestra la lista numerada de jugadores con su estado actual.
-  Formato de lista: "1. Juan Pérez ✅ / 2. Carlos López ⬜ / ..."  (✅ = PRESENTE, ⬜ = PENDIENTE/sin marcar)
-  Luego pregunta: "Dime quiénes asistieron. Puedes decir:
-  • *todos* para marcar a todos como presentes
-  • *todos menos 5, 8* para excluir ciertos números
-  • *1, 3, 7, 12* para indicar solo los que sí asistieron"
-Paso 4 — Interpreta la respuesta y construye la lista de cédulas presentes a partir de los números indicados. Llama registrar_asistencia_lote con las cédulas correspondientes.
-  Confirma con: "✅ Asistencia guardada — X presentes, Y sin marcar."
-REGLA: NUNCA inventes cédulas ni números. Usa SOLO los datos que retornó ver_lista_asistencia.
+  Si hay un solo evento: confírmalo directamente ("Tenemos un entrenamiento hoy a las HH:MM. ¿Pasamos asistencia? Responde *sí* o *no*.")
+  Si hay varios: pregunta cuál (por número).
+Paso 2 — llama ver_lista_asistencia con el evento_id.
+  Si la nota dice que el club es grande (>60 jugadores):
+    Muestra: "📋 *[título]* — X jugadores en total.
+    ¿Cómo quieres registrar la asistencia?
+    • *todos* → todos presentes
+    • *ausentes: [cédulas]* → todos presentes menos esas cédulas
+    • *presentes: [cédulas]* → solo esas cédulas presentes"
+  Si el club es pequeño (≤60): muestra la lista numerada.
+    Formato: "1. Juan Pérez ⬜\n2. Carlos López ⬜\n..."  (✅=PRESENTE ⬜=PENDIENTE)
+    Luego pregunta: "Dime quiénes asistieron: *todos*, *todos menos 2,5*, o *1,3,7*"
+Paso 3 — Interpreta la respuesta:
+  - "todos" → registrar_asistencia_lote con marcar_todos_presentes=true
+  - "ausentes: [cédulas]" → registrar_asistencia_lote con todas las cédulas EXCEPTO las indicadas
+  - números o cédulas específicas → registrar_asistencia_lote con esas cédulas como presentes
+  Confirma: "✅ Asistencia guardada — X presentes, Y sin marcar."
+REGLA: NUNCA inventes cédulas. Usa SOLO los datos de ver_lista_asistencia.
 
 RECORDATORIO PERSONALIZADO:
 - Si el admin dice "envía recordatorio con mensaje: [texto]", usa ese texto como mensaje_personalizado
