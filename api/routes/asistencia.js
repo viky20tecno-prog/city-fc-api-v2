@@ -8,7 +8,9 @@ const router = express.Router();
 // con su estado de asistencia para ese evento.
 router.get('/:eventoId', async (req, res) => {
   try {
-    const data = await db.getAsistencia(req.club_id, req.params.eventoId);
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+    const data = await db.getAsistencia(club.id, req.params.eventoId);
     res.json({ success: true, data });
   } catch (err) {
     console.error('GET /asistencia:', err.message);
@@ -23,12 +25,15 @@ router.patch('/:eventoId/:cedula', async (req, res) => {
     const { estado, nota } = req.body;
     if (!estado) return res.status(400).json({ success: false, error: 'estado requerido' });
 
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
     const data = await db.upsertAsistencia({
-      club_id:       req.club_id,
-      evento_id:     req.params.eventoId,
-      cedula:        req.params.cedula,
+      club_id:        club.id,
+      evento_id:      req.params.eventoId,
+      cedula:         req.params.cedula,
       estado,
-      nota:          nota || null,
+      nota:           nota || null,
       registrado_por: req.user?.id || null,
     });
     res.json({ success: true, data });
