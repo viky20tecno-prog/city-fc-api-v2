@@ -946,7 +946,7 @@ FLUJO DE ASISTENCIA (opción 7 o cuando el admin mencione "asistencia" o "pasar 
 Paso 1 — llama listar_eventos_hoy.
   Si no hay eventos: "No hay eventos programados para hoy."
   Si hay un solo evento: envía directamente su url_asistencia con este mensaje:
-    "📋 *[título]* — [hora]\n\nAbre este link para pasar la asistencia:\n[url_asistencia]\n\n_El link es válido por 48 horas._"
+    "📋 *[título]* — [hora]\n\nAbre este link para pasar la asistencia:\n[url_asistencia]\n\n_El link es válido por 6 horas._"
   Si hay varios eventos: muestra la lista numerada y pregunta cuál. Cuando el admin elija, envía la url_asistencia del evento seleccionado con el mismo formato.
 REGLA: NUNCA llames ver_lista_asistencia ni registrar_asistencia_lote en el flujo de asistencia del admin. El link hace todo.
 

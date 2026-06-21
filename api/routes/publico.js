@@ -667,19 +667,20 @@ router.get('/stats', async (req, res) => {
 
 const ASIST_SECRET = process.env.ASISTENCIA_HMAC_SECRET || 'zs-asist-2026-k7p';
 
+// Ventanas de 3h: el token es válido en la ventana actual y la anterior → máximo ~6h de validez
 function generarTokenAsistencia(slug, eventoId) {
-  const dia = Math.floor(Date.now() / 86400000);
+  const ventana = Math.floor(Date.now() / (3 * 3600000));
   return crypto.createHmac('sha256', ASIST_SECRET)
-    .update(`asist:${slug}:${eventoId}:${dia}`)
+    .update(`asist:${slug}:${eventoId}:${ventana}`)
     .digest('hex')
     .slice(0, 20);
 }
 
 function validarTokenAsistencia(slug, eventoId, token) {
-  const dia = Math.floor(Date.now() / 86400000);
+  const ventana = Math.floor(Date.now() / (3 * 3600000));
   for (let i = 0; i < 2; i++) {
     const expected = crypto.createHmac('sha256', ASIST_SECRET)
-      .update(`asist:${slug}:${eventoId}:${dia - i}`)
+      .update(`asist:${slug}:${eventoId}:${ventana - i}`)
       .digest('hex')
       .slice(0, 20);
     if (token === expected) return true;
