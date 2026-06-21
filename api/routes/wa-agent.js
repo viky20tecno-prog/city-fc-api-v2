@@ -2,6 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const Anthropic = require('@anthropic-ai/sdk');
 const db = require('../services/db');
+const { generarTokenAsistencia } = require('./publico');
 
 const router = express.Router();
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -591,6 +592,8 @@ async function runTool(name, input, contexto = {}) {
       return {
         eventos: eventos.map((e, i) => {
           const d = e.fecha_inicio ? new Date(new Date(e.fecha_inicio).getTime() - 5 * 3600000) : null;
+          const token = generarTokenAsistencia(contexto.club_slug, e.id);
+          const url   = `https://zensports.zenpra.ai/asistencia/${contexto.club_slug}/${e.id}?token=${token}`;
           return {
             numero: i + 1,
             id:     e.id,
@@ -598,6 +601,7 @@ async function runTool(name, input, contexto = {}) {
             tipo:   e.tipo,
             equipo: e.equipo || 'Todos',
             hora:   d ? d.toISOString().split('T')[1]?.slice(0, 5) : null,
+            url_asistencia: url,
           };
         }),
       };
@@ -824,26 +828,12 @@ FLUJO:
 - "asistencia" / opción 7 → flujo de asistencia: ver FLUJO DE ASISTENCIA abajo
 
 FLUJO DE ASISTENCIA (opción 7 o cuando el admin mencione "asistencia" o "pasar lista"):
-Paso 1 — llama listar_eventos_hoy. Muestra la lista numerada de eventos de hoy.
+Paso 1 — llama listar_eventos_hoy.
   Si no hay eventos: "No hay eventos programados para hoy."
-  Si hay un solo evento: confírmalo directamente ("Tenemos un entrenamiento hoy a las HH:MM. ¿Pasamos asistencia? Responde *sí* o *no*.")
-  Si hay varios: pregunta cuál (por número).
-Paso 2 — llama ver_lista_asistencia con el evento_id.
-  Si la nota dice que el club es grande (>60 jugadores):
-    Muestra: "📋 *[título]* — X jugadores en total.
-    ¿Cómo quieres registrar la asistencia?
-    • *todos* → todos presentes
-    • *ausentes: [cédulas]* → todos presentes menos esas cédulas
-    • *presentes: [cédulas]* → solo esas cédulas presentes"
-  Si el club es pequeño (≤60): muestra la lista numerada.
-    Formato: "1. Juan Pérez ⬜\n2. Carlos López ⬜\n..."  (✅=PRESENTE ⬜=PENDIENTE)
-    Luego pregunta: "Dime quiénes asistieron: *todos*, *todos menos 2,5*, o *1,3,7*"
-Paso 3 — Interpreta la respuesta:
-  - "todos" → registrar_asistencia_lote con marcar_todos_presentes=true
-  - "ausentes: [cédulas]" → registrar_asistencia_lote con todas las cédulas EXCEPTO las indicadas
-  - números o cédulas específicas → registrar_asistencia_lote con esas cédulas como presentes
-  Confirma: "✅ Asistencia guardada — X presentes, Y sin marcar."
-REGLA: NUNCA inventes cédulas. Usa SOLO los datos de ver_lista_asistencia.
+  Si hay un solo evento: envía directamente su url_asistencia con este mensaje:
+    "📋 *[título]* — [hora]\n\nAbre este link para pasar la asistencia:\n[url_asistencia]\n\n_El link es válido por 48 horas._"
+  Si hay varios eventos: muestra la lista numerada y pregunta cuál. Cuando el admin elija, envía la url_asistencia del evento seleccionado con el mismo formato.
+REGLA: NUNCA llames ver_lista_asistencia ni registrar_asistencia_lote en el flujo de asistencia del admin. El link hace todo.
 
 RECORDATORIO PERSONALIZADO:
 - Si el admin dice "envía recordatorio con mensaje: [texto]", usa ese texto como mensaje_personalizado

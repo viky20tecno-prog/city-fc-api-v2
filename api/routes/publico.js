@@ -663,4 +663,135 @@ router.get('/stats', async (req, res) => {
   }
 });
 
+// ── Asistencia pública (link desde WhatsApp) ─────────────────────────────────
+
+const ASIST_SECRET = process.env.ASISTENCIA_HMAC_SECRET || 'zs-asist-2026-k7p';
+
+function generarTokenAsistencia(slug, eventoId) {
+  const dia = Math.floor(Date.now() / 86400000);
+  return crypto.createHmac('sha256', ASIST_SECRET)
+    .update(`asist:${slug}:${eventoId}:${dia}`)
+    .digest('hex')
+    .slice(0, 20);
+}
+
+function validarTokenAsistencia(slug, eventoId, token) {
+  const dia = Math.floor(Date.now() / 86400000);
+  for (let i = 0; i < 2; i++) {
+    const expected = crypto.createHmac('sha256', ASIST_SECRET)
+      .update(`asist:${slug}:${eventoId}:${dia - i}`)
+      .digest('hex')
+      .slice(0, 20);
+    if (token === expected) return true;
+  }
+  return false;
+}
+
+// GET /api/publico/asistencia/:slug/:eventoId
+// Devuelve info del evento + lista de jugadores con estado actual (sin token — lectura pública)
+router.get('/asistencia/:slug/:eventoId', async (req, res) => {
+  try {
+    const { slug, eventoId } = req.params;
+    const club = await db.getClubBySlug(slug);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    // Evento
+    const { data: evento, error: evErr } = await db.supabase
+      .from('calendario')
+      .select('id, titulo, tipo, fecha_inicio, lugar, equipo')
+      .eq('id', eventoId)
+      .eq('club_id', slug)
+      .single();
+    if (evErr || !evento) return res.status(404).json({ success: false, error: 'Evento no encontrado' });
+
+    // Jugadores + asistencia actual
+    const lista = await db.getAsistencia(club.id, eventoId);
+
+    // Fecha/hora en Colombia UTC-5
+    const fechaUTC = new Date(evento.fecha_inicio);
+    const fechaCol = new Date(fechaUTC.getTime() - 5 * 3600000);
+
+    res.json({
+      success: true,
+      club: {
+        nombre: club.config?.nombre || slug,
+        color:  club.config?.color  || '#6A00FF',
+        logo:   club.config?.logo_url || null,
+        slug,
+      },
+      evento: {
+        id:     evento.id,
+        titulo: evento.titulo || evento.tipo,
+        tipo:   evento.tipo,
+        lugar:  evento.lugar || null,
+        equipo: evento.equipo || null,
+        fecha:  fechaCol.toISOString().split('T')[0],
+        hora:   fechaCol.toISOString().split('T')[1].slice(0, 5),
+      },
+      jugadores: lista.map((j, i) => ({
+        numero:   i + 1,
+        cedula:   j.cedula,
+        nombre:   `${j.nombre} ${j.apellidos || ''}`.trim(),
+        equipo:   j.equipo || null,
+        categoria: j.categoria || null,
+        estado:   j.estado || 'PENDIENTE',
+      })),
+    });
+  } catch (err) {
+    console.error('[publico/asistencia GET]', err.message);
+    res.status(500).json({ success: false, error: 'Error interno' });
+  }
+});
+
+// POST /api/publico/asistencia/:slug/:eventoId?token=xxx
+// Guarda asistencia en lote: { jugadores: [{ cedula, estado }] }
+router.post('/asistencia/:slug/:eventoId', async (req, res) => {
+  try {
+    const { slug, eventoId } = req.params;
+    const { token } = req.query;
+
+    if (!token || !validarTokenAsistencia(slug, eventoId, token)) {
+      return res.status(403).json({ success: false, error: 'Token inválido o expirado. Solicita un nuevo link desde WhatsApp.' });
+    }
+
+    const club = await db.getClubBySlug(slug);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const { jugadores } = req.body;
+    if (!Array.isArray(jugadores) || jugadores.length === 0) {
+      return res.status(400).json({ success: false, error: 'Se requiere el array jugadores' });
+    }
+
+    const upserts = jugadores.map(j =>
+      db.upsertAsistencia({
+        club_id:  club.id,
+        evento_id: eventoId,
+        cedula:   String(j.cedula),
+        estado:   j.estado || 'PENDIENTE',
+        nota:     null,
+        registrado_por: null,
+      })
+    );
+    await Promise.all(upserts);
+
+    const presentes = jugadores.filter(j => j.estado === 'PRESENTE').length;
+    res.json({ success: true, presentes, total: jugadores.length });
+  } catch (err) {
+    console.error('[publico/asistencia POST]', err.message);
+    res.status(500).json({ success: false, error: 'Error interno' });
+  }
+});
+
+// GET /api/publico/asistencia-token/:slug/:eventoId
+// Genera el token para el link de asistencia (solo para uso interno del wa-agent)
+router.get('/asistencia-token/:slug/:eventoId', async (req, res) => {
+  const { slug, eventoId } = req.params;
+  const secret = req.headers['x-internal-secret'];
+  if (secret !== (process.env.INTERNAL_SECRET || 'zs-internal-2026')) {
+    return res.status(403).json({ success: false });
+  }
+  res.json({ success: true, token: generarTokenAsistencia(slug, eventoId) });
+});
+
 module.exports = router;
+module.exports.generarTokenAsistencia = generarTokenAsistencia;
