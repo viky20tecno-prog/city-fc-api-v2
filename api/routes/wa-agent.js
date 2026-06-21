@@ -412,13 +412,21 @@ async function runTool(name, input, contexto = {}) {
         return { error: 'Solo administradores y entrenadores pueden crear eventos.' };
       }
       const { tipo, titulo, fecha_inicio, fecha_fin, lugar, equipo } = input;
+      if (!contexto.club_slug) {
+        return { error: 'No se pudo identificar el club. Escribe "hola" para reiniciar la sesión.' };
+      }
       if ((tipo === 'PARTIDO' || tipo === 'EVENTO') && !titulo) {
         return { error: `Necesito el nombre del evento. Para un ${tipo}, ¿cuál es el título o contra quién es el partido?` };
       }
-      // Convertir hora Colombia (UTC-5) → UTC sumando 5h
-      const toUTC = str => str
-        ? new Date(new Date(str + 'Z').getTime() + 5 * 3600000).toISOString()
-        : null;
+      // Convertir hora Colombia (UTC-5) → UTC: restar 5h porque Colombia va detrás de UTC
+      // Ej: 3pm Colombia (15:00) = 15:00 - (-5h) = 20:00 UTC
+      const toUTC = str => {
+        if (!str) return null;
+        // str viene como "2026-06-28T15:00:00" (hora local Colombia, sin zona)
+        // Tratar como Colombia UTC-5: restar el offset inverso → sumar 5h en UTC
+        const local = new Date(str.includes('T') ? str : str + 'T00:00:00');
+        return new Date(local.getTime() + 5 * 3600000).toISOString();
+      };
 
       const evento = await db.createCalendarioEvent({
         club_id:      contexto.club_slug,
