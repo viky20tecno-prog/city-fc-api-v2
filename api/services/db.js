@@ -871,13 +871,24 @@ async function getAsistencia(club_id, evento_id) {
 async function getAsistenciaJugador(club_id, cedula) {
   const { data, error } = await supabase
     .from('asistencia')
-    .select('estado, evento_id, created_at, calendario(tipo, titulo, fecha_inicio, equipo)')
+    .select('estado, evento_id, created_at')
     .eq('club_id', club_id)
-    .eq('cedula', cedula)
+    .eq('cedula', String(cedula))
     .order('created_at', { ascending: false })
     .limit(30);
   if (error) throw error;
-  return data || [];
+  if (!data || data.length === 0) return [];
+
+  const eventoIds = [...new Set(data.map(r => r.evento_id).filter(Boolean))];
+  const { data: eventos } = await supabase
+    .from('calendario')
+    .select('id, tipo, titulo, fecha_inicio, equipo')
+    .in('id', eventoIds);
+
+  const evMap = {};
+  (eventos || []).forEach(e => { evMap[e.id] = e; });
+
+  return data.map(r => ({ ...r, calendario: evMap[r.evento_id] || null }));
 }
 
 async function getAsistenciaStatsClub(club_id) {
