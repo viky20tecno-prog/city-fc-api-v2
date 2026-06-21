@@ -911,33 +911,38 @@ async function getAsistenciaJugador(club_id, cedula, club_slug) {
 }
 
 async function getAsistenciaStatsClub(club_id, club_slug) {
-  const [{ data, error }, totalEventos] = await Promise.all([
+  const [{ data: asistData, error }, totalEventos, { data: players }] = await Promise.all([
     supabase.from('asistencia').select('cedula, estado, evento_id').eq('club_id', club_id),
     getTotalEventosClub(club_slug),
+    supabase.from('players').select('cedula').eq('club_id', club_id).eq('activo', true),
   ]);
   if (error) throw error;
   if (!totalEventos) return [];
 
-  const eventoIds = [...new Set((data || []).map(r => r.evento_id).filter(Boolean))];
+  const eventoIds = [...new Set((asistData || []).map(r => r.evento_id).filter(Boolean))];
   let eventosVivos = new Set();
   if (eventoIds.length > 0) {
     const { data: evs } = await supabase.from('calendario').select('id, suspendido').in('id', eventoIds);
     (evs || []).filter(e => !e.suspendido).forEach(e => eventosVivos.add(e.id));
   }
 
-  const map = {};
-  (data || []).forEach(({ cedula, estado, evento_id }) => {
+  const presencesMap = {};
+  (asistData || []).forEach(({ cedula, estado, evento_id }) => {
     if (!eventosVivos.has(evento_id)) return;
-    if (!map[cedula]) map[cedula] = { presentes: 0 };
-    if (estado === 'PRESENTE') map[cedula].presentes++;
+    if (!(cedula in presencesMap)) presencesMap[cedula] = 0;
+    if (estado === 'PRESENTE') presencesMap[cedula]++;
   });
 
-  return Object.entries(map).map(([cedula, s]) => ({
-    cedula,
-    presentes:      s.presentes,
-    total_eventos:  totalEventos,
-    porcentaje:     Math.round((s.presentes / totalEventos) * 100),
-  }));
+  // Todos los jugadores activos del club, aunque no tengan ningún registro
+  return (players || []).map(p => {
+    const presentes = presencesMap[p.cedula] || 0;
+    return {
+      cedula:        p.cedula,
+      presentes,
+      total_eventos: totalEventos,
+      porcentaje:    Math.round((presentes / totalEventos) * 100),
+    };
+  });
 }
 
 async function upsertAsistencia({ club_id, evento_id, cedula, estado, nota, registrado_por }) {
