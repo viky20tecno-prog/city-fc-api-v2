@@ -208,7 +208,7 @@ const TOOL_OBTENER_CARNET = {
 // enviar_mensaje_jugador: SOLO admins — envía WA individual a un jugador del club
 const TOOL_ENVIAR_MENSAJE_JUGADOR = {
   name: 'enviar_mensaje_jugador',
-  description: 'SOLO ADMIN. Envía un mensaje de WhatsApp personalizado a un jugador específico del club. Busca por cédula (exacto) o nombre (parcial).',
+  description: 'SOLO ADMIN/ENTRENADOR. Envía un mensaje de WhatsApp personalizado a un jugador específico del club. Busca por cédula (exacto) o nombre (parcial).',
   input_schema: {
     type: 'object',
     properties: {
@@ -220,10 +220,44 @@ const TOOL_ENVIAR_MENSAJE_JUGADOR = {
   },
 };
 
+// Herramientas de asistencia — admin y entrenador
+const TOOL_LISTAR_EVENTOS_HOY = {
+  name: 'listar_eventos_hoy',
+  description: 'Lista los eventos del club programados para hoy (excluye suspendidos). Usar para iniciar el flujo de registro de asistencia.',
+  input_schema: { type: 'object', properties: {} },
+};
+
+const TOOL_VER_LISTA_ASISTENCIA = {
+  name: 'ver_lista_asistencia',
+  description: 'Obtiene la lista numerada de jugadores para un evento específico con su estado actual de asistencia. Usar para preparar el registro de asistencia por lote.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      evento_id: { type: 'string', description: 'ID del evento (viene de listar_eventos_hoy)' },
+    },
+    required: ['evento_id'],
+  },
+};
+
+const TOOL_REGISTRAR_ASISTENCIA_LOTE = {
+  name: 'registrar_asistencia_lote',
+  description: 'Registra asistencia masiva para un evento. Pasa las cédulas de los jugadores PRESENTES. Los demás quedan como PENDIENTE (no asistió). Usa marcar_todos_presentes=true para marcar a todos.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      evento_id:              { type: 'string', description: 'ID del evento' },
+      cedulas_presentes:      { type: 'array',  items: { type: 'string' }, description: 'Cédulas de jugadores que SÍ asistieron' },
+      marcar_todos_presentes: { type: 'boolean', description: 'true para marcar TODOS como PRESENTE (ignora cedulas_presentes)' },
+    },
+    required: ['evento_id'],
+  },
+};
+
 // Herramientas por rol — jugadores y visitantes NO pueden buscar datos de otras personas
-const TOOLS_ADMIN     = [TOOL_BUSCAR_JUGADOR, TOOL_ENVIAR_MENSAJE_JUGADOR, ...TOOLS_BASE];
-const TOOLS_JUGADOR   = [TOOL_OBTENER_CARNET, ...TOOLS_BASE.filter(t => !['registrar_lead', 'consultar_pagos_club', 'consultar_morosos', 'enviar_recordatorio_pago', 'consultar_asistencia_hoy'].includes(t.name))];
-const TOOLS_VISITANTE = TOOLS_BASE.filter(t => ['registrar_lead', 'info_zensports'].includes(t.name));
+const TOOLS_ADMIN       = [TOOL_BUSCAR_JUGADOR, TOOL_ENVIAR_MENSAJE_JUGADOR, TOOL_LISTAR_EVENTOS_HOY, TOOL_VER_LISTA_ASISTENCIA, TOOL_REGISTRAR_ASISTENCIA_LOTE, ...TOOLS_BASE];
+const TOOLS_ENTRENADOR  = [TOOL_BUSCAR_JUGADOR, TOOL_ENVIAR_MENSAJE_JUGADOR, TOOL_LISTAR_EVENTOS_HOY, TOOL_VER_LISTA_ASISTENCIA, TOOL_REGISTRAR_ASISTENCIA_LOTE, ...TOOLS_BASE.filter(t => ['consultar_calendario', 'consultar_asistencia_hoy'].includes(t.name))];
+const TOOLS_JUGADOR     = [TOOL_OBTENER_CARNET, ...TOOLS_BASE.filter(t => !['registrar_lead', 'consultar_pagos_club', 'consultar_morosos', 'enviar_recordatorio_pago', 'consultar_asistencia_hoy'].includes(t.name))];
+const TOOLS_VISITANTE   = TOOLS_BASE.filter(t => ['registrar_lead', 'info_zensports'].includes(t.name));
 
 // ── Ejecutar herramienta ─────────────────────────────────────────────────────
 async function runTool(name, input, contexto = {}) {
@@ -528,6 +562,66 @@ async function runTool(name, input, contexto = {}) {
       return { enviado: true, destinatario: `${jugador.nombre} ${jugador.apellidos}`.trim(), celular: jugador.celular };
     }
 
+    if (name === 'listar_eventos_hoy') {
+      const supabase = db.supabase;
+      const hoy = new Date().toISOString().split('T')[0];
+      const { data: eventos } = await supabase
+        .from('calendario')
+        .select('id, titulo, tipo, equipo, fecha_inicio')
+        .eq('club_id', contexto.club_slug)
+        .gte('fecha_inicio', `${hoy}T00:00:00`)
+        .lte('fecha_inicio', `${hoy}T23:59:59`)
+        .or('suspendido.eq.false,suspendido.is.null')
+        .order('fecha_inicio');
+      if (!eventos?.length) return { mensaje: 'No hay eventos programados para hoy.' };
+      return {
+        eventos: eventos.map((e, i) => ({
+          numero: i + 1,
+          id:     e.id,
+          titulo: e.titulo || (e.tipo === 'ENTRENAMIENTO' ? 'Entrenamiento' : e.tipo),
+          tipo:   e.tipo,
+          equipo: e.equipo || 'Todos',
+          hora:   e.fecha_inicio?.split('T')[1]?.slice(0, 5),
+        })),
+      };
+    }
+
+    if (name === 'ver_lista_asistencia') {
+      const lista = await db.getAsistencia(contexto.club_id, input.evento_id);
+      if (!lista?.length) return { mensaje: 'No hay jugadores registrados en este evento.', jugadores: [] };
+      return {
+        total: lista.length,
+        jugadores: lista.map((j, i) => ({
+          numero:   i + 1,
+          cedula:   j.cedula,
+          nombre:   `${j.nombre} ${j.apellidos}`.trim(),
+          estado:   j.estado || 'PENDIENTE',
+          equipo:   j.equipo,
+        })),
+      };
+    }
+
+    if (name === 'registrar_asistencia_lote') {
+      const lista = await db.getAsistencia(contexto.club_id, input.evento_id);
+      if (!lista?.length) return { error: 'No se encontraron jugadores para este evento.' };
+      const cedulasPresentes = new Set(
+        input.marcar_todos_presentes
+          ? lista.map(j => String(j.cedula))
+          : (input.cedulas_presentes || []).map(String)
+      );
+      await Promise.all(lista.map(j => db.upsertAsistencia({
+        club_id:        contexto.club_id,
+        evento_id:      input.evento_id,
+        cedula:         j.cedula,
+        estado:         cedulasPresentes.has(String(j.cedula)) ? 'PRESENTE' : 'PENDIENTE',
+        nota:           null,
+        registrado_por: null,
+      })));
+      const presentes = cedulasPresentes.size;
+      const ausentes  = lista.length - presentes;
+      return { exitoso: true, presentes, ausentes, total: lista.length };
+    }
+
     if (name === 'consultar_metricas_wa') {
       const supabase = db.supabase;
       const [{ data: clubData }, { data: sessions }] = await Promise.all([
@@ -692,6 +786,7 @@ PERSONALIZACIÓN OBLIGATORIA: usa el campo "club_nombre" del CONTEXTO en el salu
 4️⃣ Resumen financiero rápido
 5️⃣ Ver próximos eventos del club
 6️⃣ Enviar mensaje a un jugador
+7️⃣ Pasar asistencia de un evento
 
 Escribe el número o dime directamente 💼
 ---
@@ -703,6 +798,21 @@ FLUJO:
 - "resumen" / opción 4 → usa consultar_pagos_club; presenta así: "📊 *Resumen financiero — [mes actual]*\n• Jugadores totales: X\n• Al día: X ✅\n• Pendientes: X ⚠️\n• Deuda total: $X\n• Tasa de mora: X%"
 - "eventos" o "calendario" / opción 5 → usa consultar_calendario con club_slug del contexto
 - "enviar mensaje a [nombre/cédula]" / opción 6 → usa enviar_mensaje_jugador con la cédula o nombre y el texto
+- "asistencia" / opción 7 → flujo de asistencia: ver FLUJO DE ASISTENCIA abajo
+
+FLUJO DE ASISTENCIA (opción 7 o cuando el admin mencione "asistencia" o "pasar lista"):
+Paso 1 — llama listar_eventos_hoy. Muestra la lista numerada de eventos de hoy.
+  Si no hay eventos: "No hay eventos programados para hoy."
+Paso 2 — Pregunta: "¿De cuál evento quieres pasar la asistencia?" (el admin responde con el número o nombre del evento)
+Paso 3 — llama ver_lista_asistencia con el evento_id seleccionado. Muestra la lista numerada de jugadores con su estado actual.
+  Formato de lista: "1. Juan Pérez ✅ / 2. Carlos López ⬜ / ..."  (✅ = PRESENTE, ⬜ = PENDIENTE/sin marcar)
+  Luego pregunta: "Dime quiénes asistieron. Puedes decir:
+  • *todos* para marcar a todos como presentes
+  • *todos menos 5, 8* para excluir ciertos números
+  • *1, 3, 7, 12* para indicar solo los que sí asistieron"
+Paso 4 — Interpreta la respuesta y construye la lista de cédulas presentes a partir de los números indicados. Llama registrar_asistencia_lote con las cédulas correspondientes.
+  Confirma con: "✅ Asistencia guardada — X presentes, Y sin marcar."
+REGLA: NUNCA inventes cédulas ni números. Usa SOLO los datos que retornó ver_lista_asistencia.
 
 RECORDATORIO PERSONALIZADO:
 - Si el admin dice "envía recordatorio con mensaje: [texto]", usa ese texto como mensaje_personalizado
@@ -729,7 +839,7 @@ const SYSTEM_ENTRENADOR = `${SYSTEM_BASE}
 
 ROL: Estás atendiendo a un ENTRENADOR / STAFF del club. Sus datos de club están en el CONTEXTO.
 
-REGLA CRÍTICA: Cuando el usuario envíe un número del 1 al 4, SIEMPRE interpreta que está seleccionando esa opción del menú. Ignora cualquier pregunta tuya anterior que esté pendiente y ejecuta la acción del número recibido.
+REGLA CRÍTICA: Cuando el usuario envíe un número del 1 al 5, SIEMPRE interpreta que está seleccionando esa opción del menú. Ignora cualquier pregunta tuya anterior que esté pendiente y ejecuta la acción del número recibido.
 
 MENÚ DE ENTRENADOR (usar cuando digan "hola", "menu" o sea primera vez):
 PERSONALIZACIÓN OBLIGATORIA: usa el campo "club_nombre" del CONTEXTO en el saludo. Ejemplo: si club_nombre="City FC", el saludo es "👋 ¡Hola! Soy *Zen*, el asistente de *City FC*."
@@ -739,18 +849,34 @@ PERSONALIZACIÓN OBLIGATORIA: usa el campo "club_nombre" del CONTEXTO en el salu
 ¿Qué necesitas hoy?
 
 1️⃣ Ver próximos eventos y entrenamientos
-2️⃣ Ver asistencia del día
-3️⃣ Buscar jugador
-4️⃣ Enviar mensaje a un jugador
+2️⃣ Resumen de asistencia del día
+3️⃣ Pasar asistencia de un evento
+4️⃣ Buscar jugador
+5️⃣ Enviar mensaje a un jugador
 
 Escribe el número o dime directamente 🏋️
 ---
 
 FLUJO:
 - "eventos" o "calendario" / opción 1 → usa consultar_calendario con club_slug del contexto
-- "asistencia" / opción 2 → usa consultar_asistencia_hoy con club_id del contexto
-- "buscar jugador" / opción 3 → pregunta nombre o cédula y usa buscar_jugador; muestra nombre, categoría y estado de pagos
-- "mensaje a [nombre/cédula]" / opción 4 → usa enviar_mensaje_jugador con la cédula o nombre y el texto
+- "resumen asistencia" / opción 2 → usa consultar_asistencia_hoy con club_id del contexto; muestra cuántos presentes/pendientes por evento
+- "pasar asistencia" / opción 3 → flujo de asistencia (ver abajo)
+- "buscar jugador" / opción 4 → pregunta nombre o cédula y usa buscar_jugador; muestra nombre, categoría y equipo
+- "mensaje a [nombre/cédula]" / opción 5 → usa enviar_mensaje_jugador con la cédula o nombre y el texto
+
+FLUJO DE ASISTENCIA (opción 3 o cuando el entrenador mencione "asistencia", "pasar lista", "lista"):
+Paso 1 — llama listar_eventos_hoy. Muestra la lista numerada de eventos de hoy.
+  Si no hay eventos: "No hay eventos programados para hoy."
+Paso 2 — Pregunta: "¿De cuál evento quieres pasar la asistencia?" (el entrenador responde con el número o nombre)
+Paso 3 — llama ver_lista_asistencia con el evento_id. Muestra la lista numerada de jugadores con su estado actual.
+  Formato: "1. Juan Pérez ✅ / 2. Carlos López ⬜ / ..."  (✅ = PRESENTE, ⬜ = sin marcar)
+  Luego pregunta: "Dime quiénes asistieron:
+  • *todos* — todos presentes
+  • *todos menos 5, 8* — todos excepto esos números
+  • *1, 3, 7* — solo esos números"
+Paso 4 — Interpreta la respuesta, construye la lista de cédulas presentes y llama registrar_asistencia_lote.
+  Confirma: "✅ Asistencia guardada — X presentes, Y sin marcar."
+REGLA: NUNCA inventes cédulas. Usa SOLO los datos de ver_lista_asistencia.
 
 RESTRICCIONES: NO tienes acceso a datos financieros del club, morosos ni recordatorios de pago. Si te preguntan por eso, responde: "Esa información solo está disponible para el administrador del club."`;
 
@@ -929,7 +1055,7 @@ async function generateReply(from, text) {
   }
 
   const systemMap  = { admin: SYSTEM_ADMIN, entrenador: SYSTEM_ENTRENADOR, jugador: SYSTEM_JUGADOR, visitante: SYSTEM_VISITANTE };
-  const toolsMap   = { admin: TOOLS_ADMIN,  jugador: TOOLS_JUGADOR,  visitante: TOOLS_VISITANTE };
+  const toolsMap   = { admin: TOOLS_ADMIN,  entrenador: TOOLS_ENTRENADOR, jugador: TOOLS_JUGADOR,  visitante: TOOLS_VISITANTE };
   const system     = `${systemMap[rol]}\n\nCONTEXTO DEL USUARIO:\n${JSON.stringify({ rol, ...contexto })}`;
   const rolTools   = toolsMap[rol] || TOOLS_JUGADOR;
 
