@@ -606,7 +606,7 @@ async function runTool(name, input, contexto = {}) {
     if (name === 'ver_lista_asistencia') {
       const lista = await db.getAsistencia(contexto.club_id, input.evento_id);
       if (!lista?.length) return { mensaje: 'No hay jugadores registrados en este evento.', jugadores: [] };
-      const MAX = 60;
+      const MAX = 120;
       const jugadores = lista.slice(0, MAX).map((j, i) => ({
         numero:  i + 1,
         cedula:  j.cedula,
