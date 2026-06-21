@@ -820,6 +820,7 @@ async function updateCalendarioEvent(id, club_id, updates) {
 }
 
 async function deleteCalendarioEvent(id, club_id) {
+  await supabase.from('asistencia').delete().eq('evento_id', id);
   const { error } = await supabase.from('calendario').delete().eq('id', id).eq('club_id', club_id);
   if (error) throw error;
 }
@@ -888,18 +889,28 @@ async function getAsistenciaJugador(club_id, cedula) {
   const evMap = {};
   (eventos || []).forEach(e => { evMap[e.id] = e; });
 
-  return data.map(r => ({ ...r, calendario: evMap[r.evento_id] || null }));
+  return data
+    .map(r => ({ ...r, calendario: evMap[r.evento_id] || null }))
+    .filter(r => r.calendario !== null);
 }
 
 async function getAsistenciaStatsClub(club_id) {
   const { data, error } = await supabase
     .from('asistencia')
-    .select('cedula, estado')
+    .select('cedula, estado, evento_id')
     .eq('club_id', club_id);
   if (error) throw error;
 
+  const eventoIds = [...new Set((data || []).map(r => r.evento_id).filter(Boolean))];
+  let eventosVivos = new Set();
+  if (eventoIds.length > 0) {
+    const { data: evs } = await supabase.from('calendario').select('id').in('id', eventoIds);
+    (evs || []).forEach(e => eventosVivos.add(e.id));
+  }
+
   const map = {};
-  (data || []).forEach(({ cedula, estado }) => {
+  (data || []).forEach(({ cedula, estado, evento_id }) => {
+    if (!eventosVivos.has(evento_id)) return;
     if (!map[cedula]) map[cedula] = { marcados: 0, presentes: 0 };
     if (estado !== 'PENDIENTE') {
       map[cedula].marcados++;
