@@ -4,6 +4,28 @@ const Anthropic = require('@anthropic-ai/sdk');
 const db = require('../services/db');
 const { generarTokenAsistencia } = require('./publico');
 
+const DIAS_ES  = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+const MESES_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+const DEPORTE_EMOJI = {
+  futbol:'⚽', fútbol:'⚽', football:'⚽', soccer:'⚽',
+  baloncesto:'🏀', basketball:'🏀', basquet:'🏀', básquet:'🏀',
+  beisbol:'⚾', béisbol:'⚾', baseball:'⚾',
+  voleibol:'🏐', volleyball:'🏐', voley:'🏐', vóleibol:'🏐',
+  natacion:'🏊', natación:'🏊', swimming:'🏊',
+  tenis:'🎾', tennis:'🎾',
+  atletismo:'🏃', running:'🏃',
+  rugby:'🏉',
+  ciclismo:'🚴',
+  boxeo:'🥊',
+  artes_marciales:'🥋', judo:'🥋', karate:'🥋', mma:'🥋',
+  golf:'⛳',
+  hockey:'🏒',
+};
+function emojiDeporte(config = {}) {
+  const d = (Array.isArray(config.deportes) ? config.deportes[0] : config.deporte) || '';
+  return DEPORTE_EMOJI[d.toLowerCase().replace(/\s/g,'_')] || '🏅';
+}
+
 const router = express.Router();
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -314,25 +336,39 @@ async function runTool(name, input, contexto = {}) {
 
     if (name === 'consultar_calendario') {
       const club = await db.getClubBySlug(input.club_slug);
-      if (!club) return { eventos: [] };
-      const hoy   = new Date(Date.now() - 5 * 3600000).toISOString().split('T')[0]; // UTC-5 Colombia
+      if (!club) return { texto: 'No hay eventos próximos.' };
+      const hoy   = new Date(Date.now() - 5 * 3600000).toISOString().split('T')[0];
       const hasta = new Date(Date.now() - 5 * 3600000 + 30 * 86400000).toISOString().split('T')[0];
       const eventos = await db.getCalendario(club.slug, hoy, hasta);
-      const filtrados = input.equipo
+      const filtrados = (input.equipo
         ? eventos.filter(e => !e.equipo || e.equipo.toUpperCase().includes(input.equipo.toUpperCase()))
-        : eventos;
-      return { eventos: filtrados.slice(0, 8).map(e => {
-        // Convertir UTC → Colombia (UTC-5) para mostrar fecha/hora correctas
+        : eventos).slice(0, 10);
+      if (!filtrados.length) return { texto: 'No hay eventos próximos en los próximos 30 días.' };
+
+      const clubNombre = contexto.club_nombre || club.config?.nombre || club.name;
+      const emoji = emojiDeporte(contexto.config || club.config || {});
+
+      // Agrupar por mes
+      const porMes = {};
+      for (const e of filtrados) {
         const d = e.fecha_inicio ? new Date(new Date(e.fecha_inicio).getTime() - 5 * 3600000) : null;
-        return {
-          tipo:   e.tipo,
-          titulo: e.titulo,
-          fecha:  d ? d.toISOString().split('T')[0] : null,
-          hora:   d ? d.toISOString().split('T')[1]?.slice(0, 5) : null,
-          lugar:  e.lugar,
-          equipo: e.equipo,
-        };
-      }) };
+        if (!d) continue;
+        const mes = MESES_ES[d.getMonth()];
+        if (!porMes[mes]) porMes[mes] = [];
+        const hora = d.toISOString().split('T')[1]?.slice(0,5);
+        const dia  = DIAS_ES[d.getDay()];
+        const num  = d.getDate();
+        const tipoEmoji = e.tipo === 'PARTIDO' ? emoji : e.tipo === 'ENTRENAMIENTO' ? emoji : '📌';
+        const titulo = e.tipo === 'ENTRENAMIENTO' ? null : (e.titulo || e.tipo);
+        let linea = `${tipoEmoji} ${dia} ${num} · ${hora}`;
+        if (titulo) linea += ` — ${titulo}`;
+        if (e.lugar) linea += ` | ${e.lugar}`;
+        porMes[mes].push(linea);
+      }
+
+      const bloques = Object.entries(porMes).map(([mes, lineas]) => `*${mes}*\n${lineas.join('\n')}`);
+      const texto = `📅 *Próximos eventos — ${clubNombre}*\n\n${bloques.join('\n\n')}`;
+      return { texto };
     }
 
     if (name === 'consultar_partidos') {
@@ -735,7 +771,7 @@ Escribe el número o cuéntame directamente 😊
 
 FLUJO:
 - Para pagos → usa consultar_pagos con club_id y cedula del contexto
-- Para calendario → usa consultar_calendario con club_slug del contexto
+- Para calendario → usa consultar_calendario con club_slug del contexto; el resultado tiene un campo "texto" ya formateado — envíalo TAL CUAL sin modificarlo
 - Para partidos → usa consultar_partidos con club_id del contexto
 - Para asistencia → usa consultar_asistencia con club_id y cedula del contexto
 - Para carnet / opción 5 → usa obtener_carnet, luego envía exactamente:
@@ -823,7 +859,7 @@ FLUJO:
 - "morosos" / opción 2 → usa consultar_morosos
 - "recordatorio" / opción 3 → usa enviar_recordatorio_pago; si el admin quiere personalizar el mensaje pregúntale el texto antes de llamarla
 - "resumen" / opción 4 → usa consultar_pagos_club; presenta así: "📊 *Resumen financiero — [mes actual]*\n• Jugadores totales: X\n• Al día: X ✅\n• Pendientes: X ⚠️\n• Deuda total: $X\n• Tasa de mora: X%"
-- "eventos" o "calendario" / opción 5 → usa consultar_calendario con club_slug del contexto
+- "eventos" o "calendario" / opción 5 → usa consultar_calendario con club_slug del contexto; el resultado tiene un campo "texto" con el mensaje ya formateado — envíalo TAL CUAL sin modificarlo
 - "enviar mensaje a [nombre/cédula]" / opción 6 → usa enviar_mensaje_jugador con la cédula o nombre y el texto
 - "asistencia" / opción 7 → flujo de asistencia: ver FLUJO DE ASISTENCIA abajo
 
@@ -879,7 +915,7 @@ Escribe el número o dime directamente 🏋️
 ---
 
 FLUJO:
-- "eventos" o "calendario" / opción 1 → usa consultar_calendario con club_slug del contexto
+- "eventos" o "calendario" / opción 1 → usa consultar_calendario con club_slug del contexto; el resultado tiene un campo "texto" ya formateado — envíalo TAL CUAL sin modificarlo
 - "resumen asistencia" / opción 2 → usa consultar_asistencia_hoy con club_id del contexto; muestra cuántos presentes/pendientes por evento
 - "pasar asistencia" / opción 3 → flujo de asistencia (ver abajo)
 - "buscar jugador" / opción 4 → pregunta nombre o cédula y usa buscar_jugador; muestra nombre, categoría y equipo
