@@ -17,6 +17,20 @@ router.get('/jugador/:cedula', async (req, res) => {
   }
 });
 
+// GET /api/asistencia/stats?club_id=
+// Retorna % de asistencia de todos los jugadores del club (para mostrar en la tabla).
+router.get('/stats', async (req, res) => {
+  try {
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+    const data = await db.getAsistenciaStatsClub(club.id);
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error('GET /asistencia/stats:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // GET /api/asistencia/:eventoId?club_id=
 // Retorna lista de jugadores (filtrada por equipo si el evento es PARTIDO)
 // con su estado de asistencia para ese evento.

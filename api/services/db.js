@@ -848,10 +848,11 @@ async function getAsistencia(club_id, evento_id) {
   const { data: players, error: plErr } = await playersQuery;
   if (plErr) throw plErr;
 
-  const { data: registros } = await supabase
+  const { data: registros, error: regErr } = await supabase
     .from('asistencia')
     .select('cedula, estado, nota')
     .eq('evento_id', evento_id);
+  if (regErr) throw regErr;
 
   const estadoMap = {};
   (registros || []).forEach(r => { estadoMap[r.cedula] = r; });
@@ -870,13 +871,37 @@ async function getAsistencia(club_id, evento_id) {
 async function getAsistenciaJugador(club_id, cedula) {
   const { data, error } = await supabase
     .from('asistencia')
-    .select('estado, evento_id, calendario(tipo, titulo, fecha_inicio, equipo)')
+    .select('estado, evento_id, created_at, calendario(tipo, titulo, fecha_inicio, equipo)')
     .eq('club_id', club_id)
     .eq('cedula', cedula)
-    .order('calendario(fecha_inicio)', { ascending: false })
+    .order('created_at', { ascending: false })
     .limit(30);
   if (error) throw error;
   return data || [];
+}
+
+async function getAsistenciaStatsClub(club_id) {
+  const { data, error } = await supabase
+    .from('asistencia')
+    .select('cedula, estado')
+    .eq('club_id', club_id);
+  if (error) throw error;
+
+  const map = {};
+  (data || []).forEach(({ cedula, estado }) => {
+    if (!map[cedula]) map[cedula] = { marcados: 0, presentes: 0 };
+    if (estado !== 'PENDIENTE') {
+      map[cedula].marcados++;
+      if (estado === 'PRESENTE') map[cedula].presentes++;
+    }
+  });
+
+  return Object.entries(map).map(([cedula, s]) => ({
+    cedula,
+    marcados:   s.marcados,
+    presentes:  s.presentes,
+    porcentaje: s.marcados > 0 ? Math.round((s.presentes / s.marcados) * 100) : null,
+  }));
 }
 
 async function upsertAsistencia({ club_id, evento_id, cedula, estado, nota, registrado_por }) {
@@ -1037,6 +1062,7 @@ module.exports = {
   deleteCalendarioEvent,
   getAsistencia,
   getAsistenciaJugador,
+  getAsistenciaStatsClub,
   upsertAsistencia,
   getAllActiveClubs,
   marcarEmailEnviado,
