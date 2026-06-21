@@ -740,7 +740,8 @@ REGLAS OBLIGATORIAS:
 - Precios siempre con puntos: $150.000 (no $150000 ni $150,000)
 - Fechas en formato legible: "Sábado 15 de junio" (no "2026-06-15")
 - No repitas información que el usuario ya sabe — ve directo al dato
-- Cuando haya deuda, sé empático con el jugador pero claro con el admin`;
+- Cuando haya deuda, sé empático con el jugador pero claro con el admin
+- REGLA DE FRESCURA: Para calendario, pagos, asistencia, morosos y cualquier dato operativo — SIEMPRE llama el tool correspondiente cada vez que el tema aparezca, incluso si ya lo consultaste antes en esta conversación. Los datos cambian en tiempo real. NUNCA uses tu respuesta anterior como fuente de datos`;
 
 const SYSTEM_JUGADOR = `${SYSTEM_BASE}
 
@@ -1091,12 +1092,18 @@ function agenteActivoParaClub(contexto) {
 }
 
 // ── Generar respuesta del agente (compartida entre todos los canales) ─────────
+const SESSION_TIMEOUT_MIN = 45;
+
 async function generateReply(from, text) {
   const session = await db.getWaSession(from);
-  const history = session?.messages || [];
 
-  // Identificar quién es
-  const { rol, contexto } = await identificarRol(from, session);
+  // Timeout de sesión: si hubo inactividad > 45 min, limpiar historial
+  const STALE = session?.updated_at &&
+    (Date.now() - new Date(session.updated_at).getTime()) > SESSION_TIMEOUT_MIN * 60 * 1000;
+  const history = STALE ? [] : (session?.messages || []);
+
+  // Identificar quién es (si sesión expiró, re-identificar desde BD ignorando caché)
+  const { rol, contexto } = await identificarRol(from, STALE ? null : session);
 
   // Verificar si el agente está habilitado para este club
   if (!agenteActivoParaClub(contexto)) {
@@ -1113,7 +1120,8 @@ async function generateReply(from, text) {
 
   const systemMap  = { admin: SYSTEM_ADMIN, entrenador: SYSTEM_ENTRENADOR, jugador: SYSTEM_JUGADOR, visitante: SYSTEM_VISITANTE };
   const toolsMap   = { admin: TOOLS_ADMIN,  entrenador: TOOLS_ENTRENADOR, jugador: TOOLS_JUGADOR,  visitante: TOOLS_VISITANTE };
-  const system     = `${systemMap[rol]}\n\nCONTEXTO DEL USUARIO:\n${JSON.stringify({ rol, ...contexto })}`;
+  const staleNote  = STALE ? '\n\n[SISTEMA: La sesión anterior expiró por inactividad. Saluda brevemente al usuario indicando que iniciamos de nuevo y atiende su mensaje de forma natural.]' : '';
+  const system     = `${systemMap[rol]}${staleNote}\n\nCONTEXTO DEL USUARIO:\n${JSON.stringify({ rol, ...contexto })}`;
   const rolTools   = toolsMap[rol] || TOOLS_JUGADOR;
 
   const messages = [...history, { role: 'user', content: text }];

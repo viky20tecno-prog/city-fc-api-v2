@@ -809,6 +809,7 @@ async function getCalendario(club_id, desde, hasta) {
     .from('calendario')
     .select('*')
     .eq('club_id', club_id)
+    .neq('suspendido', true)
     .order('fecha_inicio', { ascending: true });
   if (desde) query = query.gte('fecha_inicio', desde);
   if (hasta) query = query.lte('fecha_inicio', hasta);
