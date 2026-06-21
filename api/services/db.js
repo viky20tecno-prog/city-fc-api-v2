@@ -54,19 +54,30 @@ async function getPlayerByCelularGlobal(celular) {
 }
 
 /**
- * Buscar jugadores por nombre, apellidos o cédula (búsqueda parcial) dentro de un club
+ * Buscar jugadores por nombre, apellidos o cédula (búsqueda parcial) dentro de un club.
+ * Normaliza tildes para que "garcia" encuentre "García" y viceversa.
  */
 async function searchPlayersByQuery(club_id, query) {
   const q = String(query).trim();
+  const norm = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const qNorm = norm(q);
+  const esNumero = /^\d+$/.test(q);
+
   const { data, error } = await supabase
     .from('players')
     .select('cedula, nombre, apellidos, celular, equipo, categoria')
     .eq('club_id', club_id)
     .eq('activo', true)
-    .or(`nombre.ilike.%${q}%,apellidos.ilike.%${q}%,cedula.eq.${q}`)
-    .limit(5);
+    .limit(300);
   if (error) throw error;
-  return data || [];
+
+  return (data || [])
+    .filter(p => esNumero
+      ? String(p.cedula) === q
+      : norm(`${p.nombre} ${p.apellidos}`).includes(qNorm) ||
+        norm(p.nombre).includes(qNorm) ||
+        norm(p.apellidos).includes(qNorm))
+    .slice(0, 5);
 }
 
 /**
