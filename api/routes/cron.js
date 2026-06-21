@@ -216,108 +216,154 @@ router.all('/plantillas', async (req, res) => {
 
   const resultados = { enviados: 0, omitidos: 0, errores: [] };
 
+  const MESES_ES  = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  const DIAS_ES   = ['DOMINGO','LUNES','MARTES','MIÉRCOLES','JUEVES','VIERNES','SÁBADO'];
+  const fmtH      = d => `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2,'0')} ${d.getHours() < 12 ? 'am' : 'pm'}`;
+  const fmtCOP    = n => '$' + Math.round(n).toLocaleString('es-CO');
+  const diaCol    = nowCol.getDate();
+  const anio      = nowCol.getFullYear();
+
+  const waHeaders = { 'Content-Type': 'application/json' };
+  if (apiKey) waHeaders['X-Api-Key'] = apiKey;
+
+  function chatId(cel) {
+    const n = String(cel).replace(/\D/g, '');
+    return `${n.startsWith('57') ? n : '57' + n}@c.us`;
+  }
+  async function enviarTexto(cel, texto) {
+    await fetch(`${wahaUrl}/api/sendText`, {
+      method: 'POST', headers: waHeaders,
+      body: JSON.stringify({ chatId: chatId(cel), text: texto, session }),
+    });
+  }
+  async function enviarImagen(cel, url) {
+    if (!url) return;
+    await fetch(`${wahaUrl}/api/sendImage`, {
+      method: 'POST', headers: waHeaders,
+      body: JSON.stringify({ chatId: chatId(cel), file: { url }, caption: '', session }),
+    });
+  }
+  function yaEnviadoHoy(p) {
+    if (!p.ultimo_envio) return false;
+    const fechaCol = new Date(new Date(p.ultimo_envio).getTime() - 5 * 3600000).toISOString().split('T')[0];
+    return fechaCol === hoyCol;
+  }
+  function render(mensaje, vars) {
+    let t = mensaje;
+    for (const [k, v] of Object.entries(vars)) t = t.replaceAll(k, v ?? '');
+    return t;
+  }
+
   try {
-    // Plantillas activas cuya hora coincide con la hora actual Colombia
     const { data: plantillas } = await sb
       .from('plantillas_mensajes')
       .select('*, clubs(id, slug, name, config, celular_admin)')
       .eq('activa', true);
 
-    const activas = (plantillas || []).filter(p => {
-      const hPlant = (p.hora_envio || '').slice(0, 2);
-      if (hPlant !== horaHH) return false;
-      // No enviar dos veces en el mismo día
-      if (p.ultimo_envio) {
-        const fechaUltimo = new Date(p.ultimo_envio).toISOString().split('T')[0];
-        const fechaColUltimo = new Date(new Date(p.ultimo_envio).getTime() - 5 * 3600000).toISOString().split('T')[0];
-        if (fechaColUltimo === hoyCol) return false;
-      }
-      return true;
-    });
-
-    for (const plantilla of activas) {
+    for (const plantilla of (plantillas || [])) {
       const club = plantilla.clubs;
-      if (!club) continue;
+      if (!club || yaEnviadoHoy(plantilla)) { resultados.omitidos++; continue; }
+
+      const config     = club.config || {};
+      const clubNombre = config.nombre || club.name || club.slug;
+      const qrUrl      = config.qr_pago_url || null;
+      const llavePago  = config.llave_pago   || '';
+      const tipo       = plantilla.tipo_plantilla || 'evento';
 
       try {
-        // Buscar eventos de hoy del tipo indicado
-        let query = sb.from('calendario')
-          .select('id, titulo, tipo, lugar, fecha_inicio, fecha_fin')
-          .eq('club_id', club.slug)
-          .gte('fecha_inicio', inicioUTC)
-          .lte('fecha_inicio', finUTC)
-          .or('suspendido.eq.false,suspendido.is.null');
+        // ── TIPO EVENTO ──────────────────────────────────────────────────────────
+        if (tipo === 'evento') {
+          const hPlant = (plantilla.hora_envio || '').slice(0, 2);
+          if (hPlant !== horaHH) { resultados.omitidos++; continue; }
 
-        if (plantilla.tipo_evento !== 'todos') {
-          query = query.eq('tipo', plantilla.tipo_evento);
-        }
-
-        const { data: eventos } = await query.order('fecha_inicio');
-        if (!eventos?.length) { resultados.omitidos++; continue; }
-
-        // Jugadores activos del club
-        const { data: jugadores } = await sb
-          .from('players')
-          .select('cedula, nombre, apellidos, celular')
-          .eq('club_id', club.id)
-          .eq('activo', true);
-        if (!jugadores?.length) { resultados.omitidos++; continue; }
-
-        const config     = club.config || {};
-        const clubNombre = config.nombre || club.name || club.slug;
-        const qrUrl      = config.qr_pago_url || null;
-        const llavePago  = config.llave_pago   || '';
-
-        const wahaHeaders = { 'Content-Type': 'application/json' };
-        if (apiKey) wahaHeaders['X-Api-Key'] = apiKey;
-
-        // Enviar un mensaje por cada evento de hoy (normalmente solo 1)
-        for (const evento of eventos) {
-          const d     = new Date(new Date(evento.fecha_inicio).getTime() - 5 * 3600000);
-          const df    = evento.fecha_fin ? new Date(new Date(evento.fecha_fin).getTime() - 5 * 3600000) : null;
-          const DIAS  = ['DOMINGO','LUNES','MARTES','MIÉRCOLES','JUEVES','VIERNES','SÁBADO'];
-          const fmtH  = d2 => `${d2.getHours() % 12 || 12}:${String(d2.getMinutes()).padStart(2,'0')} ${d2.getHours() < 12 ? 'am' : 'pm'}`;
-
-          const vars = {
-            '{dia}':          DIAS[d.getDay()],
-            '{lugar}':        evento.lugar || '',
-            '{hora_inicio}':  fmtH(d),
-            '{hora_fin}':     df ? fmtH(df) : '',
-            '{club_nombre}':  clubNombre,
-            '{llave_pago}':   llavePago,
-          };
-
-          let texto = plantilla.mensaje;
-          for (const [k, v] of Object.entries(vars)) {
-            texto = texto.replaceAll(k, v);
+          let query = sb.from('calendario')
+            .select('id, titulo, tipo, lugar, fecha_inicio, fecha_fin')
+            .eq('club_id', club.slug)
+            .gte('fecha_inicio', inicioUTC)
+            .lte('fecha_inicio', finUTC)
+            .or('suspendido.eq.false,suspendido.is.null');
+          if (plantilla.tipo_evento && plantilla.tipo_evento !== 'todos') {
+            query = query.eq('tipo', plantilla.tipo_evento);
           }
+          const { data: eventos } = await query.order('fecha_inicio');
+          if (!eventos?.length) { resultados.omitidos++; continue; }
 
-          for (const jugador of jugadores) {
-            if (!jugador.celular) continue;
-            const numOnly = jugador.celular.replace(/\D/g, '');
-            const chatId  = `${numOnly.startsWith('57') ? numOnly : '57' + numOnly}@c.us`;
+          const { data: jugadores } = await sb
+            .from('players').select('cedula, nombre, apellidos, celular')
+            .eq('club_id', club.id).eq('activo', true);
+          if (!jugadores?.length) { resultados.omitidos++; continue; }
 
-            try {
-              // Enviar QR si está configurado y la plantilla lo pide
-              if (plantilla.incluir_qr && qrUrl) {
-                await fetch(`${wahaUrl}/api/sendImage`, {
-                  method: 'POST', headers: wahaHeaders,
-                  body: JSON.stringify({ chatId, file: { url: qrUrl }, caption: '', session }),
-                });
-              }
-              // Enviar texto
-              await fetch(`${wahaUrl}/api/sendText`, {
-                method: 'POST', headers: wahaHeaders,
-                body: JSON.stringify({ chatId, text: texto, session }),
-              });
-              resultados.enviados++;
-            } catch (e) {
-              resultados.errores.push(`${jugador.celular}: ${e.message}`);
+          for (const evento of eventos) {
+            const d  = new Date(new Date(evento.fecha_inicio).getTime() - 5 * 3600000);
+            const df = evento.fecha_fin ? new Date(new Date(evento.fecha_fin).getTime() - 5 * 3600000) : null;
+            const vars = {
+              '{dia}':         DIAS_ES[d.getDay()],
+              '{lugar}':       evento.lugar || '',
+              '{hora_inicio}': fmtH(d),
+              '{hora_fin}':    df ? fmtH(df) : '',
+              '{club_nombre}': clubNombre,
+              '{llave_pago}':  llavePago,
+            };
+            const texto = render(plantilla.mensaje, vars);
+            for (const j of jugadores) {
+              if (!j.celular) continue;
+              try {
+                if (plantilla.incluir_qr && qrUrl) await enviarImagen(j.celular, qrUrl);
+                await enviarTexto(j.celular, texto);
+                resultados.enviados++;
+              } catch (e) { resultados.errores.push(`${j.celular}: ${e.message}`); }
             }
           }
+
+        // ── TIPO COBRO ───────────────────────────────────────────────────────────
+        } else if (tipo === 'cobro') {
+          if (Number(plantilla.dia_envio) !== diaCol) { resultados.omitidos++; continue; }
+
+          const { data: jugadores } = await sb
+            .from('players').select('cedula, nombre, apellidos, celular')
+            .eq('club_id', club.id).eq('activo', true);
+          if (!jugadores?.length) { resultados.omitidos++; continue; }
+
+          // Traer todas las mensualidades del año de una sola vez
+          const { data: todasMens } = await sb
+            .from('mensualidades')
+            .select('cedula, estado, saldo_pendiente, numero_mes')
+            .eq('club_id', club.id)
+            .eq('anio', anio)
+            .in('estado', ['MORA','PENDIENTE','PARCIAL'])
+            .gt('valor_oficial', 0);
+
+          // Agrupar por cédula
+          const porCedula = {};
+          for (const m of (todasMens || [])) {
+            if (!porCedula[m.cedula]) porCedula[m.cedula] = [];
+            porCedula[m.cedula].push(m);
+          }
+
+          for (const j of jugadores) {
+            const pendientes = porCedula[j.cedula];
+            if (!pendientes?.length) continue; // jugador al día — no se envía
+            const deuda  = pendientes.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
+            const meses  = pendientes
+              .sort((a, b) => a.numero_mes - b.numero_mes)
+              .map(m => MESES_ES[(m.numero_mes || 1) - 1])
+              .join(', ');
+            const vars = {
+              '{nombre}':      j.nombre,
+              '{deuda}':       fmtCOP(deuda),
+              '{meses}':       meses,
+              '{club_nombre}': clubNombre,
+              '{llave_pago}':  llavePago,
+            };
+            const texto = render(plantilla.mensaje, vars);
+            try {
+              if (plantilla.incluir_qr && qrUrl) await enviarImagen(j.celular, qrUrl);
+              await enviarTexto(j.celular, texto);
+              resultados.enviados++;
+            } catch (e) { resultados.errores.push(`${j.celular}: ${e.message}`); }
+          }
         }
 
-        // Marcar ultimo_envio para evitar duplicados
         await sb.from('plantillas_mensajes')
           .update({ ultimo_envio: new Date().toISOString() })
           .eq('id', plantilla.id);
