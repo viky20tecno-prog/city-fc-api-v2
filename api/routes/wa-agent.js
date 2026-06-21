@@ -475,8 +475,8 @@ async function runTool(name, input, contexto = {}) {
       const nowCol    = new Date(Date.now() - 5 * 3600000);
       const hoyCol    = nowCol.toISOString().split('T')[0];
       const mananaCol = new Date(nowCol.getTime() + 86400000).toISOString().split('T')[0];
-      const inicioUTC = `${hoyCol}T05:00:00+00:00`;
-      const finUTC    = `${mananaCol}T04:59:59+00:00`;
+      const inicioUTC = `${hoyCol}T05:00:00Z`;
+      const finUTC    = `${mananaCol}T04:59:59Z`;
       const { data: eventos } = await supabase
         .from('calendario')
         .select('id, titulo, tipo, equipo')
@@ -573,8 +573,8 @@ async function runTool(name, input, contexto = {}) {
       const nowCol    = new Date(Date.now() - 5 * 3600000);
       const hoyCol    = nowCol.toISOString().split('T')[0];
       const mananaCol = new Date(nowCol.getTime() + 86400000).toISOString().split('T')[0];
-      const inicioUTC = `${hoyCol}T05:00:00+00:00`;
-      const finUTC    = `${mananaCol}T04:59:59+00:00`;
+      const inicioUTC = `${hoyCol}T05:00:00Z`;
+      const finUTC    = `${mananaCol}T04:59:59Z`;
       const { data: eventos } = await supabase
         .from('calendario')
         .select('id, titulo, tipo, equipo, fecha_inicio')
