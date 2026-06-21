@@ -276,9 +276,45 @@ const TOOL_REGISTRAR_ASISTENCIA_LOTE = {
   },
 };
 
+const TOOL_CREAR_EVENTO = {
+  name: 'crear_evento_calendario',
+  description: 'ADMIN y ENTRENADOR. Crea un evento en el calendario del club (partido, entrenamiento u otro). Úsala cuando el admin o entrenador pida crear, programar o agendar un evento.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      tipo: {
+        type: 'string',
+        enum: ['PARTIDO', 'ENTRENAMIENTO', 'EVENTO'],
+        description: 'Tipo: PARTIDO para partidos, ENTRENAMIENTO para prácticas, EVENTO para otros.',
+      },
+      titulo: {
+        type: 'string',
+        description: 'Nombre o título. Para PARTIDO: nombre del rival o torneo (ej: "vs Deportivo Cali"). Para ENTRENAMIENTO es opcional.',
+      },
+      fecha_inicio: {
+        type: 'string',
+        description: 'Fecha y hora de inicio en hora Colombia (UTC-5), formato ISO YYYY-MM-DDTHH:MM:SS. Ej: 2026-06-28T15:00:00. Deriva la fecha exacta del mensaje del usuario.',
+      },
+      fecha_fin: {
+        type: 'string',
+        description: 'Fecha y hora de fin en hora Colombia (UTC-5), formato ISO YYYY-MM-DDTHH:MM:SS. Opcional.',
+      },
+      lugar: {
+        type: 'string',
+        description: 'Lugar, cancha o dirección. Opcional.',
+      },
+      equipo: {
+        type: 'string',
+        description: 'Equipo o categoría (ej: Sub-17, Femenino, Equipo A). Opcional.',
+      },
+    },
+    required: ['tipo', 'fecha_inicio'],
+  },
+};
+
 // Herramientas por rol — jugadores y visitantes NO pueden buscar datos de otras personas
-const TOOLS_ADMIN       = [TOOL_BUSCAR_JUGADOR, TOOL_ENVIAR_MENSAJE_JUGADOR, TOOL_LISTAR_EVENTOS_HOY, TOOL_VER_LISTA_ASISTENCIA, TOOL_REGISTRAR_ASISTENCIA_LOTE, ...TOOLS_BASE];
-const TOOLS_ENTRENADOR  = [TOOL_BUSCAR_JUGADOR, TOOL_ENVIAR_MENSAJE_JUGADOR, TOOL_LISTAR_EVENTOS_HOY, TOOL_VER_LISTA_ASISTENCIA, TOOL_REGISTRAR_ASISTENCIA_LOTE, ...TOOLS_BASE.filter(t => ['consultar_calendario', 'consultar_asistencia_hoy'].includes(t.name))];
+const TOOLS_ADMIN       = [TOOL_BUSCAR_JUGADOR, TOOL_ENVIAR_MENSAJE_JUGADOR, TOOL_LISTAR_EVENTOS_HOY, TOOL_VER_LISTA_ASISTENCIA, TOOL_REGISTRAR_ASISTENCIA_LOTE, TOOL_CREAR_EVENTO, ...TOOLS_BASE];
+const TOOLS_ENTRENADOR  = [TOOL_BUSCAR_JUGADOR, TOOL_ENVIAR_MENSAJE_JUGADOR, TOOL_LISTAR_EVENTOS_HOY, TOOL_VER_LISTA_ASISTENCIA, TOOL_REGISTRAR_ASISTENCIA_LOTE, TOOL_CREAR_EVENTO, ...TOOLS_BASE.filter(t => ['consultar_calendario', 'consultar_asistencia_hoy'].includes(t.name))];
 const TOOLS_JUGADOR     = [TOOL_OBTENER_CARNET, ...TOOLS_BASE.filter(t => !['registrar_lead', 'consultar_pagos_club', 'consultar_morosos', 'enviar_recordatorio_pago', 'consultar_asistencia_hoy'].includes(t.name))];
 const TOOLS_VISITANTE   = TOOLS_BASE.filter(t => ['registrar_lead', 'info_zensports'].includes(t.name));
 
@@ -369,6 +405,46 @@ async function runTool(name, input, contexto = {}) {
       const bloques = Object.entries(porMes).map(([mes, lineas]) => `*${mes}*\n${lineas.join('\n')}`);
       const texto = `📅 *Próximos eventos — ${clubNombre}*\n\n${bloques.join('\n\n')}`;
       return { texto };
+    }
+
+    if (name === 'crear_evento_calendario') {
+      if (!['admin', 'entrenador'].includes(rol)) {
+        return { error: 'Solo administradores y entrenadores pueden crear eventos.' };
+      }
+      const { tipo, titulo, fecha_inicio, fecha_fin, lugar, equipo } = input;
+      if ((tipo === 'PARTIDO' || tipo === 'EVENTO') && !titulo) {
+        return { error: `Necesito el nombre del evento. Para un ${tipo}, ¿cuál es el título o contra quién es el partido?` };
+      }
+      // Convertir hora Colombia (UTC-5) → UTC sumando 5h
+      const toUTC = str => str
+        ? new Date(new Date(str + 'Z').getTime() + 5 * 3600000).toISOString()
+        : null;
+
+      const evento = await db.createCalendarioEvent({
+        club_id:      contexto.club_slug,
+        tipo:         tipo || 'ENTRENAMIENTO',
+        titulo:       titulo || null,
+        fecha_inicio: toUTC(fecha_inicio),
+        fecha_fin:    toUTC(fecha_fin),
+        lugar:        lugar || null,
+        equipo:       equipo || null,
+        created_by:   null,
+      });
+
+      // Resumen legible en hora Colombia
+      const DIAS  = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+      const MESES_FULL = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+      const d = new Date(new Date(evento.fecha_inicio).getTime() - 5 * 3600000);
+      const resumen = [
+        tipo === 'PARTIDO' ? '⚽' : tipo === 'ENTRENAMIENTO' ? '🏃' : '📌',
+        titulo || tipo,
+        `— ${DIAS[d.getUTCDay()]} ${d.getUTCDate()} de ${MESES_FULL[d.getUTCMonth()]}`,
+        `a las ${d.toISOString().split('T')[1].slice(0,5)}`,
+        lugar ? `en ${lugar}` : '',
+        equipo ? `(${equipo})` : '',
+      ].filter(Boolean).join(' ');
+
+      return { creado: true, id: evento.id, resumen };
     }
 
     if (name === 'consultar_partidos') {
@@ -835,7 +911,7 @@ const SYSTEM_ADMIN = `${SYSTEM_BASE}
 
 ROL: Estás atendiendo al ADMINISTRADOR del club. Sus datos de club están en el CONTEXTO.
 
-REGLA CRÍTICA: Cuando el usuario envíe un número del 1 al 7 Y no estés en medio de un flujo de asistencia, interpreta que está seleccionando esa opción del menú. Si ya llamaste listar_eventos_hoy y estás esperando que el admin elija un evento, interpreta el número como selección del evento (no del menú).
+REGLA CRÍTICA: Cuando el usuario envíe un número del 1 al 8 Y no estés en medio de un flujo de asistencia o creación de evento, interpreta que está seleccionando esa opción del menú. Si ya llamaste listar_eventos_hoy y estás esperando que el admin elija un evento, interpreta el número como selección del evento (no del menú).
 
 MENÚ DE ADMIN (usar cuando digan "hola", "menu" o sea primera vez):
 PERSONALIZACIÓN OBLIGATORIA: usa el campo "club_nombre" del CONTEXTO en el saludo. Ejemplo: si club_nombre="City FC", el saludo es "👋 ¡Hola! Soy *Zen*, el asistente de administración de *City FC*."
@@ -851,6 +927,7 @@ PERSONALIZACIÓN OBLIGATORIA: usa el campo "club_nombre" del CONTEXTO en el salu
 5️⃣ Ver próximos eventos del club
 6️⃣ Enviar mensaje a un jugador
 7️⃣ Pasar asistencia de un evento
+8️⃣ Crear evento en el calendario
 
 Escribe el número o dime directamente 💼
 ---
@@ -863,6 +940,7 @@ FLUJO:
 - "eventos" o "calendario" / opción 5 → usa consultar_calendario con club_slug del contexto; el resultado tiene un campo "texto" con el mensaje ya formateado — envíalo TAL CUAL sin modificarlo
 - "enviar mensaje a [nombre/cédula]" / opción 6 → usa enviar_mensaje_jugador con la cédula o nombre y el texto
 - "asistencia" / opción 7 → flujo de asistencia: ver FLUJO DE ASISTENCIA abajo
+- "crear evento" / opción 8 → flujo de creación: ver FLUJO CREAR EVENTO abajo
 
 FLUJO DE ASISTENCIA (opción 7 o cuando el admin mencione "asistencia" o "pasar lista"):
 Paso 1 — llama listar_eventos_hoy.
@@ -888,6 +966,12 @@ REPORTE PDF DE MOROSOS:
 - NO escribas ninguna URL en tu respuesta. El enlace se envía automáticamente por separado.
 - NO listes jugadores. NO agregues explicaciones. SOLO esa línea.
 
+FLUJO CREAR EVENTO (opción 8 o cuando el admin diga "crea", "programa", "agrega" un evento/partido/entrenamiento):
+- Si el admin incluye todos los datos en un solo mensaje (ej: "crea partido vs Nacional el sábado 28 a las 3pm en el Campín, sub-17"), llama crear_evento_calendario directamente sin preguntar nada. Deduce la fecha ISO del año actual.
+- Si faltan datos clave (fecha/hora para cualquier tipo; rival para PARTIDO), pregunta solo los que faltan en un único mensaje.
+- Al crear exitosamente responde con el resumen que devuelve el tool: "✅ *Evento creado* — [resumen]"
+- El campo fecha_inicio SIEMPRE en hora Colombia (UTC-5), formato YYYY-MM-DDTHH:MM:SS.
+
 REGLA DE ORO — RESPUESTAS CONCISAS:
 - Al finalizar CUALQUIER respuesta, NO sugieras ni propongas otras acciones del menú.
 - NO digas "¿quieres enviar un recordatorio?", "¿te gustaría ver algo más?", ni frases similares.
@@ -897,7 +981,7 @@ const SYSTEM_ENTRENADOR = `${SYSTEM_BASE}
 
 ROL: Estás atendiendo a un ENTRENADOR / STAFF del club. Sus datos de club están en el CONTEXTO.
 
-REGLA CRÍTICA: Cuando el usuario envíe un número del 1 al 5, SIEMPRE interpreta que está seleccionando esa opción del menú. Ignora cualquier pregunta tuya anterior que esté pendiente y ejecuta la acción del número recibido.
+REGLA CRÍTICA: Cuando el usuario envíe un número del 1 al 6, SIEMPRE interpreta que está seleccionando esa opción del menú. Ignora cualquier pregunta tuya anterior que esté pendiente y ejecuta la acción del número recibido.
 
 MENÚ DE ENTRENADOR (usar cuando digan "hola", "menu" o sea primera vez):
 PERSONALIZACIÓN OBLIGATORIA: usa el campo "club_nombre" del CONTEXTO en el saludo. Ejemplo: si club_nombre="City FC", el saludo es "👋 ¡Hola! Soy *Zen*, el asistente de *City FC*."
@@ -911,6 +995,7 @@ PERSONALIZACIÓN OBLIGATORIA: usa el campo "club_nombre" del CONTEXTO en el salu
 3️⃣ Pasar asistencia de un evento
 4️⃣ Buscar jugador
 5️⃣ Enviar mensaje a un jugador
+6️⃣ Crear entrenamiento o partido
 
 Escribe el número o dime directamente 🏋️
 ---
@@ -921,6 +1006,7 @@ FLUJO:
 - "pasar asistencia" / opción 3 → flujo de asistencia (ver abajo)
 - "buscar jugador" / opción 4 → pregunta nombre o cédula y usa buscar_jugador; muestra nombre, categoría y equipo
 - "mensaje a [nombre/cédula]" / opción 5 → usa enviar_mensaje_jugador con la cédula o nombre y el texto
+- "crear evento" / opción 6 → flujo de creación: si el entrenador da todos los datos en un mensaje, crea directamente. Si faltan fecha/hora, pregunta solo eso. Al crear: "✅ *Evento creado* — [resumen del tool]". Fecha en hora Colombia YYYY-MM-DDTHH:MM:SS.
 
 FLUJO DE ASISTENCIA (opción 3 o cuando el entrenador mencione "asistencia", "pasar lista", "lista"):
 Paso 1 — llama listar_eventos_hoy. Muestra la lista numerada de eventos de hoy.
