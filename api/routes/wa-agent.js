@@ -1092,7 +1092,7 @@ function agenteActivoParaClub(contexto) {
 }
 
 // ── Generar respuesta del agente (compartida entre todos los canales) ─────────
-const SESSION_TIMEOUT_MIN = 45;
+const SESSION_TIMEOUT_MIN = 10;
 
 async function generateReply(from, text) {
   const session = await db.getWaSession(from);
@@ -1120,7 +1120,7 @@ async function generateReply(from, text) {
 
   const systemMap  = { admin: SYSTEM_ADMIN, entrenador: SYSTEM_ENTRENADOR, jugador: SYSTEM_JUGADOR, visitante: SYSTEM_VISITANTE };
   const toolsMap   = { admin: TOOLS_ADMIN,  entrenador: TOOLS_ENTRENADOR, jugador: TOOLS_JUGADOR,  visitante: TOOLS_VISITANTE };
-  const staleNote  = STALE ? '\n\n[SISTEMA: La sesión anterior expiró por inactividad. Saluda brevemente al usuario indicando que iniciamos de nuevo y atiende su mensaje de forma natural.]' : '';
+  const staleNote  = STALE ? '\n\n[SISTEMA: La sesión anterior cerró por inactividad. Abre con un saludo corto y cálido tipo "¡Hola de nuevo! 👋 Nuestra sesión anterior ya cerró, pero aquí estoy para lo que necesites." Luego atiende su mensaje de inmediato. Al final de tu respuesta, si no hay más preguntas pendientes, despídete con algo como "¡Hasta la próxima! Recuerda que puedo ayudarte cuando lo necesites 🙌"]' : '';
   const system     = `${systemMap[rol]}${staleNote}\n\nCONTEXTO DEL USUARIO:\n${JSON.stringify({ rol, ...contexto })}`;
   const rolTools   = toolsMap[rol] || TOOLS_JUGADOR;
 
