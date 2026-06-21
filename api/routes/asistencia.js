@@ -9,7 +9,7 @@ router.get('/jugador/:cedula', async (req, res) => {
   try {
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
-    const { registros, total_eventos } = await db.getAsistenciaJugador(club.id, req.params.cedula);
+    const { registros, total_eventos } = await db.getAsistenciaJugador(club.id, req.params.cedula, req.club_id);
     res.json({ success: true, data: registros, total_eventos });
   } catch (err) {
     console.error('GET /asistencia/jugador:', err.message);
@@ -23,7 +23,7 @@ router.get('/stats', async (req, res) => {
   try {
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
-    const data = await db.getAsistenciaStatsClub(club.id);
+    const data = await db.getAsistenciaStatsClub(club.id, req.club_id);
     res.json({ success: true, data });
   } catch (err) {
     console.error('GET /asistencia/stats:', err.message);

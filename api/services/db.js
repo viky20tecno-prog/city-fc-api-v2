@@ -869,16 +869,18 @@ async function getAsistencia(club_id, evento_id) {
   }));
 }
 
-async function getTotalEventosClub(club_id) {
+// club_slug: slug del club (campo club_id en tabla calendario)
+async function getTotalEventosClub(club_slug) {
   const { data } = await supabase
     .from('calendario')
     .select('id')
-    .eq('club_id', club_id)
+    .eq('club_id', club_slug)
     .or('suspendido.eq.false,suspendido.is.null');
   return (data || []).length;
 }
 
-async function getAsistenciaJugador(club_id, cedula) {
+// club_id: ID numérico (tabla asistencia) — club_slug: slug (tabla calendario)
+async function getAsistenciaJugador(club_id, cedula, club_slug) {
   const [{ data, error }, totalEventos] = await Promise.all([
     supabase
       .from('asistencia')
@@ -887,7 +889,7 @@ async function getAsistenciaJugador(club_id, cedula) {
       .eq('cedula', String(cedula))
       .order('created_at', { ascending: false })
       .limit(200),
-    getTotalEventosClub(club_id),
+    getTotalEventosClub(club_slug),
   ]);
   if (error) throw error;
   if (!data || data.length === 0) return { registros: [], total_eventos: totalEventos };
@@ -908,10 +910,10 @@ async function getAsistenciaJugador(club_id, cedula) {
   return { registros, total_eventos: totalEventos };
 }
 
-async function getAsistenciaStatsClub(club_id) {
+async function getAsistenciaStatsClub(club_id, club_slug) {
   const [{ data, error }, totalEventos] = await Promise.all([
     supabase.from('asistencia').select('cedula, estado, evento_id').eq('club_id', club_id),
-    getTotalEventosClub(club_id),
+    getTotalEventosClub(club_slug),
   ]);
   if (error) throw error;
   if (!totalEventos) return [];
