@@ -314,20 +314,24 @@ async function runTool(name, input, contexto = {}) {
     if (name === 'consultar_calendario') {
       const club = await db.getClubBySlug(input.club_slug);
       if (!club) return { eventos: [] };
-      const hoy   = new Date().toISOString().split('T')[0];
-      const hasta = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
-      const eventos = await db.getCalendario(club.id, hoy, hasta);
+      const hoy   = new Date(Date.now() - 5 * 3600000).toISOString().split('T')[0]; // UTC-5 Colombia
+      const hasta = new Date(Date.now() - 5 * 3600000 + 30 * 86400000).toISOString().split('T')[0];
+      const eventos = await db.getCalendario(club.slug, hoy, hasta);
       const filtrados = input.equipo
         ? eventos.filter(e => !e.equipo || e.equipo.toUpperCase().includes(input.equipo.toUpperCase()))
         : eventos;
-      return { eventos: filtrados.slice(0, 8).map(e => ({
-        tipo:   e.tipo,
-        titulo: e.titulo,
-        fecha:  e.fecha_inicio?.split('T')[0],
-        hora:   e.fecha_inicio?.split('T')[1]?.slice(0,5),
-        lugar:  e.lugar,
-        equipo: e.equipo,
-      })) };
+      return { eventos: filtrados.slice(0, 8).map(e => {
+        // Convertir UTC → Colombia (UTC-5) para mostrar fecha/hora correctas
+        const d = e.fecha_inicio ? new Date(new Date(e.fecha_inicio).getTime() - 5 * 3600000) : null;
+        return {
+          tipo:   e.tipo,
+          titulo: e.titulo,
+          fecha:  d ? d.toISOString().split('T')[0] : null,
+          hora:   d ? d.toISOString().split('T')[1]?.slice(0, 5) : null,
+          lugar:  e.lugar,
+          equipo: e.equipo,
+        };
+      }) };
     }
 
     if (name === 'consultar_partidos') {
@@ -585,14 +589,17 @@ async function runTool(name, input, contexto = {}) {
         .order('fecha_inicio');
       if (!eventos?.length) return { mensaje: 'No hay eventos programados para hoy.' };
       return {
-        eventos: eventos.map((e, i) => ({
-          numero: i + 1,
-          id:     e.id,
-          titulo: e.titulo || (e.tipo === 'ENTRENAMIENTO' ? 'Entrenamiento' : e.tipo),
-          tipo:   e.tipo,
-          equipo: e.equipo || 'Todos',
-          hora:   e.fecha_inicio?.split('T')[1]?.slice(0, 5),
-        })),
+        eventos: eventos.map((e, i) => {
+          const d = e.fecha_inicio ? new Date(new Date(e.fecha_inicio).getTime() - 5 * 3600000) : null;
+          return {
+            numero: i + 1,
+            id:     e.id,
+            titulo: e.titulo || (e.tipo === 'ENTRENAMIENTO' ? 'Entrenamiento' : e.tipo),
+            tipo:   e.tipo,
+            equipo: e.equipo || 'Todos',
+            hora:   d ? d.toISOString().split('T')[1]?.slice(0, 5) : null,
+          };
+        }),
       };
     }
 
