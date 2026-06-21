@@ -883,7 +883,7 @@ async function getAsistenciaJugador(club_id, cedula) {
   const eventoIds = [...new Set(data.map(r => r.evento_id).filter(Boolean))];
   const { data: eventos } = await supabase
     .from('calendario')
-    .select('id, tipo, titulo, fecha_inicio, equipo')
+    .select('id, tipo, titulo, fecha_inicio, equipo, suspendido')
     .in('id', eventoIds);
 
   const evMap = {};
@@ -891,7 +891,7 @@ async function getAsistenciaJugador(club_id, cedula) {
 
   return data
     .map(r => ({ ...r, calendario: evMap[r.evento_id] || null }))
-    .filter(r => r.calendario !== null);
+    .filter(r => r.calendario !== null && !r.calendario.suspendido);
 }
 
 async function getAsistenciaStatsClub(club_id) {
@@ -904,8 +904,8 @@ async function getAsistenciaStatsClub(club_id) {
   const eventoIds = [...new Set((data || []).map(r => r.evento_id).filter(Boolean))];
   let eventosVivos = new Set();
   if (eventoIds.length > 0) {
-    const { data: evs } = await supabase.from('calendario').select('id').in('id', eventoIds);
-    (evs || []).forEach(e => eventosVivos.add(e.id));
+    const { data: evs } = await supabase.from('calendario').select('id, suspendido').in('id', eventoIds);
+    (evs || []).filter(e => !e.suspendido).forEach(e => eventosVivos.add(e.id));
   }
 
   const map = {};

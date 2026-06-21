@@ -43,7 +43,7 @@ router.post('/', async (req, res) => {
 // PATCH /api/calendario/:id
 router.patch('/:id', async (req, res) => {
   try {
-    const allowed = ['tipo', 'titulo', 'descripcion', 'fecha_inicio', 'fecha_fin', 'lugar', 'equipo'];
+    const allowed = ['tipo', 'titulo', 'descripcion', 'fecha_inicio', 'fecha_fin', 'lugar', 'equipo', 'suspendido'];
     const updates = {};
     allowed.forEach(k => { if (k in req.body) updates[k] = req.body[k]; });
 
