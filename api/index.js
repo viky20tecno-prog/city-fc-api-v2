@@ -157,19 +157,18 @@ app.use('/api', async (req, res, next) => {
       return res.status(403).json({ success: false, error: 'Club inactivo' });
     }
 
-    if (!club.owner_user_id || club.owner_user_id === req.user.id) {
-      // Dueño del club o club sin owner (retrocompatible)
+    if (club.owner_user_id === req.user.id) {
       req.club_uuid = club.id;
       req.userRole  = 'ADMIN';
       return next();
     }
 
-    // Verificar si es miembro con rol
+    // Verificar si es miembro con rol — usar UUID del club, no el slug
     const { data: member } = await supabaseAdmin
       .from('club_members')
       .select('role, activo, nombre')
       .eq('user_id', req.user.id)
-      .eq('club_id', req.club_id)
+      .eq('club_id', club.id)
       .single();
 
     if (!member || !member.activo) {
