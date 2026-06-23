@@ -19,6 +19,7 @@ const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto'
 function mapEstado(estado) {
   switch (estado) {
     case 'AL_DIA':      return 'pagado';
+    case 'EXENTO':      return 'exento';
     case 'MORA':        return 'vencido';
     case 'PARCIAL':     return 'parcial';
     case 'POR_VALIDAR': return 'por_validar';
@@ -30,7 +31,7 @@ function mapEstado(estado) {
 function calcSaldo(m) {
   const oficial  = parseFloat(m.valor_oficial) || 0;
   const pagado   = parseFloat(m.valor_pagado)  || 0;
-  if (m.estado === 'AL_DIA') return 0;
+  if (m.estado === 'AL_DIA' || m.estado === 'EXENTO') return 0;
   if (m.estado === 'PARCIAL' || m.estado === 'POR_VALIDAR') return Math.max(0, oficial - pagado);
   return oficial;
 }
@@ -117,12 +118,27 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
       }
 
       if (m) {
+        const estadoM = mapEstado(m.estado);
+
+        // Mes exento individualmente: saldo $0, sin fallback a cuota del club
+        if (estadoM === 'exento') {
+          return {
+            mes:           nombreMes,
+            numero_mes:    numMes,
+            anio:          anioActual,
+            estado:        'exento',
+            valor_oficial: 0,
+            valor_pagado:  parseFloat(m.valor_pagado) || 0,
+            saldo:         0,
+            fecha_pago:    m.fecha_pago || null,
+          };
+        }
+
         // Registro existente: usar cuota como valor_oficial cuando está en $0
         const oficial = parseFloat(m.valor_oficial) > 0
           ? parseFloat(m.valor_oficial)
           : cuota;
         const pagado  = parseFloat(m.valor_pagado) || 0;
-        const estadoM = mapEstado(m.estado);
         const saldo   = estadoM === 'pagado'
           ? 0
           : (estadoM === 'parcial' || estadoM === 'por_validar')

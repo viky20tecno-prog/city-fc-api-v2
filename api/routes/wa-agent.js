@@ -355,8 +355,8 @@ async function runTool(name, input, contexto = {}) {
       const del_anio = mensualidades
         .filter(m => String(m.anio) === String(anio))
         .sort((a, b) => (a.numero_mes || 0) - (b.numero_mes || 0));
-      const pendientes = del_anio.filter(m => m.estado !== 'AL_DIA');
-      const al_dia     = del_anio.filter(m => m.estado === 'AL_DIA');
+      const pendientes = del_anio.filter(m => m.estado !== 'AL_DIA' && m.estado !== 'EXENTO');
+      const al_dia     = del_anio.filter(m => m.estado === 'AL_DIA' || m.estado === 'EXENTO');
       const total_deuda = pendientes.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
       const { data: clubData } = await db.supabase.from('clubs').select('config').eq('id', input.club_id).single();
       const qr_pago_url    = clubData?.config?.qr_pago_url    || null;
@@ -506,7 +506,7 @@ async function runTool(name, input, contexto = {}) {
       for (const p of players) {
         const mens = await db.getMensualidades(input.club_id, p.cedula);
         const delAnio = mens.filter(m => String(m.anio) === String(anio));
-        const pend = delAnio.filter(m => m.estado !== 'AL_DIA');
+        const pend = delAnio.filter(m => m.estado !== 'AL_DIA' && m.estado !== 'EXENTO');
         if (pend.length === 0) alDia++;
         else {
           pendientes++;
@@ -535,7 +535,7 @@ async function runTool(name, input, contexto = {}) {
         const mens = await db.getMensualidades(clubId, p.cedula);
         const pend = mens.filter(m => {
           if (String(m.anio) !== String(anio)) return false;
-          if (m.estado === 'AL_DIA') return false;
+          if (m.estado === 'AL_DIA' || m.estado === 'EXENTO') return false;
           if (mesNum !== null) return parseInt(m.numero_mes) === mesNum;
           return true;
         });
@@ -572,7 +572,7 @@ async function runTool(name, input, contexto = {}) {
 
       for (const p of players) {
         const mens = await db.getMensualidades(input.club_id, p.cedula);
-        const pend = mens.filter(m => String(m.anio) === String(anio) && m.estado !== 'AL_DIA');
+        const pend = mens.filter(m => String(m.anio) === String(anio) && m.estado !== 'AL_DIA' && m.estado !== 'EXENTO');
         if (!pend.length) continue;
         const deuda = pend.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
         const msg = aplicarTemplate(template, { nombre: p.nombre, deuda, meses: pend.length, club_nombre: input.club_nombre });
