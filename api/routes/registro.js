@@ -67,7 +67,7 @@ router.post('/', async (req, res) => {
   const emailNorm = email.trim().toLowerCase();
 
   // Crear club + sign-in en paralelo (ambos dependen de userId pero no entre sí)
-  const [{ error: clubError }, signInResult] = await Promise.all([
+  const [{ data: clubData, error: clubError }, signInResult] = await Promise.all([
     supabase.from('clubs').insert({
       slug,
       name:          nombre_club.trim(),
@@ -95,7 +95,7 @@ router.post('/', async (req, res) => {
           conciliacion: true,
         },
       },
-    }),
+    }).select('id').single(),
     supabase.auth.signInWithPassword({ email: emailNorm, password }),
   ]);
 
@@ -111,7 +111,7 @@ router.post('/', async (req, res) => {
   }
 
   // Vincular usuario al club (no bloquea la respuesta)
-  supabase.from('club_members').insert({ user_id: userId, club_id: slug }).catch(() => {});
+  supabase.from('club_members').insert({ user_id: userId, club_id: clubData.id }).catch(() => {});
 
   const signIn = signInResult;
 
