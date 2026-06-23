@@ -313,6 +313,7 @@ router.all('/plantillas', async (req, res) => {
                 await enviarTexto(j.celular, texto);
                 resultados.enviados++;
               } catch (e) { resultados.errores.push(`${j.celular}: ${e.message}`); }
+              await new Promise(r => setTimeout(r, 3000));
             }
           }
 
@@ -362,6 +363,7 @@ router.all('/plantillas', async (req, res) => {
               await enviarTexto(j.celular, texto);
               resultados.enviados++;
             } catch (e) { resultados.errores.push(`${j.celular}: ${e.message}`); }
+            await new Promise(r => setTimeout(r, 3000));
           }
         }
 
