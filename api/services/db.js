@@ -768,11 +768,36 @@ async function getClubMemberByUserId(user_id, club_slug) {
 async function getClubMembers(club_slug) {
   const { data, error } = await supabase
     .from('club_members')
-    .select('id, user_id, role, nombre, activo')
+    .select('id, user_id, role, nombre, activo, celular')
     .eq('club_id', club_slug)
     .order('role');
   if (error) throw error;
   return data || [];
+}
+
+async function addCelularStaff(club_slug, celular) {
+  if (!celular) return;
+  const club = await getClubBySlug(club_slug);
+  if (!club) return;
+  const staff = Array.isArray(club.config?.celulares_staff) ? club.config.celulares_staff : [];
+  const norm  = String(celular).replace(/\D/g, '');
+  if (staff.some(n => String(n).replace(/\D/g, '') === norm)) return;
+  await supabase.from('clubs').update({
+    config: { ...club.config, celulares_staff: [...staff, norm] },
+  }).eq('slug', club_slug);
+}
+
+async function removeCelularStaff(club_slug, celular) {
+  if (!celular) return;
+  const club = await getClubBySlug(club_slug);
+  if (!club) return;
+  const staff  = Array.isArray(club.config?.celulares_staff) ? club.config.celulares_staff : [];
+  const norm   = String(celular).replace(/\D/g, '');
+  const newStaff = staff.filter(n => String(n).replace(/\D/g, '') !== norm);
+  if (newStaff.length === staff.length) return;
+  await supabase.from('clubs').update({
+    config: { ...club.config, celulares_staff: newStaff },
+  }).eq('slug', club_slug);
 }
 
 async function createClubMember(member) {
@@ -1109,6 +1134,8 @@ module.exports = {
   createClubMember,
   updateClubMember,
   deleteClubMember,
+  addCelularStaff,
+  removeCelularStaff,
   getCalendario,
   createCalendarioEvent,
   updateCalendarioEvent,

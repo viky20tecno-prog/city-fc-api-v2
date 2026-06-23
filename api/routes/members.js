@@ -84,6 +84,8 @@ router.post('/', async (req, res) => {
 
     const userId = authData.user.id;
 
+    const celularNorm = celular ? String(celular).replace(/\D/g, '') : null;
+
     // Insertar en club_members
     const member = await db.createClubMember({
       user_id: userId,
@@ -91,7 +93,13 @@ router.post('/', async (req, res) => {
       role,
       nombre,
       activo:   true,
+      ...(celularNorm ? { celular: celularNorm } : {}),
     });
+
+    // Si es entrenador con celular, registrar en celulares_staff para el bot WA
+    if (celularNorm) {
+      await db.addCelularStaff(req.club_id, celularNorm).catch(() => {});
+    }
 
     res.json({ success: true, data: member, email, nombre, role, temp_password: password });
   } catch (err) {
@@ -126,6 +134,12 @@ router.delete('/:id', async (req, res) => {
   try {
     if (req.userRole === 'ENTRENADOR') {
       return res.status(403).json({ success: false, error: 'Sin permisos' });
+    }
+    // Obtener celular antes de borrar para sacarlo de celulares_staff
+    const members = await db.getClubMembers(req.club_id);
+    const target  = members.find(m => String(m.id) === String(req.params.id));
+    if (target?.celular) {
+      await db.removeCelularStaff(req.club_id, target.celular).catch(() => {});
     }
     await db.deleteClubMember(req.params.id, req.club_id);
     res.json({ success: true });
