@@ -102,7 +102,8 @@ router.all('/emails', async (req, res) => {
     let vencidosTotal = 0;
     for (const club of clubs) {
       try {
-        vencidosTotal += await db.marcarMensualidadesVencidas(club.id);
+        const diasGracia = club.config?.dias_gracia_mora ?? 7;
+        vencidosTotal += await db.marcarMensualidadesVencidas(club.id, diasGracia);
       } catch (e) {
         console.error(`[cron] marcarVencidos ${club.slug}:`, e.message);
       }

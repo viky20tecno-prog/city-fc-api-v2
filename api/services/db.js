@@ -1021,20 +1021,31 @@ async function upsertWaSession(phone, { rol, contexto, messages, last_interactio
  * Siempre devuelve un array no vacío.
  */
 /**
- * Marca como MORA todas las mensualidades PENDIENTE de meses anteriores al actual.
- * Los meses del año en curso anteriores al mes actual + todos los años anteriores.
+ * Marca como MORA todas las mensualidades PENDIENTE vencidas.
+ * - Meses anteriores al actual: siempre MORA.
+ * - Mes actual: MORA si ya pasaron los días de gracia (dia > dias_gracia_mora, default 7).
+ * - Meses futuros: intocables.
  */
-async function marcarMensualidadesVencidas(club_id) {
-  const now    = new Date();
-  const mesAct = now.getMonth() + 1; // 1-12
+async function marcarMensualidadesVencidas(club_id, diasGracia = 7) {
+  const now     = new Date();
+  const diaAct  = now.getDate();
+  const mesAct  = now.getMonth() + 1;
   const anioAct = now.getFullYear();
+
+  // Meses pasados (años anteriores o meses anteriores del año en curso)
+  const filtroPasados = `anio.lt.${anioAct},and(anio.eq.${anioAct},numero_mes.lt.${mesAct})`;
+
+  // Mes actual incluido si ya venció el período de gracia
+  const filtro = diaAct > diasGracia
+    ? `${filtroPasados},and(anio.eq.${anioAct},numero_mes.eq.${mesAct})`
+    : filtroPasados;
 
   const { data, error } = await supabase
     .from('mensualidades')
     .update({ estado: 'MORA', fecha_ultima_actualizacion: now.toISOString() })
     .eq('club_id', club_id)
     .eq('estado', 'PENDIENTE')
-    .or(`anio.lt.${anioAct},and(anio.eq.${anioAct},numero_mes.lt.${mesAct})`)
+    .or(filtro)
     .select('id');
 
   if (error) throw error;
