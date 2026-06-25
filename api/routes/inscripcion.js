@@ -1,5 +1,6 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
+const { createClient } = require('@supabase/supabase-js');
 const db = require('../services/db');
 const { MESES } = require('../services/meses');
 
@@ -133,6 +134,13 @@ router.post('/', inscripcionLimiter, async (req, res) => {
       await db.bulkInsert('torneos', torneos);
     }
 
+    // Enviar documentos de bienvenida por WhatsApp (fire-and-forget)
+    const wahaSession = club.config?.waha_session;
+    const wahaUrl     = process.env.WAHA_URL;
+    if (wahaSession && wahaUrl && celular) {
+      enviarDocumentosInscripcion({ club, celular: String(celular), session: wahaSession, wahaUrl }).catch(() => {});
+    }
+
     res.json({
       success: true,
       message: `¡Bienvenido a ${club.config?.nombre || club.name}! ⚽`,
@@ -162,5 +170,39 @@ router.get('/verificar', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+async function enviarDocumentosInscripcion({ club, celular, session, wahaUrl }) {
+  try {
+    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+    const { data: docs } = await supabase
+      .from('club_documents')
+      .select('nombre, url, descripcion')
+      .eq('club_id', club.id)
+      .eq('enviar_al_inscribirse', true)
+      .eq('activo', true)
+      .order('orden', { ascending: true });
+
+    if (!docs || docs.length === 0) return;
+
+    const chatId  = `57${celular}@c.us`;
+    const headers = { 'Content-Type': 'application/json' };
+    if (process.env.WAHA_API_KEY) headers['X-Api-Key'] = process.env.WAHA_API_KEY;
+
+    for (const doc of docs) {
+      await fetch(`${wahaUrl}/api/sendFile`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          chatId,
+          file:    { url: doc.url, filename: `${doc.nombre}.pdf` },
+          caption: doc.descripcion || doc.nombre,
+          session,
+        }),
+      });
+    }
+  } catch (e) {
+    console.error('[inscripcion] error enviando documentos WA:', e.message);
+  }
+}
 
 module.exports = router;

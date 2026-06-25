@@ -27,6 +27,7 @@ const cronRouter           = require('./routes/cron');
 const leadsRouter          = require('./routes/leads');
 const waAgentRouter        = require('./routes/wa-agent');
 const internalRouter       = require('./routes/internal');
+const documentsRouter      = require('./routes/documents');
 const requireAuth          = require('./middleware/auth');
 
 // Middleware que bloquea acceso a rutas financieras para ENTRENADOR
@@ -200,6 +201,7 @@ app.use('/api/invoices',     invoicesRouter);
 app.use('/api/payments',     paymentsRouter);
 app.use('/api/config',       configRouter);
 app.use('/api/torneos',      torneosRouter);
+app.use('/api/documents',    documentsRouter);
 
 // Rutas solo ADMIN (bloqueadas para ENTRENADOR)
 app.use('/api/finanzas',     requireAdmin, finanzasRouter);

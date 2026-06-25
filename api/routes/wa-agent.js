@@ -51,6 +51,41 @@ function generarTokenMorosos(clubId) {
 
 const API_BASE = 'https://api.zensports.zenpra.ai';
 
+// ── Analizar comprobante con Claude Vision (Haiku) ───────────────────────────
+async function analizarComprobanteConClaude(mediaUrl) {
+  const wahaBase = (process.env.WAHA_URL || '').replace(/\/$/, '');
+  const headers  = {};
+  if (process.env.WAHA_API_KEY && wahaBase && mediaUrl.startsWith(wahaBase)) {
+    headers['X-Api-Key'] = process.env.WAHA_API_KEY;
+  }
+
+  const imgRes = await fetch(mediaUrl, { headers });
+  if (!imgRes.ok) throw new Error(`No se pudo descargar imagen: ${imgRes.status}`);
+
+  const ct        = imgRes.headers.get('content-type') || 'image/jpeg';
+  const mediaType = ct.split(';')[0].trim();
+  const valid     = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  if (!valid.includes(mediaType)) throw new Error(`Tipo no soportado: ${mediaType}`);
+
+  const b64 = Buffer.from(await imgRes.arrayBuffer()).toString('base64');
+
+  const msg = await anthropic.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 300,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: mediaType, data: b64 } },
+        { type: 'text', text: 'Analiza esta imagen. ¿Es un comprobante de pago o transferencia bancaria? Responde SOLO en JSON sin markdown:\n{"es_comprobante":true/false,"monto":numero_o_null,"banco":"texto_o_null","referencia":"texto_o_null","fecha":"texto_o_null"}\nSi es comprobante extrae los datos; si no, retorna es_comprobante:false y el resto null.' },
+      ],
+    }],
+  });
+
+  const raw   = msg.content[0]?.text || '{}';
+  const clean = raw.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim();
+  return JSON.parse(clean);
+}
+
 const MESES = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio',
                'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
@@ -1400,6 +1435,74 @@ async function reenviarMediaAlAdmin(adminCelular, playerNombre, mediaUrl, mediaC
   await sendWAHA(adminCelular, msg);
 }
 
+// ── Procesar comprobante de pago detectado por Vision ───────────────────────
+async function procesarPagoComprobante(from, contexto, analisis, mediaUrl) {
+  const MESES_NOMBRE = ['','enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  const { monto, banco, referencia } = analisis;
+  const montoFmt = (n) => '$' + Math.round(n).toLocaleString('es-CO');
+
+  // Registrar el pago en la base de datos
+  try {
+    await db.createPago({
+      club_id:         contexto.club_id,
+      cedula:          String(contexto.cedula),
+      monto:           monto,
+      banco:           banco || 'No detectado',
+      referencia:      referencia || null,
+      concepto:        'Mensualidad vía WhatsApp',
+      url_comprobante: mediaUrl,
+      estado_revision: 'PENDIENTE',
+      celular:         from,
+    });
+  } catch (e) {
+    console.error('[comprobante] createPago error:', e.message);
+  }
+
+  // Aplicar a la mensualidad más antigua pendiente
+  const pendientes = await db.getMensualidadesPendientes(contexto.club_id, contexto.cedula);
+  const clubSession = contexto.config?.waha_session || null;
+  let mensajeJugador, mensajeAdmin;
+
+  if (!pendientes.length) {
+    mensajeJugador = `✅ *Comprobante recibido*\n\nGracias *${contexto.nombre}*, recibimos tu pago de *${montoFmt(monto)}*. No tienes mensualidades pendientes — el administrador lo revisará pronto 🙏`;
+    mensajeAdmin   = `💰 *Pago recibido* (sin pendientes)\n\nJugador: *${contexto.nombre}* · C.C. ${contexto.cedula}\nMonto: ${montoFmt(monto)}\nBanco: ${banco || 'N/A'} · Ref: ${referencia || 'N/A'}`;
+  } else {
+    const target     = pendientes[0];
+    const mesNombre  = MESES_NOMBRE[target.numero_mes] || `mes ${target.numero_mes}`;
+    const pagadoPrev = parseFloat(target.valor_pagado) || 0;
+    const oficial    = parseFloat(target.valor_oficial) || 0;
+    const penalidad  = parseFloat(target.penalidad) || 0;
+    const total      = oficial + penalidad;
+    const nuevoPagado = pagadoPrev + monto;
+    const nuevoSaldo  = Math.max(0, total - nuevoPagado);
+    const nuevoEstado = nuevoPagado >= total ? 'AL_DIA' : 'PARCIAL';
+
+    try {
+      await db.updateMensualidad(target.id, {
+        valor_pagado:    nuevoPagado,
+        saldo_pendiente: nuevoSaldo,
+        estado:          nuevoEstado,
+      });
+    } catch (e) {
+      console.error('[comprobante] updateMensualidad error:', e.message);
+    }
+
+    const estadoTexto = nuevoEstado === 'AL_DIA'
+      ? '✅ Al día'
+      : `⚠️ Parcial — saldo: ${montoFmt(nuevoSaldo)}`;
+
+    mensajeJugador = `✅ *Pago registrado*\n\nHola *${contexto.nombre}*, tu pago de *${montoFmt(monto)}* fue aplicado a *${mesNombre}*.\n\nEstado: ${estadoTexto}\n\nEl administrador confirmará tu comprobante 🙏`;
+    mensajeAdmin   = `💰 *Comprobante auto-registrado*\n\nJugador: *${contexto.nombre}* · C.C. ${contexto.cedula}\nMonto: ${montoFmt(monto)}\nBanco: ${banco || 'N/A'} · Ref: ${referencia || 'N/A'}\nAplicado a: ${mesNombre}\nEstado: ${estadoTexto}`;
+  }
+
+  await sendWAHA(from, mensajeJugador);
+
+  if (contexto.celular_admin) {
+    await sendWAHA(contexto.celular_admin, mensajeAdmin, clubSession);
+    await sendWAHAImage(contexto.celular_admin, mediaUrl, `Comprobante de ${contexto.nombre}`, clubSession);
+  }
+}
+
 // ── Resolver @lid al número real de teléfono via WAHA ────────────────────────
 async function resolverLid(lidId) {
   const wahaUrl = process.env.WAHA_URL;
@@ -1487,8 +1590,30 @@ router.post('/waha', async (req, res) => {
       const { rol, contexto } = await identificarRol(from, null);
       const mediaUrl     = payload?.media?.url || payload?.fileUrl || null;
       const mediaCaption = payload?.caption || '';
+      const mediaType    = payload?.type || '';
 
-      if (rol === 'jugador' && contexto.celular_admin && mediaUrl) {
+      // Jugador envía imagen → intentar analizar como comprobante de pago
+      if (rol === 'jugador' && mediaUrl && mediaType === 'image') {
+        let esComprobante = false;
+        try {
+          const analisis = await analizarComprobanteConClaude(mediaUrl);
+          if (analisis.es_comprobante && analisis.monto > 0) {
+            esComprobante = true;
+            await procesarPagoComprobante(from, contexto, analisis, mediaUrl);
+          }
+        } catch (visionErr) {
+          console.error('[wa-agent] Vision error:', visionErr.message);
+        }
+
+        if (!esComprobante) {
+          if (contexto.celular_admin) {
+            await reenviarMediaAlAdmin(contexto.celular_admin, contexto.nombre, mediaUrl, mediaCaption);
+            await sendWAHA(from, `✅ Tu imagen fue enviada al administrador de *${contexto.club_nombre}*. Te contactarán pronto.`);
+          } else {
+            await sendWAHA(from, 'Solo puedo procesar mensajes de texto por ahora. Escríbeme lo que necesitas 😊');
+          }
+        }
+      } else if (rol === 'jugador' && contexto.celular_admin && mediaUrl) {
         await reenviarMediaAlAdmin(contexto.celular_admin, contexto.nombre, mediaUrl, mediaCaption);
         await sendWAHA(from, `✅ Tu imagen fue enviada al administrador de *${contexto.club_nombre}*. Te contactarán pronto.`);
       } else {
