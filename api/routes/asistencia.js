@@ -50,8 +50,10 @@ router.get('/:eventoId', async (req, res) => {
 // Upsert el estado de asistencia de un jugador en un evento.
 router.patch('/:eventoId/:cedula', async (req, res) => {
   try {
-    const { estado, nota } = req.body;
-    if (!estado) return res.status(400).json({ success: false, error: 'estado requerido' });
+    const { estado, nota, pago_arbitraje } = req.body;
+    if (!estado && pago_arbitraje === undefined) {
+      return res.status(400).json({ success: false, error: 'estado requerido' });
+    }
 
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
@@ -60,8 +62,9 @@ router.patch('/:eventoId/:cedula', async (req, res) => {
       club_id:        club.id,
       evento_id:      req.params.eventoId,
       cedula:         req.params.cedula,
-      estado,
+      estado:         estado || null,
       nota:           nota || null,
+      pago_arbitraje: pago_arbitraje !== undefined ? pago_arbitraje : false,
       registrado_por: req.user?.id || null,
     });
     res.json({ success: true, data });

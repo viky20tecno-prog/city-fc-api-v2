@@ -18,20 +18,21 @@ router.get('/', async (req, res) => {
 // POST /api/calendario
 router.post('/', async (req, res) => {
   try {
-    const { tipo, titulo, descripcion, fecha_inicio, fecha_fin, lugar, equipo } = req.body;
+    const { tipo, titulo, descripcion, fecha_inicio, fecha_fin, lugar, equipo, monto_arbitraje } = req.body;
     if (!titulo || !fecha_inicio) {
       return res.status(400).json({ success: false, error: 'titulo y fecha_inicio son requeridos' });
     }
     const evento = await db.createCalendarioEvent({
-      club_id:     req.club_id,
-      tipo:        tipo        || 'ENTRENAMIENTO',
+      club_id:         req.club_id,
+      tipo:            tipo        || 'ENTRENAMIENTO',
       titulo,
-      descripcion: descripcion || null,
+      descripcion:     descripcion || null,
       fecha_inicio,
-      fecha_fin:   fecha_fin   || null,
-      lugar:       lugar       || null,
-      equipo:      equipo      || null,
-      created_by:  req.user?.id || null,
+      fecha_fin:       fecha_fin   || null,
+      lugar:           lugar       || null,
+      equipo:          equipo      || null,
+      monto_arbitraje: (tipo === 'PARTIDO' && monto_arbitraje) ? parseInt(monto_arbitraje) : null,
+      created_by:      req.user?.id || null,
     });
     res.json({ success: true, data: evento });
   } catch (err) {
@@ -43,7 +44,7 @@ router.post('/', async (req, res) => {
 // PATCH /api/calendario/:id
 router.patch('/:id', async (req, res) => {
   try {
-    const allowed = ['tipo', 'titulo', 'descripcion', 'fecha_inicio', 'fecha_fin', 'lugar', 'equipo', 'suspendido'];
+    const allowed = ['tipo', 'titulo', 'descripcion', 'fecha_inicio', 'fecha_fin', 'lugar', 'equipo', 'suspendido', 'monto_arbitraje'];
     const updates = {};
     allowed.forEach(k => { if (k in req.body) updates[k] = req.body[k]; });
 

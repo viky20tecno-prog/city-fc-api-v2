@@ -888,7 +888,7 @@ async function getAsistencia(club_id, evento_id) {
 
   const { data: registros, error: regErr } = await supabase
     .from('asistencia')
-    .select('cedula, estado, nota')
+    .select('cedula, estado, nota, pago_arbitraje')
     .eq('evento_id', evento_id);
   if (regErr) throw regErr;
 
@@ -896,13 +896,14 @@ async function getAsistencia(club_id, evento_id) {
   (registros || []).forEach(r => { estadoMap[r.cedula] = r; });
 
   return (players || []).map(p => ({
-    cedula:    p.cedula,
-    nombre:    p.nombre,
-    apellidos: p.apellidos,
-    equipo:    p.equipo,
-    categoria: p.categoria,
-    estado:    estadoMap[p.cedula]?.estado || 'PENDIENTE',
-    nota:      estadoMap[p.cedula]?.nota   || null,
+    cedula:         p.cedula,
+    nombre:         p.nombre,
+    apellidos:      p.apellidos,
+    equipo:         p.equipo,
+    categoria:      p.categoria,
+    estado:         estadoMap[p.cedula]?.estado         || 'PENDIENTE',
+    nota:           estadoMap[p.cedula]?.nota           || null,
+    pago_arbitraje: estadoMap[p.cedula]?.pago_arbitraje ?? false,
   }));
 }
 
@@ -982,11 +983,11 @@ async function getAsistenciaStatsClub(club_id, club_slug) {
   });
 }
 
-async function upsertAsistencia({ club_id, evento_id, cedula, estado, nota, registrado_por }) {
+async function upsertAsistencia({ club_id, evento_id, cedula, estado, nota, pago_arbitraje, registrado_por }) {
   const { data, error } = await supabase
     .from('asistencia')
     .upsert(
-      { evento_id, club_id, cedula, estado, nota, registrado_por, updated_at: new Date().toISOString() },
+      { evento_id, club_id, cedula, estado, nota, pago_arbitraje: pago_arbitraje ?? false, registrado_por, updated_at: new Date().toISOString() },
       { onConflict: 'evento_id,cedula' }
     )
     .select()
