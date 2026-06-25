@@ -208,7 +208,6 @@ router.patch('/:cedula/exento', async (req, res) => {
       descuento_pct:  exento ? 100 : 0,
       tipo_descuento: null,           // siempre null al marcar/desmarcar exento
     };
-    if (exento && motivoLabel) updateFields.notas = `[Exento: ${motivoLabel}]`;
     await db.updatePlayer(club.id, cedula, updateFields);
 
     // 2. Sincronizar mensualidades del año actual
