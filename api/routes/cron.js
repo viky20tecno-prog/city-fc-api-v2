@@ -275,7 +275,8 @@ router.all('/plantillas', async (req, res) => {
       const qrUrl       = config.qr_pago_url || null;
       const llavePago   = config.llave_pago   || '';
       const tipo        = plantilla.tipo_plantilla || 'evento';
-      const clubSession = config.waha_session || defaultSession;
+      const clubSession = config.waha_session;
+      if (!clubSession) { resultados.omitidos++; continue; } // sin número propio → no enviar
 
       try {
         // ── TIPO EVENTO ──────────────────────────────────────────────────────────

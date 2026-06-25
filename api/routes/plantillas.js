@@ -4,7 +4,7 @@ const db = require('../services/db');
 
 const router = express.Router();
 
-const LIMITE_POR_PLAN = { trial: 1, starter: 3, pro: 8, scale: Infinity };
+const LIMITE_POR_PLAN = { trial: 0, starter: 0, pro: 8, scale: Infinity };
 const MESES_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 
 function supabaseAdmin() {
