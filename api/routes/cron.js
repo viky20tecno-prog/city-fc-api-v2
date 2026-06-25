@@ -204,6 +204,11 @@ router.all('/plantillas', async (req, res) => {
   const apiKey  = process.env.WAHA_API_KEY;
   if (!wahaUrl) return res.status(500).json({ success: false, error: 'WAHA_URL no configurado' });
 
+  // Responder inmediatamente para no agotar el timeout del cron externo
+  res.json({ success: true, status: 'processing' });
+
+  // Procesar en background — la respuesta ya fue enviada
+  setImmediate(async () => {
   const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
   // Hora actual en Colombia (UTC-5)
@@ -376,10 +381,11 @@ router.all('/plantillas', async (req, res) => {
       }
     }
 
-    res.json({ success: true, hora_col: horaCol, ...resultados });
+    console.log(`[cron/plantillas] ${horaCol} — enviados:${resultados.enviados} omitidos:${resultados.omitidos} errores:${resultados.errores.length}`);
   } catch (e) {
-    res.status(500).json({ success: false, error: e.message });
+    console.error('[cron/plantillas] Error fatal:', e.message);
   }
+  }); // fin setImmediate
 });
 
 module.exports = router;
