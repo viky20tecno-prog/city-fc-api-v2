@@ -302,7 +302,7 @@ router.all('/plantillas', async (req, res) => {
           for (const evento of eventos) {
             const d  = new Date(new Date(evento.fecha_inicio).getTime() - 5 * 3600000);
             const df = evento.fecha_fin ? new Date(new Date(evento.fecha_fin).getTime() - 5 * 3600000) : null;
-            const vars = {
+            const varsBase = {
               '{dia}':         DIAS_ES[d.getDay()],
               '{lugar}':       evento.lugar || '',
               '{hora_inicio}': fmtH(d),
@@ -310,9 +310,9 @@ router.all('/plantillas', async (req, res) => {
               '{club_nombre}': clubNombre,
               '{llave_pago}':  llavePago,
             };
-            const texto = render(plantilla.mensaje, vars);
             for (const j of jugadores) {
               if (!j.celular) continue;
+              const texto = render(plantilla.mensaje, { ...varsBase, '{nombre}': j.nombre || '' });
               try {
                 if (plantilla.incluir_qr && qrUrl) await enviarImagen(j.celular, qrUrl);
                 await enviarTexto(j.celular, texto);
