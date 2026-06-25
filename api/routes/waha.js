@@ -73,7 +73,15 @@ router.post('/conectar', async (req, res) => {
 
     if (!r.ok) {
       const err = await r.text();
-      return res.status(502).json({ success: false, error: `WAHA error: ${err}` });
+      // WAHA Core solo soporta la sesión 'default' — se necesita WAHA Plus para multi-sesión
+      if (err.includes('only') && err.includes('default')) {
+        return res.status(402).json({
+          success: false,
+          error: 'Tu instancia de WAHA es la versión Core que solo soporta 1 sesión. Para conectar el número de cada club por separado se necesita WAHA Plus.',
+          waha_plus_required: true,
+        });
+      }
+      return res.status(502).json({ success: false, error: `Error WAHA: ${err}` });
     }
 
     res.json({ success: true, session: sessionName });
