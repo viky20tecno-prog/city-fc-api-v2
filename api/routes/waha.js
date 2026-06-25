@@ -66,14 +66,13 @@ router.post('/conectar', async (req, res) => {
     } catch (_) { /* no existía, ok */ }
 
     // Crear nueva sesión
-    const r = await wahaFetch('/api/sessions', {
+    const rCreate = await wahaFetch('/api/sessions', {
       method: 'POST',
       body: JSON.stringify({ name: sessionName, config: { webhooks: [] } }),
     });
 
-    if (!r.ok) {
-      const err = await r.text();
-      // WAHA Core solo soporta la sesión 'default' — se necesita WAHA Plus para multi-sesión
+    if (!rCreate.ok) {
+      const err = await rCreate.text();
       if (err.includes('only') && err.includes('default')) {
         return res.status(402).json({
           success: false,
@@ -81,7 +80,20 @@ router.post('/conectar', async (req, res) => {
           waha_plus_required: true,
         });
       }
-      return res.status(502).json({ success: false, error: `Error WAHA: ${err}` });
+      // Si ya existe, continuar (puede que la delete anterior no eliminó a tiempo)
+      if (!err.includes('already exists') && rCreate.status !== 409) {
+        return res.status(502).json({ success: false, error: `Error WAHA: ${err}` });
+      }
+    }
+
+    // Iniciar la sesión (en WAHA v2026 create y start son pasos separados)
+    const rStart = await wahaFetch(`/api/sessions/${sessionName}/start`, { method: 'POST' });
+    if (!rStart.ok) {
+      const errStart = await rStart.text();
+      // Si ya está iniciada, no es error
+      if (!errStart.includes('already') && rStart.status !== 409) {
+        console.warn('[waha/conectar] start warning:', errStart);
+      }
     }
 
     res.json({ success: true, session: sessionName });
@@ -190,6 +202,10 @@ router.delete('/desconectar', async (req, res) => {
     }
 
     const sessionName = club.slug;
+
+    try {
+      await wahaFetch(`/api/sessions/${sessionName}/stop`, { method: 'POST' });
+    } catch (_) { /* ok si ya estaba parada */ }
 
     try {
       await wahaFetch(`/api/sessions/${sessionName}/logout`, { method: 'POST' });
