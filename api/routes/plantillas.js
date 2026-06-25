@@ -22,23 +22,23 @@ function wahaHeaders() {
   return h;
 }
 
-async function sendWAHA(to, text) {
+async function sendWAHA(to, text, session) {
   const wahaUrl = process.env.WAHA_URL;
-  const session = process.env.WAHA_SESSION || 'default';
+  const sess    = session || process.env.WAHA_SESSION || 'default';
   if (!wahaUrl) return;
   await fetch(`${wahaUrl}/api/sendText`, {
     method: 'POST', headers: wahaHeaders(),
-    body: JSON.stringify({ chatId: wahaChatId(to), text, session }),
+    body: JSON.stringify({ chatId: wahaChatId(to), text, session: sess }),
   });
 }
 
-async function sendWAHAImage(to, imageUrl) {
+async function sendWAHAImage(to, imageUrl, session) {
   const wahaUrl = process.env.WAHA_URL;
-  const session = process.env.WAHA_SESSION || 'default';
+  const sess    = session || process.env.WAHA_SESSION || 'default';
   if (!wahaUrl || !imageUrl) return;
   await fetch(`${wahaUrl}/api/sendImage`, {
     method: 'POST', headers: wahaHeaders(),
-    body: JSON.stringify({ chatId: wahaChatId(to), file: { url: imageUrl }, caption: '', session }),
+    body: JSON.stringify({ chatId: wahaChatId(to), file: { url: imageUrl }, caption: '', session: sess }),
   });
 }
 
@@ -161,8 +161,9 @@ router.post('/:id/probar', async (req, res) => {
     const config     = club?.config || {};
     const clubNombre = config.nombre || club?.name || 'Mi Club';
     const qrUrl      = config.qr_pago_url || null;
-    const adminTel   = club?.celular_admin;
+    const adminTel    = club?.celular_admin;
     if (!adminTel) return res.status(400).json({ success: false, error: 'El club no tiene celular_admin configurado' });
+    const clubSession = config.waha_session || process.env.WAHA_SESSION || 'default';
 
     const tipo = p.tipo_plantilla || 'evento';
     let vars = {};
@@ -190,8 +191,8 @@ router.post('/:id/probar', async (req, res) => {
 
     const texto = renderMensaje(p.mensaje, vars);
 
-    if (p.incluir_qr && qrUrl) await sendWAHAImage(adminTel, qrUrl);
-    await sendWAHA(adminTel, `🧪 *PRUEBA DE PLANTILLA*\n\n${texto}`);
+    if (p.incluir_qr && qrUrl) await sendWAHAImage(adminTel, qrUrl, clubSession);
+    await sendWAHA(adminTel, `🧪 *PRUEBA DE PLANTILLA*\n\n${texto}`, clubSession);
 
     res.json({ success: true, enviado_a: adminTel });
   } catch (e) {

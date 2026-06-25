@@ -557,6 +557,14 @@ async function runTool(name, input, contexto = {}) {
     if (name === 'enviar_recordatorio_pago') {
       const anio = new Date().getFullYear();
       const supabase = db.supabase;
+
+      // Obtener la sesión propia del club — nunca usar el número central para masivos
+      const { data: clubRow } = await supabase.from('clubs').select('config').eq('id', input.club_id).single();
+      const clubSession = clubRow?.config?.waha_session;
+      if (!clubSession) {
+        return { error: 'El club no tiene número de WhatsApp propio configurado. Conéctalo desde el panel (Configuración → WhatsApp) para poder enviar recordatorios masivos.' };
+      }
+
       const { data: players } = await supabase
         .from('players')
         .select('cedula, nombre, celular')
@@ -572,14 +580,16 @@ async function runTool(name, input, contexto = {}) {
 
       for (const p of players) {
         const mens = await db.getMensualidades(input.club_id, p.cedula);
-        const pend = mens.filter(m => String(m.anio) === String(anio) && m.estado !== 'AL_DIA' && m.estado !== 'EXENTO');
+        const pend = mens.filter(m => String(m.anio) === String(anio) && m.estado !== 'AL_DIA' && m.estado !== 'EXENTO' && m.estado !== 'SUSPENDIDO');
         if (!pend.length) continue;
         const deuda = pend.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
         const msg = aplicarTemplate(template, { nombre: p.nombre, deuda, meses: pend.length, club_nombre: input.club_nombre });
         try {
-          await sendWAHA(p.celular, msg);
+          await sendWAHA(p.celular, msg, clubSession);
           enviados++;
         } catch (e) { /* continuar con el siguiente */ }
+        // Delay anti-ban: 4-8 segundos entre mensajes
+        await new Promise(r => setTimeout(r, 4000 + Math.random() * 4000));
       }
 
       // Guardar métricas en clubs.config
@@ -1345,16 +1355,16 @@ function wahaChatId(to) {
   return to.includes('@') ? to : `${numOnly.startsWith('57') ? numOnly : '57' + numOnly}@c.us`;
 }
 
-async function sendWAHA(to, text) {
+async function sendWAHA(to, text, session) {
   const wahaUrl = process.env.WAHA_URL;
-  const session = process.env.WAHA_SESSION || 'default';
+  const sess    = session || process.env.WAHA_SESSION || 'default';
   if (!wahaUrl) { console.error('[wa-agent] WAHA_URL no configurado'); return; }
   const chatId  = wahaChatId(to);
   const headers = wahaHeaders();
   const res = await fetch(`${wahaUrl}/api/sendText`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ chatId, text, session }),
+    body: JSON.stringify({ chatId, text, session: sess }),
   });
   const data = await res.json();
   if (!res.ok) console.error('[wa-agent] sendWAHA error:', res.status, JSON.stringify(data));
@@ -1363,16 +1373,16 @@ async function sendWAHA(to, text) {
 }
 
 // ── Enviar imagen/archivo vía WAHA ───────────────────────────────────────────
-async function sendWAHAImage(to, imageUrl, caption = '') {
+async function sendWAHAImage(to, imageUrl, caption = '', session) {
   const wahaUrl = process.env.WAHA_URL;
-  const session = process.env.WAHA_SESSION || 'default';
+  const sess    = session || process.env.WAHA_SESSION || 'default';
   if (!wahaUrl || !imageUrl) return;
   try {
     const chatId = wahaChatId(to);
     const res = await fetch(`${wahaUrl}/api/sendImage`, {
       method: 'POST',
       headers: wahaHeaders(),
-      body: JSON.stringify({ chatId, file: { url: imageUrl }, caption, session }),
+      body: JSON.stringify({ chatId, file: { url: imageUrl }, caption, session: sess }),
     });
     if (!res.ok) {
       const err = await res.text();
