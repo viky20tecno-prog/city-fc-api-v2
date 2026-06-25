@@ -104,15 +104,33 @@ router.get('/qr', async (req, res) => {
     }
 
     const sessionName = club.slug;
-    const r = await wahaFetch(`/api/${sessionName}/auth/qr?format=image`);
 
-    if (!r.ok) {
-      return res.status(r.status).json({ success: false, error: 'QR no disponible aún — espera unos segundos' });
+    // Intentar primero como imagen PNG
+    const rImg = await wahaFetch(`/api/${sessionName}/auth/qr?format=image`);
+    if (rImg.ok) {
+      const contentType = rImg.headers.get('content-type') || '';
+      if (contentType.startsWith('image/')) {
+        const buf = await rImg.arrayBuffer();
+        const b64 = Buffer.from(buf).toString('base64');
+        return res.json({ success: true, qr: `data:image/png;base64,${b64}` });
+      }
+      // Respuesta inesperada como imagen, intentar parsear como JSON
+      try {
+        const json = await rImg.json();
+        if (json.value) return res.json({ success: true, qr: json.value, raw: true });
+      } catch (_) {}
     }
 
-    const buf = await r.arrayBuffer();
-    const b64 = Buffer.from(buf).toString('base64');
-    res.json({ success: true, qr: `data:image/png;base64,${b64}` });
+    // Fallback: endpoint sin format param (devuelve JSON con value)
+    const rJson = await wahaFetch(`/api/${sessionName}/auth/qr`);
+    if (rJson.ok) {
+      try {
+        const json = await rJson.json();
+        if (json.value) return res.json({ success: true, qr: json.value, raw: true });
+      } catch (_) {}
+    }
+
+    return res.status(202).json({ success: false, error: 'QR no disponible aún — espera unos segundos' });
   } catch (e) {
     console.error('[waha/qr]', e.message);
     res.status(500).json({ success: false, error: e.message });
