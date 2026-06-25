@@ -199,9 +199,9 @@ router.all('/cobro', async (req, res) => {
 router.all('/plantillas', async (req, res) => {
   if (!verifyCronSecret(req, res)) return;
 
-  const wahaUrl = process.env.WAHA_URL;
-  const session = process.env.WAHA_SESSION || 'default';
-  const apiKey  = process.env.WAHA_API_KEY;
+  const wahaUrl    = process.env.WAHA_URL;
+  const defaultSession = process.env.WAHA_SESSION || 'default';
+  const apiKey     = process.env.WAHA_API_KEY;
   if (!wahaUrl) return res.status(500).json({ success: false, error: 'WAHA_URL no configurado' });
 
   // Responder inmediatamente para no agotar el timeout del cron externo
@@ -236,13 +236,13 @@ router.all('/plantillas', async (req, res) => {
     const n = String(cel).replace(/\D/g, '');
     return `${n.startsWith('57') ? n : '57' + n}@c.us`;
   }
-  async function enviarTexto(cel, texto) {
+  async function enviarTexto(cel, texto, session) {
     await fetch(`${wahaUrl}/api/sendText`, {
       method: 'POST', headers: waHeaders,
       body: JSON.stringify({ chatId: chatId(cel), text: texto, session }),
     });
   }
-  async function enviarImagen(cel, url) {
+  async function enviarImagen(cel, url, session) {
     if (!url) return;
     await fetch(`${wahaUrl}/api/sendImage`, {
       method: 'POST', headers: waHeaders,
@@ -270,11 +270,12 @@ router.all('/plantillas', async (req, res) => {
       const club = plantilla.clubs;
       if (!club || yaEnviadoHoy(plantilla)) { resultados.omitidos++; continue; }
 
-      const config     = club.config || {};
-      const clubNombre = config.nombre || club.name || club.slug;
-      const qrUrl      = config.qr_pago_url || null;
-      const llavePago  = config.llave_pago   || '';
-      const tipo       = plantilla.tipo_plantilla || 'evento';
+      const config      = club.config || {};
+      const clubNombre  = config.nombre || club.name || club.slug;
+      const qrUrl       = config.qr_pago_url || null;
+      const llavePago   = config.llave_pago   || '';
+      const tipo        = plantilla.tipo_plantilla || 'evento';
+      const clubSession = config.waha_session || defaultSession;
 
       try {
         // ── TIPO EVENTO ──────────────────────────────────────────────────────────
@@ -314,11 +315,11 @@ router.all('/plantillas', async (req, res) => {
               if (!j.celular) continue;
               const texto = render(plantilla.mensaje, { ...varsBase, '{nombre}': j.nombre || '' });
               try {
-                if (plantilla.incluir_qr && qrUrl) await enviarImagen(j.celular, qrUrl);
-                await enviarTexto(j.celular, texto);
+                if (plantilla.incluir_qr && qrUrl) await enviarImagen(j.celular, qrUrl, clubSession);
+                await enviarTexto(j.celular, texto, clubSession);
                 resultados.enviados++;
               } catch (e) { resultados.errores.push(`${j.celular}: ${e.message}`); }
-              await new Promise(r => setTimeout(r, 3000));
+              await new Promise(r => setTimeout(r, 4000 + Math.random() * 4000));
             }
           }
 
@@ -364,11 +365,11 @@ router.all('/plantillas', async (req, res) => {
             };
             const texto = render(plantilla.mensaje, vars);
             try {
-              if (plantilla.incluir_qr && qrUrl) await enviarImagen(j.celular, qrUrl);
-              await enviarTexto(j.celular, texto);
+              if (plantilla.incluir_qr && qrUrl) await enviarImagen(j.celular, qrUrl, clubSession);
+              await enviarTexto(j.celular, texto, clubSession);
               resultados.enviados++;
             } catch (e) { resultados.errores.push(`${j.celular}: ${e.message}`); }
-            await new Promise(r => setTimeout(r, 3000));
+            await new Promise(r => setTimeout(r, 4000 + Math.random() * 4000));
           }
         }
 
