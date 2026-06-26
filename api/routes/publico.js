@@ -582,7 +582,6 @@ router.post('/otp/verificar', otpLimiter, async (req, res) => {
       .eq('phone', phone)
       .eq('club_slug', club_slug)
       .eq('code', String(code).trim())
-      .eq('used', false)
       .gt('expires_at', new Date().toISOString())
       .order('created_at', { ascending: false })
       .limit(1);
@@ -591,9 +590,6 @@ router.post('/otp/verificar', otpLimiter, async (req, res) => {
     if (!tokens || tokens.length === 0) {
       return res.status(401).json({ success: false, error: 'Código incorrecto o expirado' });
     }
-
-    // Marcar OTP como usado
-    await db.supabase.from('otp_tokens').update({ used: true }).eq('id', tokens[0].id);
 
     // Buscar jugador por celular y devolver su estado de cuenta
     const club = await db.getClubBySlug(club_slug);
