@@ -385,13 +385,18 @@ async function runTool(name, input, contexto = {}) {
       if (contexto.rol === 'jugador' && input.cedula !== String(contexto.cedula)) {
         return { error: 'No autorizado. Solo puedes consultar tu propio estado de cuenta.' };
       }
-      const anio = new Date().getFullYear();
+      const anio      = new Date().getFullYear();
+      const mesActual = new Date().getMonth() + 1;
       const mensualidades = await db.getMensualidades(input.club_id, input.cedula);
+      const suspensiones  = await db.getSuspensionesJugador(input.club_id, input.cedula);
+      const suspActivas   = (suspensiones || []).filter(s => s.activa && (s.anio == null || parseInt(s.anio) === anio));
+      const esSuspendido  = (n) => suspActivas.some(s => s.mes_inicio <= n && n <= s.mes_fin);
       const del_anio = mensualidades
         .filter(m => String(m.anio) === String(anio))
         .sort((a, b) => (a.numero_mes || 0) - (b.numero_mes || 0));
-      const pendientes = del_anio.filter(m => m.estado !== 'AL_DIA' && m.estado !== 'EXENTO');
-      const al_dia     = del_anio.filter(m => m.estado === 'AL_DIA' || m.estado === 'EXENTO');
+      const causados   = del_anio.filter(m => (m.numero_mes || 0) <= mesActual);
+      const pendientes = causados.filter(m => m.estado !== 'AL_DIA' && m.estado !== 'EXENTO' && !esSuspendido(m.numero_mes));
+      const al_dia     = causados.filter(m => m.estado === 'AL_DIA' || m.estado === 'EXENTO');
       const total_deuda = pendientes.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
       const { data: clubData } = await db.supabase.from('clubs').select('config').eq('id', input.club_id).single();
       const qr_pago_url    = clubData?.config?.qr_pago_url    || null;
