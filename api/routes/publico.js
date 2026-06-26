@@ -616,19 +616,41 @@ router.post('/otp/verificar', otpLimiter, async (req, res) => {
 
     const esExento = suspensiones.some(s => s.tipo === 'exento' || s.exento === true);
 
+    const suspActivas2 = (suspensiones || []).filter(s =>
+      s.activa && (s.anio == null || parseInt(s.anio) === anioActual)
+    );
+    const esSuspendido2 = (numMes) =>
+      suspActivas2.some(s => s.mes_inicio <= numMes && numMes <= s.mes_fin);
+    const getSusp2 = (numMes) =>
+      suspActivas2.find(s => s.mes_inicio <= numMes && numMes <= s.mes_fin) || null;
+
     const mensualidades = mensAnio
       .sort((a, b) => a.numero_mes - b.numero_mes)
-      .map(m => ({
-        mes:          MESES[(m.numero_mes || 1) - 1] || `Mes ${m.numero_mes}`,
-        estado:       mapEstado(m.estado),
-        valor_oficial: m.valor_oficial,
-        valor_pagado:  m.valor_pagado,
-        saldo:         calcSaldo(m),
-      }));
+      .map(m => {
+        const numMes = parseInt(m.numero_mes);
+        if (esSuspendido2(numMes)) {
+          const susp = getSusp2(numMes);
+          return {
+            mes:           MESES[(numMes || 1) - 1] || `Mes ${numMes}`,
+            estado:        'suspendido',
+            valor_oficial: m.valor_oficial,
+            valor_pagado:  m.valor_pagado,
+            saldo:         0,
+            suspension:    { motivo: susp?.motivo || null, detalle: susp?.detalle || null },
+          };
+        }
+        return {
+          mes:           MESES[(numMes || 1) - 1] || `Mes ${numMes}`,
+          estado:        mapEstado(m.estado),
+          valor_oficial: m.valor_oficial,
+          valor_pagado:  m.valor_pagado,
+          saldo:         calcSaldo(m),
+        };
+      });
 
     const saldo_pendiente = esExento ? 0 : mensualidades.reduce((s, m) => s + m.saldo, 0);
     const total_pagado    = mensualidades.reduce((s, m) => s + (parseFloat(m.valor_pagado) || 0), 0);
-    const meses_pendientes = mensualidades.filter(m => m.estado !== 'pagado' && m.estado !== 'exento').length;
+    const meses_pendientes = mensualidades.filter(m => m.estado !== 'pagado' && m.estado !== 'exento' && m.estado !== 'suspendido').length;
 
     res.json({
       success:     true,
