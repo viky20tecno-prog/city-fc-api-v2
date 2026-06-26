@@ -49,12 +49,11 @@ router.get('/lookup-phone', requireSuperAdmin, async (req, res) => {
     const local  = digits.startsWith('57') ? digits.slice(2) : digits;
     const all10  = digits.slice(-10);
 
-    // Buscar sesión en caché (wa_sessions) — puede tener rol diferente al real si está cacheado
-    const phoneVariants = [digits, local, `57${local}`, `+57${local}`];
+    // Buscar sesión en caché (wa_sessions) — búsqueda LIKE para encontrar cualquier formato
     const { data: sessionRows } = await sb
       .from('wa_sessions')
       .select('phone, rol, updated_at, contexto')
-      .in('phone', phoneVariants);
+      .like('phone', `%${all10}%`);
     const session = sessionRows?.[0] || null;
     const SESSION_TIMEOUT_MIN = 10;
     const sessionActiva = session && (Date.now() - new Date(session.updated_at).getTime()) < SESSION_TIMEOUT_MIN * 60 * 1000;
@@ -156,18 +155,28 @@ router.delete('/reset-session', requireSuperAdmin, async (req, res) => {
     const { phone } = req.query;
     if (!phone) return res.status(400).json({ success: false, error: 'phone requerido' });
 
-    const digits  = phone.replace(/\D/g, '');
-    const local   = digits.startsWith('57') ? digits.slice(2) : digits;
-    const variants = [digits, local, `57${local}`, `+57${local}`];
+    const digits = phone.replace(/\D/g, '');
+    const last10 = digits.slice(-10);
 
+    // Buscar con LIKE para encontrar cualquier variante del número
+    const { data: sessions } = await sb
+      .from('wa_sessions')
+      .select('phone, rol, updated_at')
+      .like('phone', `%${last10}%`);
+
+    if (!sessions?.length) {
+      return res.json({ success: true, eliminadas: 0, nota: `No se encontró ninguna sesión que contenga ${last10}`, encontradas: [] });
+    }
+
+    const phones = sessions.map(s => s.phone);
     const { data: deleted, error } = await sb
       .from('wa_sessions')
       .delete()
-      .in('phone', variants)
+      .in('phone', phones)
       .select('phone');
     if (error) throw error;
 
-    res.json({ success: true, eliminadas: deleted?.length || 0 });
+    res.json({ success: true, eliminadas: deleted?.length || 0, phones_eliminados: phones, sesiones_encontradas: sessions });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
