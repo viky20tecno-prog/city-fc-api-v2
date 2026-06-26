@@ -117,4 +117,27 @@ router.get('/lookup-phone', requireSuperAdmin, async (req, res) => {
   }
 });
 
+// DELETE /api/superadmin/reset-session?phone=3203903192
+router.delete('/reset-session', requireSuperAdmin, async (req, res) => {
+  try {
+    const { phone } = req.query;
+    if (!phone) return res.status(400).json({ success: false, error: 'phone requerido' });
+
+    const digits  = phone.replace(/\D/g, '');
+    const local   = digits.startsWith('57') ? digits.slice(2) : digits;
+    const variants = [digits, local, `57${local}`, `+57${local}`];
+
+    const { data: deleted, error } = await sb
+      .from('wa_sessions')
+      .delete()
+      .in('phone', variants)
+      .select('phone');
+    if (error) throw error;
+
+    res.json({ success: true, eliminadas: deleted?.length || 0 });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
