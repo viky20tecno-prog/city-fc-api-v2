@@ -1246,6 +1246,11 @@ async function generateReply(from, text) {
     (Date.now() - new Date(session.updated_at).getTime()) > SESSION_TIMEOUT_MIN * 60 * 1000;
   const history = STALE ? [] : (session?.messages || []);
 
+  // Si la sesión está vencida, borrarla para forzar identificación limpia
+  if (STALE && session) {
+    db.supabase.from('wa_sessions').delete().eq('phone', from).then(() => {}).catch(() => {});
+  }
+
   // Identificar quién es (si sesión expiró, re-identificar desde BD ignorando caché)
   const { rol, contexto } = await identificarRol(from, STALE ? null : session);
 

@@ -390,4 +390,27 @@ router.all('/plantillas', async (req, res) => {
   }); // fin setImmediate
 });
 
+// POST /api/cron/cleanup-sessions — elimina sesiones WA inactivas > 20 min
+router.all('/cleanup-sessions', async (req, res) => {
+  if (!verifyCronSecret(req, res)) return;
+  try {
+    const supabaseAdmin = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY
+    );
+    const corte = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+    const { data: deleted, error } = await supabaseAdmin
+      .from('wa_sessions')
+      .delete()
+      .lt('updated_at', corte)
+      .select('phone');
+    if (error) throw error;
+    console.log(`[cron] cleanup-sessions: ${deleted?.length || 0} sesiones eliminadas`);
+    res.json({ success: true, eliminadas: deleted?.length || 0 });
+  } catch (err) {
+    console.error('[cron] cleanup-sessions error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
