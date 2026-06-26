@@ -28,7 +28,10 @@ const leadsRouter          = require('./routes/leads');
 const waAgentRouter        = require('./routes/wa-agent');
 const internalRouter       = require('./routes/internal');
 const documentsRouter      = require('./routes/documents');
+const superadminRouter     = require('./routes/superadmin');
 const requireAuth          = require('./middleware/auth');
+
+const SUPER_ADMIN_EMAILS = ['diego31escobar@gmail.com'];
 
 // Middleware que bloquea acceso a rutas financieras para ENTRENADOR
 const requireAdmin = (req, res, next) => {
@@ -159,7 +162,7 @@ app.use('/api', async (req, res, next) => {
       return res.status(403).json({ success: false, error: 'Club inactivo' });
     }
 
-    if (club.owner_user_id === req.user.id) {
+    if (SUPER_ADMIN_EMAILS.includes(req.user.email) || club.owner_user_id === req.user.id) {
       req.club_uuid = club.id;
       req.userRole  = 'ADMIN';
       return next();
@@ -202,6 +205,8 @@ app.use('/api/payments',     paymentsRouter);
 app.use('/api/config',       configRouter);
 app.use('/api/torneos',      torneosRouter);
 app.use('/api/documents',    documentsRouter);
+
+app.use('/api/superadmin',   superadminRouter);
 
 // Rutas solo ADMIN (bloqueadas para ENTRENADOR)
 app.use('/api/finanzas',     requireAdmin, finanzasRouter);
