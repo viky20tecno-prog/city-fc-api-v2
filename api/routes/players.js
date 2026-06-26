@@ -244,6 +244,139 @@ router.patch('/:cedula/exento', async (req, res) => {
   }
 });
 
+// POST /api/players/estado-cuenta-masivo?club_id= — envía WA personalizado con estado de cuenta a todos los jugadores activos con celular
+router.post('/estado-cuenta-masivo', async (req, res) => {
+  try {
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const wahaUrl    = process.env.WAHA_URL;
+    const apiKey     = process.env.WAHA_API_KEY;
+    if (!wahaUrl) return res.status(500).json({ success: false, error: 'WAHA_URL no configurado' });
+
+    const clubSession = club.config?.waha_session;
+    if (!clubSession) return res.status(400).json({ success: false, error: 'Club sin sesión WhatsApp configurada' });
+
+    const clubNombre  = club.config?.nombre || club.name;
+    const clubSlug    = club.slug;
+    const adminDigits = club.celular_admin ? String(club.celular_admin).replace(/\D/g, '') : null;
+    const adminWaLink = adminDigits ? `wa.me/${adminDigits.startsWith('57') ? adminDigits : '57' + adminDigits}` : null;
+
+    const todosJugadores = await db.getPlayers(club.id);
+    const conNumero  = todosJugadores.filter(j => j.activo && j.celular);
+    const sinNumero  = todosJugadores.filter(j => j.activo && !j.celular).length;
+
+    res.json({ success: true, iniciado: true, total: conNumero.length, sin_numero: sinNumero });
+
+    setImmediate(async () => {
+      try {
+        const [allMens, allTorneos, allPedidos] = await Promise.all([
+          db.getMensualidades(club.id),
+          db.getTorneos(club.id),
+          db.getPedidoUniformes(club.id),
+        ]);
+
+        const mensByCedula    = {};
+        const torneosByCedula = {};
+        const pedidosByCedula = {};
+
+        allMens.forEach(m => {
+          if (!mensByCedula[m.cedula]) mensByCedula[m.cedula] = [];
+          mensByCedula[m.cedula].push(m);
+        });
+        allTorneos.forEach(t => {
+          if (!torneosByCedula[t.cedula]) torneosByCedula[t.cedula] = [];
+          torneosByCedula[t.cedula].push(t);
+        });
+        allPedidos.forEach(p => {
+          if (!p.cedula) return;
+          if (!pedidosByCedula[p.cedula]) pedidosByCedula[p.cedula] = [];
+          pedidosByCedula[p.cedula].push(p);
+        });
+
+        const waHeaders = { 'Content-Type': 'application/json' };
+        if (apiKey) waHeaders['X-Api-Key'] = apiKey;
+
+        const nowCol    = new Date(Date.now() - 5 * 3600000);
+        const MESES_ES  = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+        const periodo   = `${MESES_ES[nowCol.getMonth()].charAt(0).toUpperCase() + MESES_ES[nowCol.getMonth()].slice(1)} ${nowCol.getFullYear()}`;
+
+        const fmtCOP = n => '$' + Math.round(Number(n) || 0).toLocaleString('es-CO');
+
+        function chatId(cel) {
+          const n = String(cel).replace(/\D/g, '');
+          return `${n.startsWith('57') ? n : '57' + n}@c.us`;
+        }
+
+        for (const jugador of conNumero) {
+          try {
+            const { cedula, nombre, apellidos, celular } = jugador;
+            const nombreCompleto = `${nombre || ''} ${apellidos || ''}`.trim();
+
+            // — Mensualidades —
+            const mens     = (mensByCedula[String(cedula)] || []).filter(m => (m.valor_oficial || 0) > 0);
+            const pendMens = mens.filter(m => ['PENDIENTE', 'PARCIAL', 'MORA'].includes(m.estado));
+            const enMora   = pendMens.some(m => m.estado === 'MORA');
+            const saldoMens = pendMens.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
+
+            let lineaMens;
+            if (pendMens.length === 0) {
+              lineaMens = '✅ Al día';
+            } else {
+              lineaMens = `${enMora ? '🔴 En mora' : '⏳ Pendiente'}\nMeses: ${pendMens.length} | Saldo: ${fmtCOP(saldoMens)}`;
+            }
+
+            // — Torneos —
+            const torneos = (torneosByCedula[String(cedula)] || []);
+            let lineaTorneos;
+            if (torneos.length === 0) {
+              lineaTorneos = 'Sin inscripciones activas';
+            } else {
+              lineaTorneos = torneos.map(t => {
+                const ico    = t.estado === 'AL_DIA' ? '✅' : t.estado === 'ABONO' ? '⏳' : '🔴';
+                const saldoT = parseFloat(t.saldo_pendiente) || 0;
+                const valorT = parseFloat(t.valor_inscrito)  || parseFloat(t.valor_oficial) || 0;
+                return `• ${t.nombre_torneo}\n  Valor: ${fmtCOP(valorT)} | Saldo: ${fmtCOP(saldoT)} ${ico}`;
+              }).join('\n');
+            }
+
+            // — Uniformes (pedidos PENDIENTE) —
+            const pedPend  = (pedidosByCedula[String(cedula)] || []).filter(p => p.estado === 'PENDIENTE');
+            const saldoUnif = pedPend.reduce((s, p) => s + (parseFloat(p.total) || 0), 0);
+            const lineaUnif = saldoUnif > 0 ? `🔴 Saldo: ${fmtCOP(saldoUnif)}` : '✅ Sin saldo pendiente';
+
+            // — Mensaje —
+            const portalLink = `https://zensports.zenpra.ai/p/${clubSlug}/${cedula}`;
+            let msg = `Hola *${nombreCompleto}* 👋\n\nTu estado de cuenta en *${clubNombre}* — ${periodo}:\n\n`;
+            msg += `📅 *MENSUALIDADES*\n${lineaMens}\n\n`;
+            msg += `👕 *UNIFORMES*\n${lineaUnif}\n\n`;
+            msg += `🏆 *TORNEOS*\n${lineaTorneos}\n\n`;
+            msg += `Ver tu cuenta completa:\n${portalLink}`;
+            if (adminWaLink) {
+              msg += `\n\n_Si crees que hay alguna inconsistencia, escríbele directamente al administrador del club:_\n${adminWaLink}`;
+            }
+
+            await fetch(`${wahaUrl}/api/sendText`, {
+              method: 'POST',
+              headers: waHeaders,
+              body: JSON.stringify({ chatId: chatId(celular), text: msg, session: clubSession }),
+            });
+
+            await new Promise(r => setTimeout(r, 3000));
+          } catch (e) {
+            console.error(`[estado-cuenta] jugador ${jugador.cedula}:`, e.message);
+          }
+        }
+      } catch (e) {
+        console.error('[estado-cuenta-masivo] error global:', e.message);
+      }
+    });
+  } catch (err) {
+    console.error('POST /players/estado-cuenta-masivo:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // POST /api/players/bulk?club_id=city-fc  — importación masiva desde Excel/CSV
 router.post('/bulk', async (req, res) => {
   try {
