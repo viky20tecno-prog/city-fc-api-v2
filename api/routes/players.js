@@ -262,9 +262,12 @@ router.post('/estado-cuenta-masivo', async (req, res) => {
     const adminDigits = club.celular_admin ? String(club.celular_admin).replace(/\D/g, '') : null;
     const adminWaLink = adminDigits ? `wa.me/${adminDigits.startsWith('57') ? adminDigits : '57' + adminDigits}` : null;
 
+    const cedulaFiltro = req.query.cedula ? String(req.query.cedula) : null;
     const todosJugadores = await db.getPlayers(club.id);
-    const conNumero  = todosJugadores.filter(j => j.activo && j.celular);
-    const sinNumero  = todosJugadores.filter(j => j.activo && !j.celular).length;
+    const activos    = todosJugadores.filter(j => j.activo);
+    const filtrados  = cedulaFiltro ? activos.filter(j => String(j.cedula) === cedulaFiltro) : activos;
+    const conNumero  = filtrados.filter(j => j.celular);
+    const sinNumero  = filtrados.filter(j => !j.celular).length;
 
     res.json({ success: true, iniciado: true, total: conNumero.length, sin_numero: sinNumero });
 
