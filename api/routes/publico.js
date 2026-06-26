@@ -169,8 +169,9 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
       };
     });
 
-    const pendientes      = resumen.filter(m => !['pagado','exento','suspendido'].includes(m.estado));
-    const saldo_pendiente = pendientes.reduce((s, m) => s + m.saldo, 0);
+    const mesActual       = new Date().getMonth() + 1;
+    const pendientes      = resumen.filter(m => !['pagado','exento','suspendido'].includes(m.estado) && m.numero_mes <= mesActual);
+    const saldo_pendiente = esExento ? 0 : pendientes.reduce((s, m) => s + m.saldo, 0);
     const total_pagado    = esExento ? 0 : resumen.reduce((s, m) => s + m.valor_pagado, 0);
 
     res.json({
@@ -624,6 +625,8 @@ router.post('/otp/verificar', otpLimiter, async (req, res) => {
     const getSusp2 = (numMes) =>
       suspActivas2.find(s => s.mes_inicio <= numMes && numMes <= s.mes_fin) || null;
 
+    const mesActualV      = new Date().getMonth() + 1;
+
     const mensualidades = mensAnio
       .sort((a, b) => a.numero_mes - b.numero_mes)
       .map(m => {
@@ -632,6 +635,7 @@ router.post('/otp/verificar', otpLimiter, async (req, res) => {
           const susp = getSusp2(numMes);
           return {
             mes:           MESES[(numMes || 1) - 1] || `Mes ${numMes}`,
+            numero_mes:    numMes,
             estado:        'suspendido',
             valor_oficial: m.valor_oficial,
             valor_pagado:  m.valor_pagado,
@@ -641,6 +645,7 @@ router.post('/otp/verificar', otpLimiter, async (req, res) => {
         }
         return {
           mes:           MESES[(numMes || 1) - 1] || `Mes ${numMes}`,
+          numero_mes:    numMes,
           estado:        mapEstado(m.estado),
           valor_oficial: m.valor_oficial,
           valor_pagado:  m.valor_pagado,
@@ -648,9 +653,11 @@ router.post('/otp/verificar', otpLimiter, async (req, res) => {
         };
       });
 
-    const saldo_pendiente = esExento ? 0 : mensualidades.reduce((s, m) => s + m.saldo, 0);
-    const total_pagado    = mensualidades.reduce((s, m) => s + (parseFloat(m.valor_pagado) || 0), 0);
-    const meses_pendientes = mensualidades.filter(m => m.estado !== 'pagado' && m.estado !== 'exento' && m.estado !== 'suspendido').length;
+    const saldo_pendiente  = esExento ? 0 : mensualidades
+      .filter(m => !['pagado','exento','suspendido'].includes(m.estado) && m.numero_mes <= mesActualV)
+      .reduce((s, m) => s + m.saldo, 0);
+    const total_pagado     = mensualidades.reduce((s, m) => s + (parseFloat(m.valor_pagado) || 0), 0);
+    const meses_pendientes = mensualidades.filter(m => !['pagado','exento','suspendido'].includes(m.estado) && m.numero_mes <= mesActualV).length;
 
     res.json({
       success:     true,
