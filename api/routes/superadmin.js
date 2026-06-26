@@ -47,6 +47,7 @@ router.get('/lookup-phone', requireSuperAdmin, async (req, res) => {
 
     const digits = phone.replace(/\D/g, '');
     const local  = digits.startsWith('57') ? digits.slice(2) : digits;
+    const all10  = digits.slice(-10);
 
     // Buscar sesión en caché (wa_sessions) — puede tener rol diferente al real si está cacheado
     const phoneVariants = [digits, local, `57${local}`, `+57${local}`];
@@ -97,7 +98,39 @@ router.get('/lookup-phone', requireSuperAdmin, async (req, res) => {
             nota:        'El club existe pero is_active = false — por eso el bot lo muestra como visitante en consulta fresca',
           };
         }
+
+        // Debug raw: buscar en players sin filtros
+        const { data: rawPlayers } = await sb
+          .from('players')
+          .select('cedula, nombre, apellidos, celular, activo, club_id')
+          .or(`celular.eq.${all10},celular.eq.57${all10},celular.eq.+57${all10},celular.eq.${digits}`)
+          .limit(5);
+
+        if (rawPlayers?.length) {
+          extra._debug_players = rawPlayers.map(p => ({
+            nombre: `${p.nombre} ${p.apellidos}`.trim(),
+            cedula: p.cedula,
+            celular: p.celular,
+            activo: p.activo,
+            club_id: p.club_id,
+          }));
+        }
       }
+    }
+
+    // Debug raw: buscar en clubs.celular_admin sin filtros (cualquier variante)
+    const { data: rawClubs } = await sb
+      .from('clubs')
+      .select('id, slug, name, celular_admin, is_active, config')
+      .or(`celular_admin.eq.${all10},celular_admin.eq.57${all10},celular_admin.eq.+57${all10},celular_admin.eq.${digits},celular_admin.eq.+${digits}`)
+      .limit(5);
+    if (rawClubs?.length) {
+      extra._debug_clubs_admin = rawClubs.map(c => ({
+        slug: c.slug,
+        nombre: c.config?.nombre || c.name,
+        celular_admin: c.celular_admin,
+        is_active: c.is_active,
+      }));
     }
 
     return res.json({
