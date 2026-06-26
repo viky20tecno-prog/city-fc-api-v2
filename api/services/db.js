@@ -867,7 +867,7 @@ async function deleteCalendarioEvent(id, club_id) {
 async function getAsistencia(club_id, evento_id) {
   const { data: evento, error: evErr } = await supabase
     .from('calendario')
-    .select('tipo, equipo')
+    .select('tipo, equipo, convocados')
     .eq('id', evento_id)
     .single();
   if (evErr) throw evErr;
@@ -879,7 +879,9 @@ async function getAsistencia(club_id, evento_id) {
     .eq('activo', true)
     .order('nombre');
 
-  if (evento.tipo === 'PARTIDO' && evento.equipo) {
+  if (evento.convocados && evento.convocados.length > 0) {
+    playersQuery = playersQuery.in('cedula', evento.convocados);
+  } else if (evento.tipo === 'PARTIDO' && evento.equipo) {
     playersQuery = playersQuery.eq('equipo', evento.equipo);
   }
 
