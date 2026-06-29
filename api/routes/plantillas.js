@@ -200,4 +200,162 @@ router.post('/:id/probar', async (req, res) => {
   }
 });
 
+// POST /api/plantillas/:id/enviar — disparo manual inmediato a todos los jugadores del club
+router.post('/:id/enviar', async (req, res) => {
+  try {
+    const sb = supabaseAdmin();
+
+    const [{ data: p }, { data: club }] = await Promise.all([
+      sb.from('plantillas_mensajes').select('*').eq('id', req.params.id).eq('club_id', req.club_uuid).single(),
+      sb.from('clubs').select('*').eq('id', req.club_uuid).single(),
+    ]);
+
+    if (!p)    return res.status(404).json({ success: false, error: 'Plantilla no encontrada' });
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const config      = club.config || {};
+    const clubSession = config.waha_session;
+    if (!clubSession) {
+      return res.status(400).json({ success: false, error: 'Conecta tu WhatsApp primero desde la sección de Plantillas.' });
+    }
+
+    const wahaUrl    = process.env.WAHA_URL;
+    const clubNombre = config.nombre || club.name || club.slug;
+    const qrUrl      = config.qr_pago_url || null;
+    const llavePago  = config.llave_pago  || '';
+    const tipo       = p.tipo_plantilla || 'evento';
+
+    // Responder inmediatamente — el envío ocurre en background
+    res.json({ success: true, status: 'processing' });
+
+    setImmediate(async () => {
+      const ahora   = new Date();
+      const nowCol  = new Date(ahora.getTime() - 5 * 3600000);
+      const hoyCol  = nowCol.toISOString().split('T')[0];
+      const anio    = nowCol.getFullYear();
+      const MESES   = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+      const DIAS_ES = ['DOMINGO','LUNES','MARTES','MIÉRCOLES','JUEVES','VIERNES','SÁBADO'];
+      const fmtH    = d => `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2,'0')} ${d.getHours() < 12 ? 'am' : 'pm'}`;
+      const delay   = ms => new Promise(r => setTimeout(r, ms));
+
+      let enviados = 0, errores = 0;
+
+      try {
+        const { data: jugadores } = await sb
+          .from('players').select('cedula, nombre, apellidos, celular')
+          .eq('club_id', club.id).eq('activo', true);
+
+        if (!jugadores?.length) {
+          console.log(`[plantillas/enviar] ${p.id}: sin jugadores activos`);
+          return;
+        }
+
+        // ── TIPO EVENTO ────────────────────────────────────────────────────
+        if (tipo === 'evento') {
+          const mananaCol = new Date(nowCol.getTime() + 86400000).toISOString().split('T')[0];
+          const inicioUTC = `${hoyCol}T05:00:00Z`;
+          const finUTC    = `${mananaCol}T04:59:59Z`;
+
+          let query = sb.from('calendario')
+            .select('id, titulo, tipo, lugar, fecha_inicio, fecha_fin')
+            .eq('club_id', club.slug)
+            .gte('fecha_inicio', inicioUTC)
+            .lte('fecha_inicio', finUTC)
+            .or('suspendido.eq.false,suspendido.is.null');
+
+          if (p.tipo_evento && p.tipo_evento !== 'todos') {
+            query = query.eq('tipo', p.tipo_evento);
+          }
+          const { data: eventos } = await query.order('fecha_inicio');
+
+          if (!eventos?.length) {
+            console.log(`[plantillas/enviar] ${p.id}: sin eventos hoy`);
+            return;
+          }
+
+          for (const evento of eventos) {
+            const d  = new Date(new Date(evento.fecha_inicio).getTime() - 5 * 3600000);
+            const df = evento.fecha_fin ? new Date(new Date(evento.fecha_fin).getTime() - 5 * 3600000) : null;
+            const varsBase = {
+              '{dia}':         DIAS_ES[d.getDay()],
+              '{lugar}':       evento.lugar || '',
+              '{hora_inicio}': fmtH(d),
+              '{hora_fin}':    df ? fmtH(df) : '',
+              '{club_nombre}': clubNombre,
+              '{llave_pago}':  llavePago,
+            };
+
+            for (const j of jugadores) {
+              if (!j.celular) continue;
+              const texto = renderMensaje(p.mensaje, { ...varsBase, '{nombre}': j.nombre || '' });
+              try {
+                if (p.incluir_qr && qrUrl) await sendWAHAImage(j.celular, qrUrl, clubSession);
+                await sendWAHA(j.celular, texto, clubSession);
+                enviados++;
+              } catch (e) { errores++; console.error(`[plantillas/enviar] ${j.celular}:`, e.message); }
+              await delay(4000 + Math.random() * 4000);
+            }
+          }
+
+        // ── TIPO COBRO ─────────────────────────────────────────────────────
+        } else if (tipo === 'cobro') {
+          const mesActual = nowCol.getMonth() + 1;
+
+          const { data: mens } = await sb
+            .from('mensualidades')
+            .select('cedula, estado, saldo_pendiente, numero_mes')
+            .eq('club_id', club.id).eq('anio', anio)
+            .in('estado', ['MORA', 'PENDIENTE', 'PARCIAL'])
+            .gt('valor_oficial', 0);
+
+          const porCedula = {};
+          for (const m of (mens || [])) {
+            if (!porCedula[m.cedula]) porCedula[m.cedula] = [];
+            porCedula[m.cedula].push(m);
+          }
+
+          for (const j of jugadores) {
+            const pendientes = porCedula[j.cedula];
+            if (!pendientes?.length || !j.celular) continue;
+
+            const deuda = pendientes.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
+            const meses = pendientes
+              .sort((a, b) => a.numero_mes - b.numero_mes)
+              .map(m => MESES[(m.numero_mes || 1) - 1])
+              .join(', ');
+
+            const texto = renderMensaje(p.mensaje, {
+              '{nombre}':      j.nombre || '',
+              '{deuda}':       formatCOP(deuda),
+              '{meses}':       meses,
+              '{club_nombre}': clubNombre,
+              '{llave_pago}':  llavePago,
+            });
+
+            try {
+              if (p.incluir_qr && qrUrl) await sendWAHAImage(j.celular, qrUrl, clubSession);
+              await sendWAHA(j.celular, texto, clubSession);
+              enviados++;
+            } catch (e) { errores++; console.error(`[plantillas/enviar] ${j.celular}:`, e.message); }
+            await delay(4000 + Math.random() * 4000);
+          }
+        }
+
+        // Actualizar ultimo_envio
+        await sb.from('plantillas_mensajes')
+          .update({ ultimo_envio: ahora.toISOString() })
+          .eq('id', p.id);
+
+        console.log(`[plantillas/enviar] ${p.nombre}: enviados=${enviados} errores=${errores}`);
+      } catch (e) {
+        console.error(`[plantillas/enviar] Error fatal plantilla ${p.id}:`, e.message);
+      }
+    });
+
+  } catch (e) {
+    console.error('[plantillas/enviar]', e.message);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 module.exports = router;
