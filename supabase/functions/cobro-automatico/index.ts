@@ -380,6 +380,10 @@ async function logEnvio(
 }
 
 async function enviarWA(celular: string, body: string, _conQR = false, _qrUrl = '') {
+  if (Deno.env.get('WA_COBRO_DISABLED') === 'true') {
+    console.log('[cobro-automatico] WA_COBRO_DISABLED=true — mensaje omitido para', celular);
+    return;
+  }
   if (!WAHA_URL) throw new Error('WAHA_URL no configurado');
   const numero = String(celular).replace(/\D/g, '').replace(/^57/, '');
   const chatId = `57${numero}@c.us`;
