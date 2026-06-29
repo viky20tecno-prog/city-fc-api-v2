@@ -350,7 +350,7 @@ const TOOL_CREAR_EVENTO = {
 // Herramientas por rol — jugadores y visitantes NO pueden buscar datos de otras personas
 const TOOLS_ADMIN       = [TOOL_BUSCAR_JUGADOR, TOOL_ENVIAR_MENSAJE_JUGADOR, TOOL_LISTAR_EVENTOS_HOY, TOOL_VER_LISTA_ASISTENCIA, TOOL_REGISTRAR_ASISTENCIA_LOTE, TOOL_CREAR_EVENTO, ...TOOLS_BASE];
 const TOOLS_ENTRENADOR  = [TOOL_BUSCAR_JUGADOR, TOOL_ENVIAR_MENSAJE_JUGADOR, TOOL_LISTAR_EVENTOS_HOY, TOOL_VER_LISTA_ASISTENCIA, TOOL_REGISTRAR_ASISTENCIA_LOTE, TOOL_CREAR_EVENTO, ...TOOLS_BASE.filter(t => ['consultar_calendario', 'consultar_asistencia_hoy'].includes(t.name))];
-const TOOLS_JUGADOR     = [TOOL_OBTENER_CARNET, ...TOOLS_BASE.filter(t => !['registrar_lead', 'consultar_pagos_club', 'consultar_morosos', 'enviar_recordatorio_pago', 'consultar_asistencia_hoy'].includes(t.name))];
+const TOOLS_JUGADOR     = [TOOL_OBTENER_CARNET, ...TOOLS_BASE.filter(t => !['registrar_lead', 'consultar_pagos_club', 'consultar_morosos', 'enviar_recordatorio_pago', 'consultar_asistencia_hoy', 'consultar_pagos'].includes(t.name))];
 const TOOLS_VISITANTE   = TOOLS_BASE.filter(t => ['registrar_lead', 'info_zensports'].includes(t.name));
 
 // ── Ejecutar herramienta ─────────────────────────────────────────────────────
@@ -905,7 +905,7 @@ Escribe el número o cuéntame directamente 😊
 ---
 
 FLUJO:
-- Para pagos → usa consultar_pagos con club_id y cedula del contexto
+- Para pagos / estado de cuenta / opción 1 → NO uses ninguna herramienta. Responde directamente usando el formato de abajo con datos del CONTEXTO.
 - Para calendario → usa consultar_calendario con club_slug del contexto; el resultado tiene un campo "texto" ya formateado — envíalo TAL CUAL sin modificarlo
 - Para partidos → usa consultar_partidos con club_id del contexto
 - Para asistencia → usa consultar_asistencia con club_id y cedula del contexto
@@ -913,45 +913,32 @@ FLUJO:
   "🪪 *Tu carnet digital — válido hoy:*\n{url}\n\n📌 Muéstralo en tiendas aliadas y patrocinadores. La fecha verde al pie confirma que es de hoy — un carnet de otro día no es válido."
 - "Hablar con el admin" / opción 6 → da el número contacto_admin del contexto
 
-FORMATO DE RESPUESTA — ESTADO DE CUENTA (opción 1 / consultar_pagos):
-Usa este esquema exacto. Cada bloque separado por una línea en blanco.
-
-Si tiene deuda pendiente:
+FORMATO DE RESPUESTA — ESTADO DE CUENTA (opción 1):
+No consultes la base de datos. Usa SOLO los datos del CONTEXTO y construye esta respuesta:
 ---
 📊 *Tu estado de cuenta*
 
-✅ Al día: X meses  ·  ⚠️ Pendientes: X meses
-💰 Deuda total: *$X.XXX*
+Para ver tu detalle completo de pagos, saldo y meses al día entra a tu portal:
+
+🔗 https://zensports.zenpra.ai/p/[club_slug del CONTEXTO]/[cedula del CONTEXTO]
 
 Para ponerte al día tienes estas opciones 👇
 
 [MEDIOS DE PAGO — ver reglas abajo]
-
-🔗 *Tu portal:* https://zensports.zenpra.ai/p/CLUB_SLUG/CEDULA
 ---
 
-Si está al día:
----
-🎉 ¡Todo al día, [nombre]! No tienes ninguna cuota pendiente ✅
-
-📊 *Tu estado de cuenta*
-✅ Meses al día: X  ·  Deuda: $0
-
-🔗 *Tu portal:* https://zensports.zenpra.ai/p/CLUB_SLUG/CEDULA
----
-
-REGLAS DE MEDIOS DE PAGO — SEPARACIÓN OBLIGATORIA:
+REGLAS DE MEDIOS DE PAGO — datos del CONTEXTO (campo config):
 Cada medio de pago va en su propio bloque separado por línea en blanco. NUNCA en la misma línea.
 
-Si existe qr_pago_url:
+Si existe config.qr_pago_url:
 📷 *QR de pago:*
-<url>
+<config.qr_pago_url>
 
-Si existe llave_pago (línea en blanco antes):
+Si existe config.llave_pago (línea en blanco antes):
 🔑 *Nequi / Daviplata:*
-<valor de llave_pago>
+<config.llave_pago>
 
-Si existe cuenta_bancaria (línea en blanco antes):
+Si existe config.cuenta_bancaria (línea en blanco antes):
 🏦 *Transferencia bancaria:*
 Banco: <banco>
 Tipo: <tipo>
@@ -960,10 +947,10 @@ Cuenta: <numero>
 
 Si no hay ningún medio configurado: "Para pagar comunícate con el administrador del club 🙏"
 
-PORTAL DEL ATLETA — OBLIGATORIO:
-La ÚLTIMA línea de la respuesta a consultar_pagos SIEMPRE es:
-🔗 *Tu portal:* https://zensports.zenpra.ai/p/CLUB_SLUG/CEDULA
-Reemplaza CLUB_SLUG con club_slug del CONTEXTO y CEDULA con cedula del CONTEXTO. Es mandatoria.`;
+PORTAL DEL ATLETA — OBLIGATORIO AL FINAL:
+La ÚLTIMA línea de la respuesta de estado de cuenta SIEMPRE es:
+🔗 *Tu portal:* https://zensports.zenpra.ai/p/[club_slug]/[cedula]
+Reemplaza con los valores reales del CONTEXTO. No uses texto literal "CLUB_SLUG" ni "CEDULA".`;
 
 const SYSTEM_ADMIN = `${SYSTEM_BASE}
 

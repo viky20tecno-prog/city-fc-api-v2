@@ -64,6 +64,13 @@ async function procesarClub(
   anio: number,
   testCedula: string | null = null,
 ) {
+  const clubSession   = String(club.config?.waha_session ?? '');
+  // Sin sesión propia: el club no ha conectado su WhatsApp → no enviar mensajes masivos
+  if (!clubSession) {
+    console.log(`[cobro-automatico] Club ${club.slug} sin waha_session — mensajes omitidos`);
+    return { mensajes: 0, mora_aplicada: 0, mensualidades_creadas: 0 };
+  }
+
   const valorMensual  = Number(club.config?.valor_mensualidad ?? DEFAULT_VALOR_MENSUALIDAD);
   const penalidad     = Number(club.config?.penalidad_mora    ?? DEFAULT_PENALIDAD_MORA);
   const llavePago     = String(club.config?.llave_pago        ?? '');
@@ -106,7 +113,7 @@ async function procesarClub(
         `💰 Valor: *$${valorMensual.toLocaleString('es-CO')}*\n\n` +
         `⏳ Organízate desde ya y evita recargos innecesarios.\n\n` +
         `En ${nombreClub} jugamos en equipo… y estar al día es parte del juego 💙⚽`,
-        false, qrPagoUrl,
+        clubSession, false, qrPagoUrl,
       );
       await logEnvio(supabase, club.id, j.cedula, 'preventivo', mesDest, anioDest);
       stats.mensajes++;
@@ -162,7 +169,7 @@ async function procesarClub(
         `📅 Tienes hasta el *día ${diaVenc}* para pagar sin penalidad\n\n` +
         (llavePago ? `📲 Paga con la llave:\n🔑 ${llavePago}\n\n` : '') +
         `💪 Paga hoy y juega tranquilo todo el mes ⚽🔥`,
-        !!qrPagoUrl, qrPagoUrl,
+        clubSession, !!qrPagoUrl, qrPagoUrl,
       );
       await logEnvio(supabase, club.id, j.cedula, 'activacion', mes, anio);
       stats.mensajes++;
@@ -184,7 +191,7 @@ async function procesarClub(
         `⚠️ Evita una penalidad de *$${penalidad.toLocaleString('es-CO')}*\n\n` +
         (llavePago ? `📲 Paga con la llave:\n🔑 ${llavePago}\n\n` : '') +
         `🔥 No lo dejes para el último minuto… el equipo cuenta contigo ⚽💪`,
-        !!qrPagoUrl, qrPagoUrl,
+        clubSession, !!qrPagoUrl, qrPagoUrl,
       );
       await logEnvio(supabase, club.id, j.cedula, 'recordatorio', mes, anio);
       stats.mensajes++;
@@ -206,7 +213,7 @@ async function procesarClub(
         `⚠️ Mañana tendrás penalidad de *$${penalidad.toLocaleString('es-CO')}*\n\n` +
         (llavePago ? `📲 Paga con la llave:\n🔑 ${llavePago}\n\n` : '') +
         `⏳ Estás a una jugada de seguir al día… no pierdas este partido ⚽🔥`,
-        !!qrPagoUrl, qrPagoUrl,
+        clubSession, !!qrPagoUrl, qrPagoUrl,
       );
       await logEnvio(supabase, club.id, j.cedula, 'vencimiento', mes, anio);
       stats.mensajes++;
@@ -258,7 +265,7 @@ async function procesarClub(
         `(incluye penalidad de $${penalidad.toLocaleString('es-CO')})\n\n` +
         (llavePago ? `📲 Paga con la llave:\n🔑 ${llavePago}\n\n` : '') +
         `🔁 Entre más pronto pagues, más rápido vuelves al juego ⚽`,
-        !!qrPagoUrl, qrPagoUrl,
+        clubSession, !!qrPagoUrl, qrPagoUrl,
       );
       await logEnvio(supabase, club.id, j.cedula, 'mora', mes, anio);
       stats.mensajes++;
@@ -277,6 +284,7 @@ async function procesarClub(
           `*${morosos.length} jugador${morosos.length > 1 ? 'es' : ''}* en mora:\n\n` +
           morosos.map(n => `• ${n}`).join('\n') + '\n\n' +
           `Gestiona los cobros desde el dashboard. 💼`,
+          clubSession,
         );
         stats.mensajes++;
       }
@@ -298,7 +306,7 @@ async function procesarClub(
         (llavePago ? `📲 Paga con la llave:\n🔑 ${llavePago}\n\n` : '') +
         `🚀 Un pago hoy, cero preocupaciones mañana\n\n` +
         `💪 ${nombreClub} sigue contando contigo ⚽🔥💯`,
-        !!qrPagoUrl, qrPagoUrl,
+        clubSession, !!qrPagoUrl, qrPagoUrl,
       );
       await logEnvio(supabase, club.id, j.cedula, 'reenganche', mes, anio);
       stats.mensajes++;
@@ -379,11 +387,7 @@ async function logEnvio(
   await supabase.from('wa_log_envios').insert({ club_id, cedula, tipo_mensaje, mes, anio });
 }
 
-async function enviarWA(celular: string, body: string, _conQR = false, _qrUrl = '') {
-  if (Deno.env.get('WA_COBRO_DISABLED') === 'true') {
-    console.log('[cobro-automatico] WA_COBRO_DISABLED=true — mensaje omitido para', celular);
-    return;
-  }
+async function enviarWA(celular: string, body: string, session: string, _conQR = false, _qrUrl = '') {
   if (!WAHA_URL) throw new Error('WAHA_URL no configurado');
   const numero = String(celular).replace(/\D/g, '').replace(/^57/, '');
   const chatId = `57${numero}@c.us`;
@@ -392,7 +396,7 @@ async function enviarWA(celular: string, body: string, _conQR = false, _qrUrl = 
   const res = await fetch(`${WAHA_URL}/api/sendText`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ chatId, text: body, session: WAHA_SESSION }),
+    body: JSON.stringify({ chatId, text: body, session }),
   });
   if (!res.ok) {
     const err = await res.text();
