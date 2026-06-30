@@ -1327,7 +1327,7 @@ async function generateReply(from, text) {
 router.get('/version', (req, res) => {
   const clubId = '2b728ed9-6ee2-4faf-a7f5-b001762c9cba';
   const token = generarTokenMorosos(clubId);
-  res.json({ token_prefix: token.slice(0, 8), secret_source: process.env.PDF_HMAC_SECRET ? 'env' : 'fallback' });
+  res.json({ token_prefix: token.slice(0, 8), secret_source: process.env.PDF_HMAC_SECRET ? 'env' : 'fallback', code_version: 'v2-portal-only-20260629' });
 });
 
 // ── Webhook verification (GET) ───────────────────────────────────────────────
