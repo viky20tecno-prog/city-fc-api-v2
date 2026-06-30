@@ -152,12 +152,13 @@ const TOOLS_BASE = [
   },
   {
     name: 'consultar_calendario',
-    description: 'Obtiene los próximos entrenamientos y eventos del club, opcionalmente filtrados por equipo.',
+    description: 'Obtiene los próximos eventos del club. Pasa tipo="ENTRENAMIENTO" para ver solo entrenamientos, tipo="PARTIDO" para ver solo partidos.',
     input_schema: {
       type: 'object',
       properties: {
         club_slug: { type: 'string' },
         equipo:    { type: 'string', description: 'Nombre del equipo para filtrar (opcional)' },
+        tipo:      { type: 'string', enum: ['PARTIDO', 'ENTRENAMIENTO', 'EVENTO'], description: 'Filtrar por tipo de evento (opcional)' },
       },
       required: ['club_slug'],
     },
@@ -418,8 +419,11 @@ async function runTool(name, input, contexto = {}) {
       const eventos = await db.getCalendario(club.slug, hoy, hasta);
       const filtrados = (input.equipo
         ? eventos.filter(e => !e.equipo || e.equipo.toUpperCase().includes(input.equipo.toUpperCase()))
-        : eventos).slice(0, 10);
-      if (!filtrados.length) return { texto: 'No hay eventos próximos en los próximos 30 días.' };
+        : eventos)
+        .filter(e => !input.tipo || e.tipo === input.tipo)
+        .slice(0, 10);
+      const tipoLabel = input.tipo === 'PARTIDO' ? 'partidos' : input.tipo === 'ENTRENAMIENTO' ? 'entrenamientos' : 'eventos';
+      if (!filtrados.length) return { texto: `No hay ${tipoLabel} próximos en los próximos 30 días.` };
 
       const clubNombre = contexto.club_nombre || club.config?.nombre || club.name;
       const emoji = emojiDeporte(contexto.config || club.config || {});
@@ -434,16 +438,16 @@ async function runTool(name, input, contexto = {}) {
         const hora = d.toISOString().split('T')[1]?.slice(0,5);
         const dia  = DIAS_ES[d.getDay()];
         const num  = d.getDate();
-        const tipoEmoji = e.tipo === 'PARTIDO' ? emoji : e.tipo === 'ENTRENAMIENTO' ? emoji : '📌';
-        const titulo = e.tipo === 'ENTRENAMIENTO' ? null : (e.titulo || e.tipo);
-        let linea = `${tipoEmoji} ${dia} ${num} · ${hora}`;
-        if (titulo) linea += ` — ${titulo}`;
+        const tipoEmoji = e.tipo === 'PARTIDO' ? emoji : e.tipo === 'ENTRENAMIENTO' ? '🏃' : '📌';
+        const titulo = e.tipo === 'ENTRENAMIENTO' ? (e.titulo || 'Entrenamiento') : (e.titulo || e.tipo);
+        let linea = `${tipoEmoji} ${dia} ${num} · ${hora} — ${titulo}`;
         if (e.lugar) linea += ` | ${e.lugar}`;
         porMes[mes].push(linea);
       }
 
       const bloques = Object.entries(porMes).map(([mes, lineas]) => `*${mes}*\n${lineas.join('\n')}`);
-      const texto = `📅 *Próximos eventos — ${clubNombre}*\n\n${bloques.join('\n\n')}`;
+      const encabezado = input.tipo === 'PARTIDO' ? 'Próximos partidos' : input.tipo === 'ENTRENAMIENTO' ? 'Próximos entrenamientos' : 'Próximos eventos';
+      const texto = `📅 *${encabezado} — ${clubNombre}*\n\n${bloques.join('\n\n')}`;
       return { texto };
     }
 
@@ -513,19 +517,19 @@ async function runTool(name, input, contexto = {}) {
       if (contexto.rol === 'jugador' && input.cedula !== String(contexto.cedula)) {
         return { error: 'No autorizado. Solo puedes consultar tu propia asistencia.' };
       }
-      const registros = await db.getAsistenciaJugador(input.club_id, input.cedula);
+      const { registros, total_eventos } = await db.getAsistenciaJugador(input.club_id, input.cedula, contexto.club_slug);
       const asistio    = registros.filter(r => r.estado === 'PRESENTE').length;
       const ausente    = registros.filter(r => r.estado === 'AUSENTE').length;
       const total      = registros.length;
-      const porcentaje = total > 0 ? Math.round((asistio / total) * 100) : 0;
+      const porcentaje = total_eventos > 0 ? Math.round((asistio / total_eventos) * 100) : 0;
       return {
-        total_eventos: total,
+        total_eventos,
         asistencias:   asistio,
         ausencias:     ausente,
         porcentaje_asistencia: porcentaje,
         ultimos: registros.slice(0, 8).map(r => ({
           tipo:   r.calendario?.tipo,
-          titulo: r.calendario?.titulo,
+          titulo: r.calendario?.titulo || (r.calendario?.tipo === 'ENTRENAMIENTO' ? 'Entrenamiento' : r.calendario?.tipo),
           fecha:  r.calendario?.fecha_inicio?.split('T')[0],
           estado: r.estado,
         })),
@@ -906,9 +910,9 @@ Escribe el número o cuéntame directamente 😊
 
 FLUJO:
 - Para pagos / estado de cuenta / opción 1 → NO uses ninguna herramienta. Responde directamente usando el formato de abajo con datos del CONTEXTO.
-- Para calendario → usa consultar_calendario con club_slug del contexto; el resultado tiene un campo "texto" ya formateado — envíalo TAL CUAL sin modificarlo
-- Para partidos → usa consultar_partidos con club_id del contexto
-- Para asistencia → usa consultar_asistencia con club_id y cedula del contexto
+- Para calendario / entrenamientos / opción 2 → usa consultar_calendario con club_slug del contexto y tipo="ENTRENAMIENTO"; envía el campo "texto" TAL CUAL sin modificarlo
+- Para partidos / opción 3 → usa consultar_calendario con club_slug del contexto y tipo="PARTIDO"; envía el campo "texto" TAL CUAL sin modificarlo
+- Para asistencia / opción 4 → usa consultar_asistencia con club_id y cedula del contexto
 - Para carnet / opción 5 → usa obtener_carnet, luego envía exactamente:
   "🪪 *Tu carnet digital — válido hoy:*\n{url}\n\n📌 Muéstralo en tiendas aliadas y patrocinadores. La fecha verde al pie confirma que es de hoy — un carnet de otro día no es válido."
 - "Hablar con el admin" / opción 6 → da el número contacto_admin del contexto

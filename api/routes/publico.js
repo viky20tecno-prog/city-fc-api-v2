@@ -50,11 +50,12 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
     const anioActual = new Date().getFullYear();
     // Buscar mensualidades por cedula Y por player_id por separado, luego combinar
     // (algunos registros solo tienen uno de los dos campos)
-    const [byCedula, byPlayerId, suspensiones, torneosJugador] = await Promise.all([
+    const [byCedula, byPlayerId, suspensiones, torneosJugador, uniformesJugador] = await Promise.all([
       db.supabase.from('mensualidades').select('*').eq('club_id', club.id).eq('cedula', String(cedula)),
       db.supabase.from('mensualidades').select('*').eq('club_id', club.id).eq('player_id', jugador.id),
       db.getSuspensionesJugador(club.id, cedula),
       db.getTorneos(club.id, String(cedula)),
+      db.getUniformes(club.id, String(cedula)),
     ]);
     // Deduplicar por id
     const mensMap = {};
@@ -203,6 +204,14 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
         valor_inscrito:  parseFloat(t.valor_inscrito) || parseFloat(t.valor_oficial) || 0,
         valor_pagado:    parseFloat(t.valor_pagado)   || 0,
         saldo_pendiente: parseFloat(t.saldo_pendiente) || 0,
+      })),
+      uniformes:        (uniformesJugador || []).map(u => ({
+        id:              u.id,
+        descripcion:     u.descripcion || u.tipo || '',
+        estado:          u.estado,
+        valor_oficial:   parseFloat(u.valor_oficial)   || 0,
+        valor_pagado:    parseFloat(u.valor_pagado)    || 0,
+        saldo_pendiente: parseFloat(u.saldo_pendiente) || 0,
       })),
       saldo_pendiente,
       total_pagado,
