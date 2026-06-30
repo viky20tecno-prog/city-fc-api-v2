@@ -951,10 +951,7 @@ Cuenta: <numero>
 
 Si no hay ningún medio configurado: "Para pagar comunícate con el administrador del club 🙏"
 
-PORTAL DEL ATLETA — OBLIGATORIO AL FINAL:
-La ÚLTIMA línea de la respuesta de estado de cuenta SIEMPRE es:
-🔗 *Tu portal:* https://zensports.zenpra.ai/p/[club_slug]/[cedula]
-Reemplaza con los valores reales del CONTEXTO. No uses texto literal "CLUB_SLUG" ni "CEDULA".`;
+Reemplaza [club_slug del CONTEXTO] y [cedula del CONTEXTO] con los valores reales. No uses texto literal "CLUB_SLUG" ni "CEDULA".`;
 
 const SYSTEM_ADMIN = `${SYSTEM_BASE}
 
