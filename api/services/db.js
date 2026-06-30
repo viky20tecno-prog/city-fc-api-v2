@@ -466,6 +466,7 @@ async function getMensualidadesPendientes(club_id, cedula) {
     .eq('cedula', String(cedula))
     .in('estado', ['PENDIENTE', 'PARCIAL', 'MORA'])
     .gt('valor_oficial', 0)
+    .order('anio',       { ascending: true })
     .order('numero_mes', { ascending: true });
   if (error) throw error;
   return data;

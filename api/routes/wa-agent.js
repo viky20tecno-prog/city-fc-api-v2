@@ -1447,9 +1447,9 @@ async function procesarPagoComprobante(from, contexto, analisis, mediaUrl) {
       monto:           monto,
       banco:           banco || 'No detectado',
       referencia:      referencia || null,
-      concepto:        'Mensualidad vía WhatsApp',
+      concepto:        'mensualidad_wa',
       url_comprobante: mediaUrl,
-      estado_revision: 'PENDIENTE',
+      estado_revision: 'pendiente',
       celular:         from,
     });
   } catch (e) {
