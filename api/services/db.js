@@ -548,6 +548,16 @@ async function getPedidoUniformes(club_id) {
   return data;
 }
 
+async function getPedidoUniformesByCedula(club_id, cedula) {
+  const { data, error } = await supabase
+    .from('pedido_uniformes')
+    .select('*')
+    .eq('club_id', club_id)
+    .eq('cedula', String(cedula));
+  if (error) throw error;
+  return data || [];
+}
+
 async function createPedidoUniforme(pedidoData) {
   const { data, error } = await supabase
     .from('pedido_uniformes')
@@ -1125,6 +1135,7 @@ module.exports = {
   createArbitrajePago,
   updateArbitrajePago,
   getPedidoUniformes,
+  getPedidoUniformesByCedula,
   createPedidoUniforme,
   updatePedidoUniforme,
   deletePedidoUniforme,

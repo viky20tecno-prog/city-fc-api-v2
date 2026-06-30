@@ -55,7 +55,7 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
       db.supabase.from('mensualidades').select('*').eq('club_id', club.id).eq('player_id', jugador.id),
       db.getSuspensionesJugador(club.id, cedula),
       db.getTorneos(club.id, String(cedula)),
-      db.getUniformes(club.id, String(cedula)),
+      db.getPedidoUniformesByCedula(club.id, String(cedula)),
     ]);
     // Deduplicar por id
     const mensMap = {};
@@ -207,11 +207,16 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
       })),
       uniformes:        (uniformesJugador || []).map(u => ({
         id:              u.id,
-        descripcion:     u.descripcion || u.tipo || '',
+        descripcion:     u.prendas || u.descripcion || u.tipo || 'Uniforme',
         estado:          u.estado,
-        valor_oficial:   parseFloat(u.valor_oficial)   || 0,
-        valor_pagado:    parseFloat(u.valor_pagado)    || 0,
-        saldo_pendiente: parseFloat(u.saldo_pendiente) || 0,
+        talla:           u.talla || '',
+        numero:          u.numero_estampar || u.numero || '',
+        nombre_estampar: u.nombre_estampar || '',
+        valor_oficial:   parseFloat(u.total) || parseFloat(u.valor_oficial) || 0,
+        valor_pagado:    parseFloat(u.valor_pagado) || 0,
+        saldo_pendiente: u.estado === 'PAGADO' || u.estado === 'ENTREGADO'
+          ? 0
+          : (parseFloat(u.total) || 0) - (parseFloat(u.valor_pagado) || 0),
       })),
       saldo_pendiente,
       total_pagado,
@@ -614,7 +619,7 @@ router.post('/otp/verificar', otpLimiter, async (req, res) => {
       db.supabase.from('mensualidades').select('*').eq('club_id', club.id).eq('player_id', jugador.id),
       db.getSuspensionesJugador(club.id, jugador.cedula),
       db.getTorneos(club.id, String(jugador.cedula)),
-      db.getUniformes(club.id, String(jugador.cedula)),
+      db.getPedidoUniformesByCedula(club.id, String(jugador.cedula)),
     ]);
     const mensMap = {};
     [...(byCedula.data || []), ...(byPlayerId.data || [])].forEach(m => { mensMap[m.id] = m; });
@@ -688,11 +693,16 @@ router.post('/otp/verificar', otpLimiter, async (req, res) => {
       })),
       uniformes: (uniformesJugador2 || []).map(u => ({
         id:              u.id,
-        descripcion:     u.descripcion || u.tipo || '',
+        descripcion:     u.prendas || u.descripcion || u.tipo || 'Uniforme',
         estado:          u.estado,
-        valor_oficial:   parseFloat(u.valor_oficial)   || 0,
-        valor_pagado:    parseFloat(u.valor_pagado)    || 0,
-        saldo_pendiente: parseFloat(u.saldo_pendiente) || 0,
+        talla:           u.talla || '',
+        numero:          u.numero_estampar || u.numero || '',
+        nombre_estampar: u.nombre_estampar || '',
+        valor_oficial:   parseFloat(u.total) || parseFloat(u.valor_oficial) || 0,
+        valor_pagado:    parseFloat(u.valor_pagado) || 0,
+        saldo_pendiente: u.estado === 'PAGADO' || u.estado === 'ENTREGADO'
+          ? 0
+          : (parseFloat(u.total) || 0) - (parseFloat(u.valor_pagado) || 0),
       })),
       saldo_pendiente,
       total_pagado,

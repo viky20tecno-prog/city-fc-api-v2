@@ -1,0 +1,13 @@
+actualizar_mensualidades.js
+agregar_pendientes.js
+completar_anio.js
+exportar_pendientes.js
+fill_prueba.sql
+fix_encoding_nombres.sql
+limpiar_categorias_jugadores.sql
+migracion_penalidad_y_wa_log.sql
+migracion_seguridad_wa_pruebas.sql
+migracion_wa_sessions.sql
+reset_prueba.sql
+pendientes_city_fc.csv
+supabase/
