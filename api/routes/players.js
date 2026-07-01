@@ -419,18 +419,40 @@ router.post('/bulk', async (req, res) => {
       const str = (v) => String(v || '').trim() || null;
       const up  = (v) => { const s = str(v); return s ? s.toUpperCase() : null; };
       const num = (v) => { const n = parseFloat(v); return isNaN(n) ? null : n; };
-      // Excel stores dates as serial numbers (days since 1900-01-00). Convert to ISO date.
+      // Excel guarda fechas como número de serie (días desde 1900-01-00), pero también
+      // llegan como texto DD/MM/AAAA (formato colombiano) o AAAA-MM-DD (ISO). Antes de
+      // esta corrección, un texto como "1998-06-15" se leía como serial (1998) y
+      // producía una fecha errónea (1905), y "15/06/1998" no calzaba con ningún caso
+      // válido y se guardaba tal cual, rompiendo la columna `date` de Postgres.
       const excelDate = (v) => {
         if (!v) return null;
-        const n = parseFloat(v);
-        if (!isNaN(n) && n > 1000) {
-          const d = new Date(Math.round((n - 25569) * 86400 * 1000));
+        const s = String(v).trim();
+        if (!s) return null;
+
+        if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(s)) {
+          const d = new Date(s);
           if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
         }
-        const s = String(v).trim();
+
+        const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+        if (dmy) {
+          const [, dd, mm, yyyy] = dmy;
+          const d = new Date(Date.UTC(+yyyy, +mm - 1, +dd));
+          if (!isNaN(d.getTime()) && d.getUTCMonth() === +mm - 1) return d.toISOString().split('T')[0];
+        }
+
+        // Solo tratar como serial de Excel si es puramente numérico (sin separadores de fecha)
+        if (/^\d+(\.\d+)?$/.test(s)) {
+          const n = parseFloat(s);
+          if (n > 1000) {
+            const d = new Date(Math.round((n - 25569) * 86400 * 1000));
+            if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+          }
+        }
+
         const d = new Date(s);
         if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
-        return s || null;
+        return null;
       };
       filas.push({
         club_id:              club.id,
