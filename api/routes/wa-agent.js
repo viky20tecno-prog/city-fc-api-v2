@@ -1625,11 +1625,18 @@ router.post('/waha', async (req, res) => {
       } else {
         await sendWAHA(from, 'Solo puedo procesar mensajes de texto por ahora. Escríbeme lo que necesitas 😊');
       }
-      await db.logClubActivity({
-        club_id: contexto?.club_id || null,
-        action: 'DEBUG_IMG_PAYLOAD', entity_type: 'debug', entity_id: from,
-        details: debugInfo,
-      });
+      const { data: dbgInsertData, error: dbgInsertError } = await db.supabase
+        .from('club_activity_logs')
+        .insert({
+          club_id: contexto?.club_id || null,
+          club_slug: contexto?.club_slug || null,
+          user_email: 'debug-wa-agent',
+          action: 'DEBUG_IMG_PAYLOAD', entity_type: 'debug', entity_id: from,
+          details: debugInfo,
+        })
+        .select();
+      debugInfo.dbgInsertError = dbgInsertError ? dbgInsertError.message : null;
+      debugInfo.dbgInsertOk    = !!dbgInsertData?.length;
       if (isDebugCall) return res.status(200).json({ status: 'ok', debugInfo });
       return res.status(200).json({ status: 'ok' });
     }
