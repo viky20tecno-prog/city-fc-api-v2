@@ -119,7 +119,7 @@ router.post('/', inscripcionLimiter, async (req, res) => {
     try {
       // TEMP-TEST-ROLLBACK: fuerza el fallo del insert solo en el club demo con cedula de prueba —
       // quitar este bloque después de validar el rollback (ver memoria reference_repos_vercel)
-      if (clubSlug === 'zensports-demo' && String(cedula).startsWith('FALLOTEST')) {
+      if (clubSlug === 'zensports-demo' && String(cedula).startsWith('9999999')) {
         throw new Error('TEST: fallo forzado para validar rollback');
       }
       await db.bulkInsert('mensualidades', mensualidades);
