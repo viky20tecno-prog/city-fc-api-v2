@@ -1674,6 +1674,7 @@ router.post('/waha', async (req, res) => {
       if (pendiente.expiresAt > Date.now()) {
         await db.logClubActivity({
           club_id:      contextoLimpio.club_id || null,
+          club_slug:    contextoLimpio.club_slug || null,
           action:       'NOTA_JUGADOR_COMPROBANTE',
           entity_type:  'pago',
           entity_id:    pendiente.pagoId,
