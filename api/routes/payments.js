@@ -323,6 +323,20 @@ async function actualizarUniforme(club_id, cedula, monto) {
     saldo_pendiente: nuevoSaldo,
     estado:          nuevoEstado,
   });
+
+  // El pedido de uniforme (prendas/talla/número) es una tabla aparte del cobro —
+  // si ya quedó pagado, reflejarlo también ahí para que no siga apareciendo
+  // como PENDIENTE en la pantalla de Uniformes.
+  if (nuevoEstado === 'AL_DIA') {
+    try {
+      const pedidos = await db.getPedidoUniformesByCedula(club_id, cedula);
+      const pedidoPendiente = pedidos.find(p => p.estado === 'PENDIENTE');
+      if (pedidoPendiente) await db.updatePedidoUniforme(pedidoPendiente.id, { estado: 'PAGADO' });
+    } catch (e) {
+      console.error('[actualizarUniforme] no se pudo marcar el pedido como pagado:', e.message);
+    }
+  }
+
   return { excedente };
 }
 
