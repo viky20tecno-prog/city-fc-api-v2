@@ -1592,7 +1592,7 @@ router.post('/waha', async (req, res) => {
 
       // TEMP-DEBUG-COMPROBANTE: loguear payload crudo para diagnosticar por qué falla
       // el análisis de Vision — quitar tras diagnosticar (ver memoria reference_repos_vercel)
-      db.logClubActivity({
+      await db.logClubActivity({
         club_id: contexto?.club_id || null,
         action: 'DEBUG_IMG_PAYLOAD', entity_type: 'debug', entity_id: from,
         details: { mediaUrl, mediaCaption, mediaType, rol, payload },
@@ -1603,7 +1603,7 @@ router.post('/waha', async (req, res) => {
         let esComprobante = false;
         try {
           const analisis = await analizarComprobanteConClaude(mediaUrl);
-          db.logClubActivity({
+          await db.logClubActivity({
             club_id: contexto?.club_id || null,
             action: 'DEBUG_VISION_OK', entity_type: 'debug', entity_id: from,
             details: { analisis },
@@ -1614,7 +1614,7 @@ router.post('/waha', async (req, res) => {
           }
         } catch (visionErr) {
           console.error('[wa-agent] Vision error:', visionErr.message);
-          db.logClubActivity({
+          await db.logClubActivity({
             club_id: contexto?.club_id || null,
             action: 'DEBUG_VISION_ERROR', entity_type: 'debug', entity_id: from,
             details: { error: visionErr.message },
