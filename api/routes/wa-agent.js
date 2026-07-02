@@ -1461,10 +1461,11 @@ async function procesarPagoComprobante(from, contexto, analisis, mediaUrl) {
   // Aplicar a la mensualidad más antigua pendiente
   const pendientes = await db.getMensualidadesPendientes(contexto.club_id, contexto.cedula);
   const clubSession = contexto.config?.waha_session || null;
+  const primerNombre = (contexto.nombre || '').trim().split(' ')[0] || contexto.nombre;
   let mensajeJugador, mensajeAdmin;
 
   if (!pendientes.length) {
-    mensajeJugador = `✅ *Comprobante recibido*\n\nGracias *${contexto.nombre}*, recibimos tu pago de *${montoFmt(monto)}*. No tienes mensualidades pendientes — el administrador lo revisará pronto 🙏`;
+    mensajeJugador = `🎉 *¡Gracias, ${primerNombre}!*\n\nRecibimos tu pago de *${montoFmt(monto)}* — no tienes mensualidades pendientes en este momento.\n\nYa casi queda confirmado — ¡gracias por estar al día! 💙`;
     mensajeAdmin   = `💰 *Pago recibido* (sin pendientes)\n\nJugador: *${contexto.nombre}* · C.C. ${contexto.cedula}\nMonto: ${montoFmt(monto)}\nBanco: ${banco || 'N/A'} · Ref: ${referencia || 'N/A'}`;
   } else {
     const target     = pendientes[0];
@@ -1491,7 +1492,7 @@ async function procesarPagoComprobante(from, contexto, analisis, mediaUrl) {
       ? '✅ Al día'
       : `⚠️ Parcial — saldo: ${montoFmt(nuevoSaldo)}`;
 
-    mensajeJugador = `✅ *Pago registrado*\n\nHola *${contexto.nombre}*, tu pago de *${montoFmt(monto)}* fue aplicado a *${mesNombre}*.\n\nEstado: ${estadoTexto}\n\nEl administrador confirmará tu comprobante 🙏`;
+    mensajeJugador = `🎉 *¡Recibido, ${primerNombre}!*\n\nTu pago de *${montoFmt(monto)}* quedó registrado y aplicado a *${mesNombre}* 🙌\n\nEstado: ${estadoTexto}\n\nYa casi queda confirmado — ¡gracias por estar al día! 💙`;
     mensajeAdmin   = `💰 *Comprobante auto-registrado*\n\nJugador: *${contexto.nombre}* · C.C. ${contexto.cedula}\nMonto: ${montoFmt(monto)}\nBanco: ${banco || 'N/A'} · Ref: ${referencia || 'N/A'}\nAplicado a: ${mesNombre}\nEstado: ${estadoTexto}`;
   }
 
