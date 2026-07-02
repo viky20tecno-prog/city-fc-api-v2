@@ -1455,6 +1455,13 @@ async function procesarPagoComprobante(from, contexto, analisis, mediaUrl) {
       tipo_origen:     'WA_COMPROBANTE',
     });
   } catch (e) {
+    // TEMP-DEBUG-CREATEPAGO: capturar el error real — quitar tras diagnosticar
+    // (ver memoria reference_repos_vercel)
+    await db.logClubActivity({
+      club_id: contexto?.club_id || null,
+      action: 'DEBUG_CREATEPAGO_ERROR', entity_type: 'debug', entity_id: from,
+      details: { message: e.message, code: e.code, details: e.details, hint: e.hint },
+    });
     console.error('[comprobante] createPago error:', e.message);
   }
 
