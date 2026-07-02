@@ -53,8 +53,7 @@ router.post('/', inscripcionLimiter, async (req, res) => {
     const club = await db.getClubBySlug(clubSlug);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
-    const CUOTA   = parseFloat(club.config?.valor_mensualidad) || 65000;
-    const TORNEOS = Array.isArray(club.config?.torneos_iniciales) ? club.config.torneos_iniciales : [];
+    const CUOTA = parseFloat(club.config?.valor_mensualidad) || 65000;
 
     // Deporte: usa el enviado por el form; si no viene, toma el único deporte del club
     const deportesClub = db.getDeportesClub(club);
@@ -118,21 +117,6 @@ router.post('/', inscripcionLimiter, async (req, res) => {
       });
     }
     await db.bulkInsert('mensualidades', mensualidades);
-
-    // Crear torneos (solo si el club configuró torneos en el onboarding)
-    if (TORNEOS.length > 0) {
-      const torneos = TORNEOS.map(t => ({
-        club_id:         club.id,
-        player_id:       player.id,
-        cedula:          String(cedula),
-        nombre_torneo:   t.nombre,
-        valor_oficial:   parseFloat(t.valor) || 0,
-        valor_pagado:    0,
-        saldo_pendiente: parseFloat(t.valor) || 0,
-        estado:          'PENDIENTE',
-      }));
-      await db.bulkInsert('torneos', torneos);
-    }
 
     // Enviar documentos de bienvenida por WhatsApp (fire-and-forget)
     const wahaSession = club.config?.waha_session;
