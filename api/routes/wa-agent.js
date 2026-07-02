@@ -1590,35 +1590,25 @@ router.post('/waha', async (req, res) => {
       const mediaCaption = payload?.caption || '';
       const mediaType    = payload?.type || '';
 
-      // TEMP-DEBUG-COMPROBANTE: loguear payload crudo para diagnosticar por qué falla
-      // el análisis de Vision — quitar tras diagnosticar (ver memoria reference_repos_vercel)
-      await db.logClubActivity({
-        club_id: contexto?.club_id || null,
-        action: 'DEBUG_IMG_PAYLOAD', entity_type: 'debug', entity_id: from,
-        details: { mediaUrl, mediaCaption, mediaType, rol, payload },
-      });
+      // TEMP-DEBUG-COMPROBANTE: si msgId empieza con TESTDEBUG, devuelve el diagnóstico
+      // directo en la respuesta HTTP en vez de depender de logs — quitar tras diagnosticar
+      // (ver memoria reference_repos_vercel)
+      const isDebugCall = String(msgId || '').startsWith('TESTDEBUG');
+      const debugInfo = { rol, mediaUrl, mediaCaption, mediaType, club_id: contexto?.club_id, payload };
 
       // Jugador envía imagen → intentar analizar como comprobante de pago
       if (rol === 'jugador' && mediaUrl && mediaType === 'image') {
         let esComprobante = false;
         try {
           const analisis = await analizarComprobanteConClaude(mediaUrl);
-          await db.logClubActivity({
-            club_id: contexto?.club_id || null,
-            action: 'DEBUG_VISION_OK', entity_type: 'debug', entity_id: from,
-            details: { analisis },
-          });
+          debugInfo.analisis = analisis;
           if (analisis.es_comprobante && analisis.monto > 0) {
             esComprobante = true;
             await procesarPagoComprobante(from, contexto, analisis, mediaUrl);
           }
         } catch (visionErr) {
           console.error('[wa-agent] Vision error:', visionErr.message);
-          await db.logClubActivity({
-            club_id: contexto?.club_id || null,
-            action: 'DEBUG_VISION_ERROR', entity_type: 'debug', entity_id: from,
-            details: { error: visionErr.message },
-          });
+          debugInfo.visionError = visionErr.message;
         }
 
         if (!esComprobante) {
@@ -1635,6 +1625,7 @@ router.post('/waha', async (req, res) => {
       } else {
         await sendWAHA(from, 'Solo puedo procesar mensajes de texto por ahora. Escríbeme lo que necesitas 😊');
       }
+      if (isDebugCall) return res.status(200).json({ status: 'ok', debugInfo });
       return res.status(200).json({ status: 'ok' });
     }
 
