@@ -1590,17 +1590,35 @@ router.post('/waha', async (req, res) => {
       const mediaCaption = payload?.caption || '';
       const mediaType    = payload?.type || '';
 
+      // TEMP-DEBUG-COMPROBANTE: loguear payload crudo para diagnosticar por qué falla
+      // el análisis de Vision — quitar tras diagnosticar (ver memoria reference_repos_vercel)
+      db.logClubActivity({
+        club_id: contexto?.club_id || null,
+        action: 'DEBUG_IMG_PAYLOAD', entity_type: 'debug', entity_id: from,
+        details: { mediaUrl, mediaCaption, mediaType, rol, payload },
+      });
+
       // Jugador envía imagen → intentar analizar como comprobante de pago
       if (rol === 'jugador' && mediaUrl && mediaType === 'image') {
         let esComprobante = false;
         try {
           const analisis = await analizarComprobanteConClaude(mediaUrl);
+          db.logClubActivity({
+            club_id: contexto?.club_id || null,
+            action: 'DEBUG_VISION_OK', entity_type: 'debug', entity_id: from,
+            details: { analisis },
+          });
           if (analisis.es_comprobante && analisis.monto > 0) {
             esComprobante = true;
             await procesarPagoComprobante(from, contexto, analisis, mediaUrl);
           }
         } catch (visionErr) {
           console.error('[wa-agent] Vision error:', visionErr.message);
+          db.logClubActivity({
+            club_id: contexto?.club_id || null,
+            action: 'DEBUG_VISION_ERROR', entity_type: 'debug', entity_id: from,
+            details: { error: visionErr.message },
+          });
         }
 
         if (!esComprobante) {
