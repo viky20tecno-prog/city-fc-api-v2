@@ -1625,6 +1625,11 @@ router.post('/waha', async (req, res) => {
       } else {
         await sendWAHA(from, 'Solo puedo procesar mensajes de texto por ahora. Escríbeme lo que necesitas 😊');
       }
+      await db.logClubActivity({
+        club_id: contexto?.club_id || null,
+        action: 'DEBUG_IMG_PAYLOAD', entity_type: 'debug', entity_id: from,
+        details: debugInfo,
+      });
       if (isDebugCall) return res.status(200).json({ status: 'ok', debugInfo });
       return res.status(200).json({ status: 'ok' });
     }
