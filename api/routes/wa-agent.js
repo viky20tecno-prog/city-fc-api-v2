@@ -1475,8 +1475,9 @@ async function procesarPagoComprobante(from, contexto, analisis, mediaUrl, buffe
     }
   }
 
+  let pagoCreado = null;
   try {
-    await db.createPago({
+    pagoCreado = await db.createPago({
       club_id:         contexto.club_id,
       player_id:       contexto.player_id || null,
       cedula:          String(contexto.cedula),
@@ -1492,10 +1493,32 @@ async function procesarPagoComprobante(from, contexto, analisis, mediaUrl, buffe
     console.error('[comprobante] createPago error:', e.message);
   }
 
-  const mensajeJugador = `🎉 *¡Recibido, ${primerNombre}!*\n\nTu comprobante de *${montoFmt(monto)}* ya está en revisión.\n\nEn cuanto el administrador lo confirme, quedará aplicado a tu mensualidad — ¡gracias por estar al día! 💙`;
+  // Si el pago es mayor a una mensualidad, preguntar en qué se aplica el resto
+  // — la respuesta se adjunta a Conciliación para que el admin la use al aprobar.
+  const cuotaMensual = parseFloat(contexto.config?.valor_mensualidad) || 65000;
+  const preguntaExcedente = pagoCreado && monto > cuotaMensual;
+
+  let mensajeJugador = `🎉 *¡Recibido, ${primerNombre}!*\n\nTu comprobante de *${montoFmt(monto)}* ya está en revisión.\n\nEn cuanto el administrador lo confirme, quedará aplicado a tu mensualidad — ¡gracias por estar al día! 💙`;
+  if (preguntaExcedente) {
+    mensajeJugador += `\n\n🤔 Vimos que el pago es mayor a una mensualidad (*${montoFmt(cuotaMensual)}*). ¿En qué se debe aplicar el resto? (uniforme, torneo, otra mensualidad, etc.)`;
+  }
   const mensajeAdmin   = `💰 *Comprobante recibido — pendiente de aprobar*\n\nJugador: *${contexto.nombre}* · C.C. ${contexto.cedula}\nMonto: ${montoFmt(monto)}\nBanco: ${banco || 'N/A'} · Ref: ${referencia || 'N/A'}\n\nRevísalo en Conciliación 👉`;
 
   await sendWAHA(from, mensajeJugador);
+
+  if (preguntaExcedente) {
+    try {
+      const sesionActual = await db.getWaSession(from);
+      await db.upsertWaSession(from, {
+        rol: 'jugador',
+        contexto: { ...contexto, _preguntaConceptoPago: { pagoId: pagoCreado.id, expiresAt: Date.now() + 10 * 60 * 1000 } },
+        messages: sesionActual?.messages || [],
+        last_interaction: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.error('[comprobante] no se pudo guardar la pregunta pendiente:', e.message);
+    }
+  }
 
   if (contexto.celular_admin) {
     await sendWAHA(contexto.celular_admin, mensajeAdmin, clubSession);
@@ -1641,6 +1664,35 @@ router.post('/waha', async (req, res) => {
 
     const text = payload.body;
     console.log(`[wa-agent] WAHA mensaje de ${from}: ${text}`);
+
+    // ¿Está respondiendo a "¿en qué se aplica el excedente?" de un comprobante reciente?
+    // Se intercepta antes del agente para no depender de que la IA lo interprete bien.
+    const sesionPrevia = await db.getWaSession(from);
+    const pendiente = sesionPrevia?.contexto?._preguntaConceptoPago;
+    if (pendiente) {
+      const { _preguntaConceptoPago, ...contextoLimpio } = sesionPrevia.contexto;
+      if (pendiente.expiresAt > Date.now()) {
+        await db.logClubActivity({
+          club_id:      contextoLimpio.club_id || null,
+          action:       'NOTA_JUGADOR_COMPROBANTE',
+          entity_type:  'pago',
+          entity_id:    pendiente.pagoId,
+          entity_label: contextoLimpio.nombre || from,
+          details:      { nota: text },
+        });
+        await db.upsertWaSession(from, {
+          rol: sesionPrevia.rol, contexto: contextoLimpio,
+          messages: sesionPrevia.messages || [], last_interaction: new Date().toISOString(),
+        });
+        await sendWAHA(from, '¡Gracias! Se lo pasamos al administrador para que lo revise al aprobar tu pago 🙏');
+        return res.status(200).json({ status: 'ok' });
+      }
+      // Venció la ventana de 10 min — limpiar el flag y seguir el flujo normal
+      await db.upsertWaSession(from, {
+        rol: sesionPrevia.rol, contexto: contextoLimpio,
+        messages: sesionPrevia.messages || [], last_interaction: sesionPrevia.last_interaction,
+      });
+    }
 
     let reply, pdfUrl;
     try {

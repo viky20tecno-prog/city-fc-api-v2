@@ -15,6 +15,25 @@ router.get('/', async (req, res) => {
       limit: Math.min(parseInt(limit) || 100, 500),
     });
 
+    // Adjuntar la nota del jugador (respuesta a "¿a qué aplicar el excedente?")
+    // a los pagos que aún no se concilian — se guarda en club_activity_logs para
+    // no necesitar una columna nueva en pagos.
+    const pendientesIds = pagos
+      .filter(p => p.estado_revision === 'pendiente' || p.estado_revision === 'excedente_pendiente')
+      .map(p => p.id);
+    if (pendientesIds.length > 0) {
+      const { data: notas } = await db.supabase
+        .from('club_activity_logs')
+        .select('entity_id, details, created_at')
+        .eq('club_id', club.id)
+        .eq('action', 'NOTA_JUGADOR_COMPROBANTE')
+        .in('entity_id', pendientesIds)
+        .order('created_at', { ascending: false });
+      const notaPorPago = {};
+      (notas || []).forEach(n => { if (!notaPorPago[n.entity_id]) notaPorPago[n.entity_id] = n.details?.nota; });
+      pagos.forEach(p => { if (notaPorPago[p.id]) p.nota_jugador = notaPorPago[p.id]; });
+    }
+
     res.json({
       success: true,
       club_id: req.club_id,
