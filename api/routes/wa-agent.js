@@ -1435,12 +1435,14 @@ async function reenviarMediaAlAdmin(adminCelular, playerNombre, mediaUrl, mediaC
 }
 
 // ── Procesar comprobante de pago detectado por Vision ───────────────────────
+// Solo registra el pago como pendiente — NO toca mensualidades. El valor se
+// aplica únicamente cuando el administrador lo aprueba desde Conciliación.
 async function procesarPagoComprobante(from, contexto, analisis, mediaUrl) {
-  const MESES_NOMBRE = ['','enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
   const { monto, banco, referencia } = analisis;
   const montoFmt = (n) => '$' + Math.round(n).toLocaleString('es-CO');
+  const clubSession = contexto.config?.waha_session || null;
+  const primerNombre = (contexto.nombre || '').trim().split(' ')[0] || contexto.nombre;
 
-  // Registrar el pago en la base de datos
   try {
     await db.createPago({
       club_id:         contexto.club_id,
@@ -1458,43 +1460,8 @@ async function procesarPagoComprobante(from, contexto, analisis, mediaUrl) {
     console.error('[comprobante] createPago error:', e.message);
   }
 
-  // Aplicar a la mensualidad más antigua pendiente
-  const pendientes = await db.getMensualidadesPendientes(contexto.club_id, contexto.cedula);
-  const clubSession = contexto.config?.waha_session || null;
-  const primerNombre = (contexto.nombre || '').trim().split(' ')[0] || contexto.nombre;
-  let mensajeJugador, mensajeAdmin;
-
-  if (!pendientes.length) {
-    mensajeJugador = `🎉 *¡Gracias, ${primerNombre}!*\n\nRecibimos tu pago de *${montoFmt(monto)}* — no tienes mensualidades pendientes en este momento.\n\nYa casi queda confirmado — ¡gracias por estar al día! 💙`;
-    mensajeAdmin   = `💰 *Pago recibido* (sin pendientes)\n\nJugador: *${contexto.nombre}* · C.C. ${contexto.cedula}\nMonto: ${montoFmt(monto)}\nBanco: ${banco || 'N/A'} · Ref: ${referencia || 'N/A'}`;
-  } else {
-    const target     = pendientes[0];
-    const mesNombre  = MESES_NOMBRE[target.numero_mes] || `mes ${target.numero_mes}`;
-    const pagadoPrev = parseFloat(target.valor_pagado) || 0;
-    const oficial    = parseFloat(target.valor_oficial) || 0;
-    const penalidad  = parseFloat(target.penalidad) || 0;
-    const total      = oficial + penalidad;
-    const nuevoPagado = pagadoPrev + monto;
-    const nuevoSaldo  = Math.max(0, total - nuevoPagado);
-    const nuevoEstado = nuevoPagado >= total ? 'AL_DIA' : 'PARCIAL';
-
-    try {
-      await db.updateMensualidad(target.id, {
-        valor_pagado:    nuevoPagado,
-        saldo_pendiente: nuevoSaldo,
-        estado:          nuevoEstado,
-      });
-    } catch (e) {
-      console.error('[comprobante] updateMensualidad error:', e.message);
-    }
-
-    const estadoTexto = nuevoEstado === 'AL_DIA'
-      ? '✅ Al día'
-      : `⚠️ Parcial — saldo: ${montoFmt(nuevoSaldo)}`;
-
-    mensajeJugador = `🎉 *¡Recibido, ${primerNombre}!*\n\nTu pago de *${montoFmt(monto)}* quedó registrado y aplicado a *${mesNombre}* 🙌\n\nEstado: ${estadoTexto}\n\nYa casi queda confirmado — ¡gracias por estar al día! 💙`;
-    mensajeAdmin   = `💰 *Comprobante auto-registrado*\n\nJugador: *${contexto.nombre}* · C.C. ${contexto.cedula}\nMonto: ${montoFmt(monto)}\nBanco: ${banco || 'N/A'} · Ref: ${referencia || 'N/A'}\nAplicado a: ${mesNombre}\nEstado: ${estadoTexto}`;
-  }
+  const mensajeJugador = `🎉 *¡Recibido, ${primerNombre}!*\n\nTu comprobante de *${montoFmt(monto)}* ya está en revisión.\n\nEn cuanto el administrador lo confirme, quedará aplicado a tu mensualidad — ¡gracias por estar al día! 💙`;
+  const mensajeAdmin   = `💰 *Comprobante recibido — pendiente de aprobar*\n\nJugador: *${contexto.nombre}* · C.C. ${contexto.cedula}\nMonto: ${montoFmt(monto)}\nBanco: ${banco || 'N/A'} · Ref: ${referencia || 'N/A'}\n\nRevísalo en Conciliación 👉`;
 
   await sendWAHA(from, mensajeJugador);
 

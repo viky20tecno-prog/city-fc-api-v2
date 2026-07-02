@@ -167,10 +167,10 @@ router.put('/:id', async (req, res) => {
       const cedulaFinal   = pago.cedula;
 
       let resultado = { excedente: 0 };
-      if (conceptoFinal === 'mensualidad')    resultado = await actualizarMensualidad(club.id, cedulaFinal, montoFinal);
+      if (conceptoFinal === 'mensualidad' || conceptoFinal === 'mensualidad_wa')
+        resultado = await actualizarMensualidad(club.id, cedulaFinal, montoFinal);
       else if (conceptoFinal === 'uniforme')  resultado = await actualizarUniforme(club.id, cedulaFinal, montoFinal);
       else if (conceptoFinal === 'torneo')    resultado = await actualizarTorneo(club.id, cedulaFinal, montoFinal, '');
-      // mensualidad_wa: ya fue auto-aplicada por el bot al recibir el comprobante, no re-aplicar
 
       const updated = await db.updatePago(id, { estado_revision: 'aprobado_manual' });
 
