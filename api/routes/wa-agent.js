@@ -1195,6 +1195,7 @@ async function identificarRol(celular, sessionData) {
     return {
       rol: 'jugador',
       contexto: {
+        player_id:     jugador.id,
         nombre:        `${jugador.nombre} ${jugador.apellidos}`.trim(),
         cedula:        jugador.cedula,
         club_id:       jugador.club_id,
@@ -1443,6 +1444,7 @@ async function procesarPagoComprobante(from, contexto, analisis, mediaUrl) {
   try {
     await db.createPago({
       club_id:         contexto.club_id,
+      player_id:       contexto.player_id || null,
       cedula:          String(contexto.cedula),
       monto:           monto,
       banco:           banco || 'No detectado',
@@ -1450,7 +1452,7 @@ async function procesarPagoComprobante(from, contexto, analisis, mediaUrl) {
       concepto:        'mensualidad_wa',
       url_comprobante: mediaUrl,
       estado_revision: 'pendiente',
-      celular:         from,
+      tipo_origen:     'WA_COMPROBANTE',
     });
   } catch (e) {
     console.error('[comprobante] createPago error:', e.message);
