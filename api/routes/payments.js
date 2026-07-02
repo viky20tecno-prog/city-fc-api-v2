@@ -350,14 +350,18 @@ async function actualizarTorneo(club_id, cedula, monto, filtroTorneo) {
   if (pendientes.length === 0) return { excedente: monto };
 
   const target      = pendientes[0];
-  const yaPageado   = parseFloat(target.valor_pagado) || 0;
-  const oficial     = parseFloat(target.valor_oficial) || 0;
-  const porPagar    = Math.max(0, oficial - yaPageado);
-  const pagoAplicar = Math.min(monto, porPagar);
-  const excedente   = monto - pagoAplicar;
-  const nuevoPagado = yaPageado + pagoAplicar;
-  const nuevoSaldo  = oficial - nuevoPagado;
-  const nuevoEstado = nuevoPagado >= oficial ? 'AL_DIA' : 'PARCIAL';
+  const yaPageado   = parseFloat(target.valor_pagado)   || 0;
+  const descuento   = parseFloat(target.descuento)      || 0;
+  // valor_inscrito es el precio real que le corresponde pagar al jugador (puede
+  // diferir de valor_oficial) — mismo criterio que PUT /api/torneos/:id.
+  const baseInscrito = parseFloat(target.valor_inscrito) || parseFloat(target.valor_oficial) || 0;
+  const valorNeto    = Math.max(0, baseInscrito - descuento);
+  const porPagar     = Math.max(0, valorNeto - yaPageado);
+  const pagoAplicar  = Math.min(monto, porPagar);
+  const excedente    = monto - pagoAplicar;
+  const nuevoPagado  = yaPageado + pagoAplicar;
+  const nuevoSaldo   = Math.max(0, valorNeto - nuevoPagado);
+  const nuevoEstado  = nuevoSaldo === 0 ? 'AL_DIA' : nuevoPagado > 0 ? 'ABONO' : 'PENDIENTE';
 
   await db.updateTorneo(target.id, {
     valor_pagado:    nuevoPagado,
