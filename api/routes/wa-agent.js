@@ -52,22 +52,44 @@ function generarTokenMorosos(clubId) {
 const API_BASE = 'https://api.zensports.zenpra.ai';
 
 // ── Analizar comprobante con Claude Vision (Haiku) ───────────────────────────
-async function analizarComprobanteConClaude(mediaUrl) {
+// WAHA guarda los archivos en disco efímero — pueden desaparecer en minutos.
+// Se descarga una sola vez y se reutiliza tanto para Vision como para guardarla
+// de forma permanente en Supabase Storage.
+async function descargarMediaWaha(mediaUrl) {
   const wahaBase = (process.env.WAHA_URL || '').replace(/\/$/, '');
   const headers  = {};
   if (process.env.WAHA_API_KEY && wahaBase && mediaUrl.startsWith(wahaBase)) {
     headers['X-Api-Key'] = process.env.WAHA_API_KEY;
   }
 
-  const imgRes = await fetch(mediaUrl, { headers });
-  if (!imgRes.ok) throw new Error(`No se pudo descargar imagen: ${imgRes.status}`);
+  const res = await fetch(mediaUrl, { headers });
+  if (!res.ok) throw new Error(`No se pudo descargar imagen: ${res.status}`);
 
-  const ct        = imgRes.headers.get('content-type') || 'image/jpeg';
+  const ct        = res.headers.get('content-type') || 'image/jpeg';
   const mediaType = ct.split(';')[0].trim();
-  const valid     = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  const buffer    = Buffer.from(await res.arrayBuffer());
+  return { buffer, mediaType };
+}
+
+// Sube la imagen del comprobante a Supabase Storage (permanente) y devuelve la
+// URL pública — reemplaza la URL de WAHA que expira en minutos.
+async function subirComprobanteAStorage(buffer, mediaType, clubSlug, cedula) {
+  const ext  = mediaType.split('/')[1] || 'jpg';
+  const path = `${clubSlug}/comprobantes/${cedula}-${Date.now()}.${ext}`;
+  const { error } = await db.supabase.storage.from('club-assets').upload(path, buffer, {
+    contentType: mediaType,
+    upsert: true,
+  });
+  if (error) throw error;
+  const { data } = db.supabase.storage.from('club-assets').getPublicUrl(path);
+  return data.publicUrl;
+}
+
+async function analizarComprobanteConClaude(buffer, mediaType) {
+  const valid = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
   if (!valid.includes(mediaType)) throw new Error(`Tipo no soportado: ${mediaType}`);
 
-  const b64 = Buffer.from(await imgRes.arrayBuffer()).toString('base64');
+  const b64 = buffer.toString('base64');
 
   const msg = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
@@ -1437,11 +1459,21 @@ async function reenviarMediaAlAdmin(adminCelular, playerNombre, mediaUrl, mediaC
 // ── Procesar comprobante de pago detectado por Vision ───────────────────────
 // Solo registra el pago como pendiente — NO toca mensualidades. El valor se
 // aplica únicamente cuando el administrador lo aprueba desde Conciliación.
-async function procesarPagoComprobante(from, contexto, analisis, mediaUrl) {
+async function procesarPagoComprobante(from, contexto, analisis, mediaUrl, buffer, mediaType) {
   const { monto, banco, referencia } = analisis;
   const montoFmt = (n) => '$' + Math.round(n).toLocaleString('es-CO');
   const clubSession = contexto.config?.waha_session || null;
   const primerNombre = (contexto.nombre || '').trim().split(' ')[0] || contexto.nombre;
+
+  // Guardar la imagen de forma permanente — WAHA la borra de su disco en minutos
+  let urlPermanente = mediaUrl;
+  if (buffer && mediaType) {
+    try {
+      urlPermanente = await subirComprobanteAStorage(buffer, mediaType, contexto.club_slug, contexto.cedula);
+    } catch (e) {
+      console.error('[comprobante] subirComprobanteAStorage error:', e.message);
+    }
+  }
 
   try {
     await db.createPago({
@@ -1452,7 +1484,7 @@ async function procesarPagoComprobante(from, contexto, analisis, mediaUrl) {
       banco:           banco || 'No detectado',
       referencia:      referencia || null,
       concepto:        'mensualidad_wa',
-      url_comprobante: mediaUrl,
+      url_comprobante: urlPermanente,
       estado_revision: 'pendiente',
       tipo_origen:     'WA_COMPROBANTE',
     });
@@ -1580,10 +1612,11 @@ router.post('/waha', async (req, res) => {
       if (rol === 'jugador' && mediaUrl && mediaType === 'image') {
         let esComprobante = false;
         try {
-          const analisis = await analizarComprobanteConClaude(mediaUrl);
+          const { buffer, mediaType: tipoReal } = await descargarMediaWaha(mediaUrl);
+          const analisis = await analizarComprobanteConClaude(buffer, tipoReal);
           if (analisis.es_comprobante && analisis.monto > 0) {
             esComprobante = true;
-            await procesarPagoComprobante(from, contexto, analisis, mediaUrl);
+            await procesarPagoComprobante(from, contexto, analisis, mediaUrl, buffer, tipoReal);
           }
         } catch (visionErr) {
           console.error('[wa-agent] Vision error:', visionErr.message);
