@@ -1586,29 +1586,37 @@ router.post('/waha', async (req, res) => {
     // ── Mensajes no-texto (imagen, audio, video, documento) ──────────────────
     if (!isText) {
       const { rol, contexto } = await identificarRol(from, null);
-      const mediaUrl     = payload?.media?.url || payload?.fileUrl || null;
+      // WAHA CORE no siempre manda payload.type en la raíz — el tipo real vive en
+      // payload._data.type. Sin este fallback, mediaType queda vacío y las imágenes
+      // nunca se reconocen como comprobante.
+      const mediaType    = payload?.type || payload?._data?.type || '';
+      let mediaUrl        = payload?.media?.url || payload?.fileUrl || null;
       const mediaCaption = payload?.caption || '';
-      const mediaType    = payload?.type || '';
 
-      // TEMP-DEBUG-COMPROBANTE: si msgId empieza con TESTDEBUG, devuelve el diagnóstico
-      // directo en la respuesta HTTP en vez de depender de logs — quitar tras diagnosticar
-      // (ver memoria reference_repos_vercel)
-      const isDebugCall = String(msgId || '').startsWith('TESTDEBUG');
-      const debugInfo = { rol, mediaUrl, mediaCaption, mediaType, club_id: contexto?.club_id, payload };
+      // WAHA a veces devuelve la URL del archivo apuntando a su propio localhost
+      // (http://localhost:8080/...), inalcanzable desde Vercel. Reescribir al host
+      // público de WAHA_URL manteniendo el path.
+      if (mediaUrl && process.env.WAHA_URL) {
+        try {
+          const u = new URL(mediaUrl);
+          if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') {
+            const wahaBase = process.env.WAHA_URL.replace(/\/$/, '');
+            mediaUrl = wahaBase + u.pathname + u.search;
+          }
+        } catch { /* URL malformada: dejar tal cual */ }
+      }
 
       // Jugador envía imagen → intentar analizar como comprobante de pago
       if (rol === 'jugador' && mediaUrl && mediaType === 'image') {
         let esComprobante = false;
         try {
           const analisis = await analizarComprobanteConClaude(mediaUrl);
-          debugInfo.analisis = analisis;
           if (analisis.es_comprobante && analisis.monto > 0) {
             esComprobante = true;
             await procesarPagoComprobante(from, contexto, analisis, mediaUrl);
           }
         } catch (visionErr) {
           console.error('[wa-agent] Vision error:', visionErr.message);
-          debugInfo.visionError = visionErr.message;
         }
 
         if (!esComprobante) {
@@ -1625,19 +1633,6 @@ router.post('/waha', async (req, res) => {
       } else {
         await sendWAHA(from, 'Solo puedo procesar mensajes de texto por ahora. Escríbeme lo que necesitas 😊');
       }
-      const { data: dbgInsertData, error: dbgInsertError } = await db.supabase
-        .from('club_activity_logs')
-        .insert({
-          club_id: contexto?.club_id || null,
-          club_slug: contexto?.club_slug || null,
-          user_email: 'debug-wa-agent',
-          action: 'DEBUG_IMG_PAYLOAD', entity_type: 'debug', entity_id: from,
-          details: debugInfo,
-        })
-        .select();
-      debugInfo.dbgInsertError = dbgInsertError ? dbgInsertError.message : null;
-      debugInfo.dbgInsertOk    = !!dbgInsertData?.length;
-      if (isDebugCall) return res.status(200).json({ status: 'ok', debugInfo });
       return res.status(200).json({ status: 'ok' });
     }
 
