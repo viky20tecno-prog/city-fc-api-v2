@@ -116,7 +116,13 @@ router.post('/', inscripcionLimiter, async (req, res) => {
         estado:          esPasado ? 'AL_DIA' : 'PENDIENTE',
       });
     }
-    await db.bulkInsert('mensualidades', mensualidades);
+    try {
+      await db.bulkInsert('mensualidades', mensualidades);
+    } catch (mensError) {
+      // No dejar un jugador huérfano sin mensualidades: revertir la creación
+      await db.supabase.from('players').delete().eq('id', player.id);
+      throw mensError;
+    }
 
     // Enviar documentos de bienvenida por WhatsApp (fire-and-forget)
     const wahaSession = club.config?.waha_session;

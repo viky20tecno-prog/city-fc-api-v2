@@ -513,7 +513,15 @@ router.post('/bulk', async (req, res) => {
         }
       }
 
-      if (mensualidades.length > 0) await db.bulkInsert('mensualidades', mensualidades);
+      if (mensualidades.length > 0) {
+        try {
+          await db.bulkInsert('mensualidades', mensualidades);
+        } catch (mensError) {
+          // No dejar jugadores huérfanos sin mensualidades: revertir toda la tanda
+          await db.supabase.from('players').delete().in('id', insertados.map(p => p.id));
+          throw mensError;
+        }
+      }
     }
 
     res.json({
