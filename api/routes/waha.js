@@ -224,4 +224,28 @@ router.delete('/desconectar', async (req, res) => {
   }
 });
 
+// GET /api/waha/media-proxy?url=<url de archivo WAHA> — reenvía el archivo con la API key
+// puesta del lado del servidor (el navegador no puede mandar headers custom a WAHA directo)
+router.get('/media-proxy', async (req, res) => {
+  try {
+    const url = req.query.url;
+    const wahaBase = (process.env.WAHA_URL || '').replace(/\/$/, '');
+    if (!url || !wahaBase || !String(url).startsWith(wahaBase)) {
+      return res.status(400).json({ success: false, error: 'URL inválida' });
+    }
+
+    const r = await fetch(url, { headers: wahaHeaders() });
+    if (!r.ok) return res.status(r.status).json({ success: false, error: `WAHA respondió ${r.status}` });
+
+    const contentType = r.headers.get('content-type') || 'application/octet-stream';
+    const buf = Buffer.from(await r.arrayBuffer());
+    res.set('Content-Type', contentType);
+    res.set('Cache-Control', 'private, max-age=3600');
+    res.send(buf);
+  } catch (e) {
+    console.error('[waha/media-proxy]', e.message);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 module.exports = router;
