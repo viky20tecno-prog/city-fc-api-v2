@@ -166,15 +166,44 @@ router.put('/:id', async (req, res) => {
       const conceptoFinal = concepto ?? pago.concepto;
       const cedulaFinal   = pago.cedula;
 
-      let resultado = { excedente: 0 };
-      if (conceptoFinal === 'mensualidad' || conceptoFinal === 'mensualidad_wa')
-        resultado = await actualizarMensualidad(club.id, cedulaFinal, montoFinal);
-      else if (conceptoFinal === 'uniforme')  resultado = await actualizarUniforme(club.id, cedulaFinal, montoFinal);
-      else if (conceptoFinal === 'torneo')    resultado = await actualizarTorneo(club.id, cedulaFinal, montoFinal, '');
+      // Reparto en varios conceptos (ej. mensualidad + uniforme en un solo pago).
+      // Si no viene `allocations`, se comporta igual que antes (un solo concepto).
+      const allocations = Array.isArray(req.body.allocations) && req.body.allocations.length > 0
+        ? req.body.allocations
+        : [{ concepto: conceptoFinal, monto: montoFinal }];
 
-      const updated = await db.updatePago(id, { estado_revision: 'aprobado_manual' });
+      const sumaAsignada = allocations.reduce((s, a) => s + (parseInt(a.monto) || 0), 0);
+      if (sumaAsignada > montoFinal) {
+        return res.status(400).json({ success: false, error: 'La suma de los conceptos no puede superar el monto pagado' });
+      }
 
-      const excedente = resultado?.excedente || 0;
+      let excedente = montoFinal - sumaAsignada; // lo que no se asignó a ningún concepto
+      const conceptosAplicados = [];
+
+      for (const alloc of allocations) {
+        const m = parseInt(alloc.monto);
+        if (!m || m <= 0) continue;
+
+        let resultado = { excedente: 0 };
+        if (alloc.concepto === 'mensualidad' || alloc.concepto === 'mensualidad_wa')
+          resultado = await actualizarMensualidad(club.id, cedulaFinal, m);
+        else if (alloc.concepto === 'uniforme')  resultado = await actualizarUniforme(club.id, cedulaFinal, m);
+        else if (alloc.concepto === 'torneo')    resultado = await actualizarTorneo(club.id, cedulaFinal, m, '');
+        else continue;
+
+        excedente += resultado?.excedente || 0;
+        conceptosAplicados.push({ concepto: alloc.concepto, monto: m - (resultado?.excedente || 0) });
+      }
+
+      const conceptoResumen = conceptosAplicados.length > 1
+        ? conceptosAplicados.map(c => c.concepto).join(' + ')
+        : conceptoFinal;
+
+      const updated = await db.updatePago(id, {
+        estado_revision: 'aprobado_manual',
+        ...(conceptosAplicados.length > 1 && { concepto: conceptoResumen }),
+      });
+
       let waEnviado = false;
       const player = await db.getPlayerByCedula(club.id, cedulaFinal);
 
@@ -198,18 +227,22 @@ router.put('/:id', async (req, res) => {
           const nombre        = `${player.nombre || ''} ${player.apellidos || ''}`.trim();
           const montoFmt      = montoFinal.toLocaleString('es-CO');
           const excedenteFmt  = excedente.toLocaleString('es-CO');
-          const conceptoLabel = conceptoFinal === 'uniforme' ? 'Uniforme'
-            : conceptoFinal === 'torneo' ? 'Torneo'
-            : 'Mensualidad';
+          const CONCEPTO_LABELS = { uniforme: 'Uniforme', torneo: 'Torneo', mensualidad: 'Mensualidad', mensualidad_wa: 'Mensualidad' };
+          const conceptoLabel = conceptosAplicados.length > 1
+            ? conceptosAplicados.map(c => CONCEPTO_LABELS[c.concepto] || c.concepto).join(' + ')
+            : (CONCEPTO_LABELS[conceptoFinal] || 'Mensualidad');
+          const portalUrl = `https://zensports.zenpra.ai/p/${club.slug}/${cedulaFinal}`;
 
           const mensaje = excedente > 0
             ? `✅ *¡Transacción exitosa!*\n\n` +
               `Hola ${nombre} 🎉 Tu pago de *$${montoFmt}* fue confirmado y aplicado a *${conceptoLabel}*.\n\n` +
               `💰 Tienes un saldo a favor de *$${excedenteFmt}*. ¿A qué concepto lo abonamos?\n` +
-              `Responde: *mensualidad*, *uniforme* o *torneo*`
+              `Responde: *mensualidad*, *uniforme* o *torneo*\n\n` +
+              `📲 Revisa tu estado de cuenta actualizado:\n${portalUrl}`
             : `✅ *¡Transacción exitosa!*\n\n` +
               `Hola ${nombre} 🎉 Tu pago de *$${montoFmt}* fue confirmado y aplicado a *${conceptoLabel}*.\n\n` +
-              `¡Gracias por mantener tu compromiso con el club! Sigue siendo un campeón 🏆`;
+              `¡Gracias por mantener tu compromiso con el club! Sigue siendo un campeón 🏆\n\n` +
+              `📲 Revisa tu estado de cuenta actualizado:\n${portalUrl}`;
 
           await sendWhatsAppMessage(player.celular, mensaje, club.config?.codigo_pais || '57');
           waEnviado = true;
