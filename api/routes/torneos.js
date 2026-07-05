@@ -64,7 +64,7 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { valor_pagado, descuento, concepto_descuento } = req.body;
+    const { valor_pagado, descuento, concepto_descuento, valor_oficial, valor_inscrito } = req.body;
 
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
@@ -74,25 +74,31 @@ router.put('/:id', async (req, res) => {
     if (!torneo) return res.status(404).json({ success: false, error: 'Inscripción no encontrada' });
 
     // Mantener valor anterior si no se envió el campo
-    const nuevoDesc   = descuento    !== undefined ? parseFloat(descuento)    : parseFloat(torneo.descuento)    || 0;
-    const nuevoPagado = valor_pagado !== undefined ? parseFloat(valor_pagado) : parseFloat(torneo.valor_pagado) || 0;
+    const nuevoDesc     = descuento      !== undefined ? parseFloat(descuento)      : parseFloat(torneo.descuento)      || 0;
+    const nuevoPagado   = valor_pagado   !== undefined ? parseFloat(valor_pagado)   : parseFloat(torneo.valor_pagado)   || 0;
+    const nuevoOficial  = valor_oficial  !== undefined ? parseFloat(valor_oficial)  : parseFloat(torneo.valor_oficial)  || 0;
+    const nuevoInscrito = valor_inscrito !== undefined ? parseFloat(valor_inscrito) : parseFloat(torneo.valor_inscrito) || 0;
 
-    const baseInscrito = parseFloat(torneo.valor_inscrito) || parseFloat(torneo.valor_oficial) || 0;
+    const baseInscrito = nuevoInscrito || nuevoOficial || 0;
     const valorNeto    = Math.max(0, baseInscrito - nuevoDesc);
     const saldo        = Math.max(0, valorNeto - nuevoPagado);
     const estado    = saldo === 0 ? 'AL_DIA' : nuevoPagado > 0 ? 'ABONO' : 'PENDIENTE';
 
-    const updates = { valor_pagado: nuevoPagado, descuento: nuevoDesc, saldo_pendiente: saldo, estado };
+    const updates = {
+      valor_pagado: nuevoPagado, descuento: nuevoDesc, saldo_pendiente: saldo, estado,
+      valor_oficial: nuevoOficial, valor_inscrito: nuevoInscrito,
+    };
     if (concepto_descuento !== undefined) updates.concepto_descuento = concepto_descuento;
 
     const updated = await db.updateTorneo(id, updates);
 
+    const montoCambio = valor_oficial !== undefined || valor_inscrito !== undefined;
     db.logClubActivity({
       club_id: club.id, club_slug: req.club_id,
       user_id: req.user?.id, user_email: req.user?.email, user_role: req.userRole, user_name: req.memberName,
-      action: 'TORNEO_PAGO_ACTUALIZADO', entity_type: 'torneo', entity_id: id,
+      action: montoCambio ? 'TORNEO_MONTO_CORREGIDO' : 'TORNEO_PAGO_ACTUALIZADO', entity_type: 'torneo', entity_id: id,
       entity_label: torneo.nombre_torneo,
-      details: { cedula: torneo.cedula, valor_pagado: nuevoPagado, descuento: nuevoDesc, estado },
+      details: { cedula: torneo.cedula, valor_pagado: nuevoPagado, descuento: nuevoDesc, valor_oficial: nuevoOficial, valor_inscrito: nuevoInscrito, estado },
     });
 
     res.json({ success: true, data: updated });
