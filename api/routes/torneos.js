@@ -17,7 +17,7 @@ router.get('/', async (req, res) => {
 // POST /api/torneos — inscribir jugadores en un torneo
 router.post('/', async (req, res) => {
   try {
-    const { cedulas, nombre_torneo, valor_oficial, valor_inscrito } = req.body;
+    const { cedulas, nombre_torneo, torneo_id, valor_oficial, valor_inscrito } = req.body;
     if (!cedulas || !nombre_torneo) {
       return res.status(400).json({ success: false, error: 'cedulas y nombre_torneo son requeridos' });
     }
@@ -34,6 +34,7 @@ router.post('/', async (req, res) => {
         player_id:       player.id,
         cedula:          String(cedula),
         nombre_torneo,
+        torneo_id:       torneo_id || null,
         valor_oficial:   parseFloat(valor_oficial)  || 0,
         valor_inscrito:  parseFloat(valor_inscrito) || parseFloat(valor_oficial) || 0,
         valor_pagado:    0,
