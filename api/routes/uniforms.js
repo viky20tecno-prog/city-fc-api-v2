@@ -35,7 +35,7 @@ router.post('/', async (req, res) => {
   try {
     const { cedula, nombre, tipo, campeon, nombre_estampar, talla, numero, prendas, total } = req.body;
 
-    if (!cedula || !nombre || !talla || !numero) {
+    if (!cedula || !nombre || !talla) {
       return res.status(400).json({ success: false, error: 'Faltan campos obligatorios' });
     }
 
@@ -69,7 +69,7 @@ router.post('/', async (req, res) => {
       campeon:         !!campeon,
       talla,
       nombre_estampar: nombre_estampar || '',
-      numero_estampar: String(numero),
+      numero_estampar: numero ? String(numero) : '',
       prendas:         prendas || '',
       total:           total ? Number(total) : 0,
       estado:          'PENDIENTE',
