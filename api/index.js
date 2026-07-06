@@ -73,7 +73,8 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
-app.use(express.json());
+// rawBody se conserva para verificar firmas de webhooks (Meta X-Hub-Signature-256)
+app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
 
 // Security headers
 app.use((req, res, next) => {
@@ -169,12 +170,14 @@ app.use('/api', async (req, res, next) => {
       return next();
     }
 
-    // Verificar si es miembro con rol — usar UUID del club, no el slug
+    // Verificar si es miembro con rol — club_members.club_id es el SLUG del club
+    // (ver migracion_roles_club_members.sql), no el UUID. Usar club.id acá hacía
+    // que ningún miembro invitado (ADMIN/ENTRENADOR) pasara nunca esta validación.
     const { data: member } = await supabaseAdmin
       .from('club_members')
       .select('role, activo, nombre')
       .eq('user_id', req.user.id)
-      .eq('club_id', club.id)
+      .eq('club_id', req.club_id)
       .single();
 
     if (!member || !member.activo) {

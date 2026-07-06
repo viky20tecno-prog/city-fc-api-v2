@@ -111,7 +111,8 @@ router.post('/', async (req, res) => {
   }
 
   // Vincular usuario al club (no bloquea la respuesta)
-  supabase.from('club_members').insert({ user_id: userId, club_id: clubData.id }).catch(() => {});
+  // club_members.club_id es el slug del club, no el UUID (ver migracion_roles_club_members.sql)
+  supabase.from('club_members').insert({ user_id: userId, club_id: slug, role: 'ADMIN', activo: true }).catch(() => {});
 
   const signIn = signInResult;
 

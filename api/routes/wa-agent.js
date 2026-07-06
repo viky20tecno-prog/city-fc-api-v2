@@ -49,6 +49,50 @@ function generarTokenMorosos(clubId) {
   return crypto.createHmac('sha256', PDF_HMAC_SECRET).update(`pdf:${clubId}:${dia}`).digest('hex');
 }
 
+// ── Verificación de origen de los webhooks entrantes ─────────────────────────
+// El rol (admin/entrenador/jugador) se deriva del número `from` del payload —
+// sin verificar que el request vino realmente de Meta/WAHA/Twilio, cualquiera
+// en internet puede suplantar a un admin real solo mandando su celular en el
+// body. Mientras el secreto correspondiente no esté configurado en el entorno
+// se deja pasar (para no tumbar el bot en producción sin coordinación), pero
+// queda logueado en cada request para que sea imposible no darse cuenta.
+function verificarFirmaMeta(req) {
+  const secret = process.env.META_APP_SECRET;
+  if (!secret) { console.warn('[wa-agent] ⚠️ META_APP_SECRET no configurado — webhook Meta sin verificar firma'); return true; }
+  const signature = req.headers['x-hub-signature-256'];
+  if (!signature || !req.rawBody) return false;
+  const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(req.rawBody).digest('hex');
+  try {
+    return signature.length === expected.length && crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  } catch { return false; }
+}
+
+function verificarSecretoWaha(req) {
+  const secret = process.env.WAHA_WEBHOOK_SECRET;
+  if (!secret) { console.warn('[wa-agent] ⚠️ WAHA_WEBHOOK_SECRET no configurado — webhook WAHA sin verificar origen'); return true; }
+  const recibido = req.headers['x-webhook-secret'];
+  if (!recibido) return false;
+  try {
+    const a = Buffer.from(recibido), b = Buffer.from(secret);
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  } catch { return false; }
+}
+
+function verificarFirmaTwilio(req) {
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  if (!token) { console.warn('[wa-agent] ⚠️ TWILIO_AUTH_TOKEN no configurado — webhook Twilio sin verificar firma'); return true; }
+  const signature = req.headers['x-twilio-signature'];
+  if (!signature) return false;
+  const url = `${API_BASE}/api/wa-agent/twilio`;
+  const params = req.body || {};
+  const data = Object.keys(params).sort().reduce((acc, k) => acc + k + params[k], url);
+  const expected = crypto.createHmac('sha1', token).update(data).digest('base64');
+  try {
+    const a = Buffer.from(signature), b = Buffer.from(expected);
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  } catch { return false; }
+}
+
 const API_BASE = 'https://api.zensports.zenpra.ai';
 
 // ── Analizar comprobante con Claude Vision (Haiku) ───────────────────────────
@@ -408,10 +452,13 @@ async function runTool(name, input, contexto = {}) {
       if (contexto.rol === 'jugador' && input.cedula !== String(contexto.cedula)) {
         return { error: 'No autorizado. Solo puedes consultar tu propio estado de cuenta.' };
       }
+      // Siempre usar el club_id del contexto autenticado, nunca el que pasa el LLM
+      const clubId = contexto.club_id;
+      if (!clubId) return { error: 'No se encontró el club en el contexto' };
       const anio      = new Date().getFullYear();
       const mesActual = new Date().getMonth() + 1;
-      const mensualidades = await db.getMensualidades(input.club_id, input.cedula);
-      const suspensiones  = await db.getSuspensionesJugador(input.club_id, input.cedula);
+      const mensualidades = await db.getMensualidades(clubId, input.cedula);
+      const suspensiones  = await db.getSuspensionesJugador(clubId, input.cedula);
       const suspActivas   = (suspensiones || []).filter(s => s.activa && (s.anio == null || parseInt(s.anio) === anio));
       const esSuspendido  = (n) => suspActivas.some(s => s.mes_inicio <= n && n <= s.mes_fin);
       const del_anio = mensualidades
@@ -421,7 +468,7 @@ async function runTool(name, input, contexto = {}) {
       const pendientes = causados.filter(m => m.estado !== 'AL_DIA' && m.estado !== 'EXENTO' && !esSuspendido(m.numero_mes));
       const al_dia     = causados.filter(m => m.estado === 'AL_DIA' || m.estado === 'EXENTO');
       const total_deuda = pendientes.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
-      const { data: clubData } = await db.supabase.from('clubs').select('config').eq('id', input.club_id).single();
+      const { data: clubData } = await db.supabase.from('clubs').select('config').eq('id', clubId).single();
       const qr_pago_url    = clubData?.config?.qr_pago_url    || null;
       const llave_pago     = clubData?.config?.llave_pago     || null;
       const cuenta_bancaria = clubData?.config?.cuenta_bancaria || null;
@@ -522,7 +569,9 @@ async function runTool(name, input, contexto = {}) {
     }
 
     if (name === 'consultar_partidos') {
-      const partidos = await db.getPartidos(input.club_id);
+      // Siempre usar el club_id del contexto autenticado, nunca el que pasa el LLM
+      if (!contexto.club_id) return { error: 'No se encontró el club en el contexto' };
+      const partidos = await db.getPartidos(contexto.club_id);
       const proximos = partidos
         .filter(p => new Date(p.fecha) >= new Date())
         .sort((a, b) => new Date(a.fecha) - new Date(b.fecha))
@@ -539,7 +588,9 @@ async function runTool(name, input, contexto = {}) {
       if (contexto.rol === 'jugador' && input.cedula !== String(contexto.cedula)) {
         return { error: 'No autorizado. Solo puedes consultar tu propia asistencia.' };
       }
-      const { registros, total_eventos } = await db.getAsistenciaJugador(input.club_id, input.cedula, contexto.club_slug);
+      // Siempre usar el club_id del contexto autenticado, nunca el que pasa el LLM
+      if (!contexto.club_id) return { error: 'No se encontró el club en el contexto' };
+      const { registros, total_eventos } = await db.getAsistenciaJugador(contexto.club_id, input.cedula, contexto.club_slug);
       const asistio    = registros.filter(r => r.estado === 'PRESENTE').length;
       const ausente    = registros.filter(r => r.estado === 'AUSENTE').length;
       const total      = registros.length;
@@ -559,18 +610,21 @@ async function runTool(name, input, contexto = {}) {
     }
 
     if (name === 'consultar_pagos_club') {
+      // Siempre usar el club_id del contexto autenticado, nunca el que pasa el LLM
+      const clubId = contexto.club_id;
+      if (!clubId) return { error: 'No se encontró el club en el contexto' };
       const anio = new Date().getFullYear();
       const supabase = db.supabase;
       const { data: players } = await supabase
         .from('players')
         .select('cedula, nombre, apellidos')
-        .eq('club_id', input.club_id)
+        .eq('club_id', clubId)
         .eq('activo', true);
       if (!players?.length) return { total: 0, al_dia: 0, pendientes: 0, deuda_total: 0 };
 
       let alDia = 0, pendientes = 0, deudaTotal = 0;
       for (const p of players) {
-        const mens = await db.getMensualidades(input.club_id, p.cedula);
+        const mens = await db.getMensualidades(clubId, p.cedula);
         const delAnio = mens.filter(m => String(m.anio) === String(anio));
         const pend = delAnio.filter(m => m.estado !== 'AL_DIA' && m.estado !== 'EXENTO');
         if (pend.length === 0) alDia++;
@@ -621,11 +675,16 @@ async function runTool(name, input, contexto = {}) {
     }
 
     if (name === 'enviar_recordatorio_pago') {
+      // Siempre usar el club_id/nombre del contexto autenticado, nunca lo que pasa el LLM —
+      // si no, un admin podría inducir al agente a mandar spam masivo con la sesión de OTRO club.
+      const clubId = contexto.club_id;
+      if (!clubId) return { error: 'No se encontró el club en el contexto' };
+      const clubNombre = contexto.club_nombre;
       const anio = new Date().getFullYear();
       const supabase = db.supabase;
 
       // Obtener la sesión propia del club — nunca usar el número central para masivos
-      const { data: clubRow } = await supabase.from('clubs').select('config').eq('id', input.club_id).single();
+      const { data: clubRow } = await supabase.from('clubs').select('config').eq('id', clubId).single();
       const clubSession = clubRow?.config?.waha_session;
       if (!clubSession) {
         return { error: 'El club no tiene número de WhatsApp propio configurado. Conéctalo desde el panel (Configuración → WhatsApp) para poder enviar recordatorios masivos.' };
@@ -634,7 +693,7 @@ async function runTool(name, input, contexto = {}) {
       const { data: players } = await supabase
         .from('players')
         .select('cedula, nombre, celular')
-        .eq('club_id', input.club_id)
+        .eq('club_id', clubId)
         .eq('activo', true)
         .not('celular', 'is', null);
       if (!players?.length) return { enviados: 0 };
@@ -645,11 +704,11 @@ async function runTool(name, input, contexto = {}) {
       let enviados = 0;
 
       for (const p of players) {
-        const mens = await db.getMensualidades(input.club_id, p.cedula);
+        const mens = await db.getMensualidades(clubId, p.cedula);
         const pend = mens.filter(m => String(m.anio) === String(anio) && m.estado !== 'AL_DIA' && m.estado !== 'EXENTO' && m.estado !== 'SUSPENDIDO');
         if (!pend.length) continue;
         const deuda = pend.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
-        const msg = aplicarTemplate(template, { nombre: p.nombre, deuda, meses: pend.length, club_nombre: input.club_nombre });
+        const msg = aplicarTemplate(template, { nombre: p.nombre, deuda, meses: pend.length, club_nombre: clubNombre });
         try {
           await sendWAHA(p.celular, msg, clubSession);
           enviados++;
@@ -660,11 +719,11 @@ async function runTool(name, input, contexto = {}) {
 
       // Guardar métricas en clubs.config
       try {
-        const { data: clubData } = await supabase.from('clubs').select('config').eq('id', input.club_id).single();
+        const { data: clubData } = await supabase.from('clubs').select('config').eq('id', clubId).single();
         const waMetrics = clubData?.config?.wa_metrics || {};
         waMetrics.ultimo_recordatorio = { fecha: new Date().toISOString(), enviados };
         waMetrics.total_recordatorios = (waMetrics.total_recordatorios || 0) + 1;
-        await supabase.from('clubs').update({ config: { ...(clubData?.config || {}), wa_metrics: waMetrics } }).eq('id', input.club_id);
+        await supabase.from('clubs').update({ config: { ...(clubData?.config || {}), wa_metrics: waMetrics } }).eq('id', clubId);
       } catch (e) { /* no crítico */ }
 
       return { enviados, mensaje: `Recordatorio enviado a ${enviados} jugador(es) con deuda pendiente.` };
@@ -688,7 +747,7 @@ async function runTool(name, input, contexto = {}) {
 
       const resumen = [];
       for (const ev of eventos) {
-        const lista = await db.getAsistencia(input.club_id, ev.id);
+        const lista = await db.getAsistencia(contexto.club_id, ev.id);
         const presentes = lista.filter(j => j.estado === 'PRESENTE').length;
         const ausentes  = lista.filter(j => j.estado === 'AUSENTE').length;
         const pendientes = lista.filter(j => j.estado === 'PENDIENTE').length;
@@ -1368,6 +1427,10 @@ router.get('/webhook', (req, res) => {
 
 // ── Webhook Meta (POST) ──────────────────────────────────────────────────────
 router.post('/webhook', async (req, res) => {
+  if (!verificarFirmaMeta(req)) {
+    console.warn('[wa-agent] Firma Meta inválida — request rechazado');
+    return res.status(401).json({ status: 'unauthorized' });
+  }
   try {
     const body = req.body;
     if (body.object !== 'whatsapp_business_account') return res.status(200).json({ status: 'ok' });
@@ -1545,6 +1608,10 @@ async function resolverLid(lidId) {
 
 // ── Webhook WAHA (POST) ──────────────────────────────────────────────────────
 router.post('/waha', async (req, res) => {
+  if (!verificarSecretoWaha(req)) {
+    console.warn('[wa-agent] Secreto WAHA inválido — request rechazado');
+    return res.status(401).json({ status: 'unauthorized' });
+  }
   try {
     const { event, payload } = req.body;
     if (event !== 'message' || payload?.fromMe) {
@@ -1719,6 +1786,11 @@ router.post('/waha', async (req, res) => {
 
 // ── Webhook Twilio sandbox (POST) ────────────────────────────────────────────
 router.post('/twilio', express.urlencoded({ extended: false }), async (req, res) => {
+  if (!verificarFirmaTwilio(req)) {
+    console.warn('[wa-agent] Firma Twilio inválida — request rechazado');
+    res.set('Content-Type', 'text/xml');
+    return res.status(401).send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+  }
   try {
     const from = req.body.From?.replace('whatsapp:+', '') || '';
     const text = req.body.Body || '';
