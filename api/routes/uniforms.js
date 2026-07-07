@@ -150,6 +150,15 @@ router.delete('/:id', async (req, res) => {
     if (!pedido) return res.status(404).json({ success: false, error: 'Pedido no encontrado' });
 
     await db.deletePedidoUniforme(id);
+
+    db.logClubActivity({
+      club_id: club.id, club_slug: req.club_id,
+      user_id: req.user?.id, user_email: req.user?.email, user_role: req.userRole, user_name: req.memberName,
+      action: 'UNIFORME_ELIMINADO', entity_type: 'uniforme', entity_id: id,
+      entity_label: `${pedido.nombre} #${pedido.numero_estampar}`,
+      details: { cedula: pedido.cedula, talla: pedido.talla, prendas: pedido.prendas, total: pedido.total, estado: pedido.estado },
+    });
+
     res.json({ success: true, message: 'Pedido eliminado' });
   } catch (error) {
     console.error('Error in DELETE /uniforms/:id:', error);
