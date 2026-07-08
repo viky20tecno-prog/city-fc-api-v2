@@ -402,6 +402,13 @@ router.post('/bulk', async (req, res) => {
       .eq('club_id', club.id);
     const existingSet = new Set((existing || []).map(p => String(p.cedula)));
 
+    // Plan gratis: tope de 20 jugadores — el import no puede saltárselo
+    let cupoDisponible = Infinity;
+    if (club.config?.plan === 'free') {
+      const jugadoresActuales = await db.getPlayers(club.id);
+      cupoDisponible = Math.max(0, 20 - jugadoresActuales.length);
+    }
+
     const errores = [];
     const filas   = [];
 
@@ -414,6 +421,9 @@ router.post('/bulk', async (req, res) => {
       if (!cedula)               return errores.push({ fila, cedula: '—', error: 'Cédula requerida' });
       if (!nombre)               return errores.push({ fila, cedula, error: 'Nombre requerido' });
       if (existingSet.has(cedula)) return errores.push({ fila, cedula, nombre: `${nombre} ${apellidos}`.trim(), error: 'Cédula ya registrada' });
+      if (filas.length >= cupoDisponible) {
+        return errores.push({ fila, cedula, nombre: `${nombre} ${apellidos}`.trim(), error: 'Tu plan gratis permite hasta 20 jugadores' });
+      }
 
       existingSet.add(cedula);
       const str = (v) => String(v || '').trim() || null;

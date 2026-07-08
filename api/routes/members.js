@@ -57,6 +57,11 @@ router.post('/', async (req, res) => {
       return res.status(403).json({ success: false, error: 'Solo el administrador puede agregar miembros' });
     }
 
+    const club = await db.getClubBySlug(req.club_id);
+    if (club?.config?.plan === 'free') {
+      return res.status(403).json({ success: false, error: 'Tu plan gratis permite solo 1 administrador. Actualiza tu plan para invitar más miembros.' });
+    }
+
     const { email, nombre, role = 'ENTRENADOR', celular } = req.body;
     if (!email || !nombre) {
       return res.status(400).json({ success: false, error: 'email y nombre son requeridos' });

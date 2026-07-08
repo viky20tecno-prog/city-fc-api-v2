@@ -31,12 +31,17 @@ function generarSlug(nombre) {
 }
 
 router.post('/', async (req, res) => {
-  const { nombre_club, ciudad, email, password, nombre_admin, celular_admin, color, codigo_pais, deporte, deportes } = req.body || {};
+  const { nombre_club, ciudad, email, password, nombre_admin, celular_admin, color, codigo_pais, deporte, deportes, plan } = req.body || {};
 
   // Normalizar deportes: acepta array nuevo o string legacy
   const deportesArray = Array.isArray(deportes) && deportes.length > 0
     ? deportes
     : (deporte ? [deporte] : ['futbol']);
+
+  // Único plan que cambia el registro es 'free' (permanente, sin trial). Cualquier otro
+  // valor (starter/pro/scale/enterprise/demo o ausente) entra al trial de siempre —
+  // los planes pagos se activan manualmente por WhatsApp, no desde el registro.
+  const esFree = plan === 'free';
 
   if (!nombre_club?.trim() || !email?.trim() || !password) {
     return res.status(400).json({ success: false, error: 'Nombre del club, email y contraseña son requeridos.' });
@@ -81,11 +86,25 @@ router.post('/', async (req, res) => {
         color:             color || '#00AAFF',
         subtitulo:         '',
         codigo_pais:       codigo_pais || '57',
-        plan:              'trial',
-        trial_ends_at:     new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
+        plan:              esFree ? 'free' : 'trial',
+        trial_ends_at:     esFree ? null : new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
         deporte:           deportesArray[0],
         deportes:          deportesArray,
-        modulos: {
+        modulos: esFree ? {
+          dashboard:    true,
+          jugadores:    true,
+          uniformes:    false,
+          arbitraje:    false,
+          cobro:        false,
+          whatsapp:     false,
+          conciliacion: false,
+          calendario:   false,
+          equipos:      false,
+          torneos:      false,
+          finanzas:     false,
+          plantillas:   false,
+          documentos:   false,
+        } : {
           dashboard:    true,
           jugadores:    true,
           uniformes:    true,

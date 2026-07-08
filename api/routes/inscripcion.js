@@ -65,6 +65,14 @@ router.post('/', inscripcionLimiter, async (req, res) => {
       return res.status(409).json({ success: false, error: 'Ya existe un jugador con esa cédula' });
     }
 
+    // Plan gratis: tope de 20 jugadores
+    if (club.config?.plan === 'free') {
+      const jugadoresActuales = await db.getPlayers(club.id);
+      if (jugadoresActuales.length >= 20) {
+        return res.status(403).json({ success: false, error: 'Tu plan gratis permite hasta 20 jugadores. Actualiza tu plan para inscribir más.' });
+      }
+    }
+
     const anioActual  = new Date().getFullYear();
     const mesActual   = new Date().getMonth() + 1;
     const nombreCompleto = `${nombre} ${apellidos}`.trim();
