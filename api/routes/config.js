@@ -29,7 +29,7 @@ router.get('/', async (req, res) => {
       club_id:           club.slug,
       nombre:            club.config?.nombre            || club.name,
       ciudad:            club.config?.ciudad            || '',
-      valor_mensualidad: club.config?.valor_mensualidad || 65000,
+      valor_mensualidad: club.config?.valor_mensualidad ?? 65000,
       color:             club.config?.color             || '#00AAFF',
       subtitulo:         club.config?.subtitulo         || '',
       logo_url:          club.config?.logo_url          || null,
@@ -40,8 +40,8 @@ router.get('/', async (req, res) => {
       onboarding_completed: club.config?.onboarding_completed || false,
       prendas_uniforme:  club.config?.prendas_uniforme  || [],
       whatsapp:                   club.config?.whatsapp                   || '',
-      dias_gracia_mora:           club.config?.dias_gracia_mora           || 7,
-      penalidad_mora:             club.config?.penalidad_mora             || 5000,
+      dias_gracia_mora:           club.config?.dias_gracia_mora           ?? 7,
+      penalidad_mora:             club.config?.penalidad_mora             ?? 5000,
       torneos_iniciales:          club.config?.torneos_iniciales          || [],
       categorias_jugadores:       club.config?.categorias_jugadores       || [],
       categorias_finanzas_ingreso: club.config?.categorias_finanzas_ingreso || [],
@@ -101,6 +101,50 @@ router.patch('/', async (req, res) => {
     return res.json({ success: true, config: updatedConfig });
   } catch (err) {
     console.error('Error in PATCH /config:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/config/aplicar-mensualidad-pendientes?club_id=city-fc
+ * Aplica el valor_mensualidad actual del club a las mensualidades que todavía
+ * están abiertas (PENDIENTE/PARCIAL/MORA) del mes en curso en adelante. No toca
+ * PAGADO ni EXENTO (deuda ya saldada o exonerada) ni meses ya pasados (historial).
+ * Acción explícita del admin — no se dispara sola al cambiar el config.
+ */
+router.post('/aplicar-mensualidad-pendientes', async (req, res) => {
+  try {
+    const club_id = req.club_id || req.query.club_id;
+    if (!club_id) return res.status(400).json({ success: false, error: 'club_id requerido' });
+
+    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+    const { data: club, error: fetchErr } = await supabase
+      .from('clubs').select('id, config').eq('slug', club_id).single();
+    if (fetchErr || !club) {
+      return res.status(404).json({ success: false, error: 'Club no encontrado' });
+    }
+
+    const nuevoValor = parseFloat(club.config?.valor_mensualidad ?? 65000);
+
+    const ahora    = new Date();
+    const anioAct  = ahora.getFullYear();
+    const mesAct   = ahora.getMonth() + 1;
+    const filtroDesdeMesActual = `anio.gt.${anioAct},and(anio.eq.${anioAct},numero_mes.gte.${mesAct})`;
+
+    const { data, error } = await supabase
+      .from('mensualidades')
+      .update({ valor_oficial: nuevoValor })
+      .eq('club_id', club.id)
+      .in('estado', ['PENDIENTE', 'PARCIAL', 'MORA'])
+      .or(filtroDesdeMesActual)
+      .select('id');
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    return res.json({ success: true, nuevo_valor: nuevoValor, actualizadas: data?.length || 0 });
+  } catch (err) {
+    console.error('Error in POST /config/aplicar-mensualidad-pendientes:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
