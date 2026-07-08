@@ -30,6 +30,19 @@ function generarSlug(nombre) {
     .slice(0, 40);
 }
 
+// Los logs de producción muestran POST /registro colgado 300s completos y
+// muriendo con 504 (Vercel Runtime Timeout) — la llamada a Supabase Auth no
+// tiene timeout propio, así que si Supabase no responde, el request cuelga
+// hasta que Vercel lo mata a la fuerza, dejando al cliente sin ninguna
+// respuesta por 5 minutos. Esto falla rápido en vez de eso.
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`TIMEOUT:${label}`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 router.post('/', async (req, res) => {
   const { nombre_club, ciudad, email, password, nombre_admin, celular_admin, color, codigo_pais, deporte, deportes, plan } = req.body || {};
 
@@ -53,12 +66,27 @@ router.post('/', async (req, res) => {
   const slug = generarSlug(nombre_club.trim());
 
   // Crear usuario en Supabase Auth
-  const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-    email:         email.trim().toLowerCase(),
-    password,
-    email_confirm: true,
-    user_metadata: { nombre: nombre_admin || '', club_slug: slug },
-  });
+  let authData, authError;
+  try {
+    ({ data: authData, error: authError } = await withTimeout(
+      supabase.auth.admin.createUser({
+        email:         email.trim().toLowerCase(),
+        password,
+        email_confirm: true,
+        user_metadata: { nombre: nombre_admin || '', club_slug: slug },
+      }),
+      20000,
+      'createUser',
+    ));
+  } catch (err) {
+    if (err.message?.startsWith('TIMEOUT')) {
+      return res.status(504).json({
+        success: false,
+        error: 'El servidor está tardando más de lo normal en responder. Espera un minuto e intenta iniciar sesión antes de registrarte de nuevo — es posible que tu cuenta ya haya quedado creada.',
+      });
+    }
+    throw err;
+  }
 
   if (authError) {
     const msg = authError.message?.toLowerCase() || '';
@@ -72,51 +100,66 @@ router.post('/', async (req, res) => {
   const emailNorm = email.trim().toLowerCase();
 
   // Crear club + sign-in en paralelo (ambos dependen de userId pero no entre sí)
-  const [{ data: clubData, error: clubError }, signInResult] = await Promise.all([
-    supabase.from('clubs').insert({
-      slug,
-      name:          nombre_club.trim(),
-      is_active:     true,
-      owner_user_id: userId,
-      celular_admin: celular_admin || null,
-      config: {
-        nombre:            nombre_club.trim(),
-        ciudad:            ciudad?.trim() || '',
-        valor_mensualidad: 0,
-        color:             color || '#00AAFF',
-        subtitulo:         '',
-        codigo_pais:       codigo_pais || '57',
-        plan:              esFree ? 'free' : 'trial',
-        trial_ends_at:     esFree ? null : new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
-        deporte:           deportesArray[0],
-        deportes:          deportesArray,
-        modulos: esFree ? {
-          dashboard:    true,
-          jugadores:    true,
-          uniformes:    false,
-          arbitraje:    false,
-          cobro:        false,
-          whatsapp:     false,
-          conciliacion: false,
-          calendario:   false,
-          equipos:      false,
-          torneos:      false,
-          finanzas:     false,
-          plantillas:   false,
-          documentos:   false,
-        } : {
-          dashboard:    true,
-          jugadores:    true,
-          uniformes:    true,
-          arbitraje:    deportesArray.includes('futbol'),
-          cobro:        true,
-          whatsapp:     true,
-          conciliacion: true,
-        },
-      },
-    }).select('id').single(),
-    supabase.auth.signInWithPassword({ email: emailNorm, password }),
-  ]);
+  let clubData, clubError, signInResult;
+  try {
+    [{ data: clubData, error: clubError }, signInResult] = await withTimeout(
+      Promise.all([
+        supabase.from('clubs').insert({
+          slug,
+          name:          nombre_club.trim(),
+          is_active:     true,
+          owner_user_id: userId,
+          celular_admin: celular_admin || null,
+          config: {
+            nombre:            nombre_club.trim(),
+            ciudad:            ciudad?.trim() || '',
+            valor_mensualidad: 0,
+            color:             color || '#00AAFF',
+            subtitulo:         '',
+            codigo_pais:       codigo_pais || '57',
+            plan:              esFree ? 'free' : 'trial',
+            trial_ends_at:     esFree ? null : new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
+            deporte:           deportesArray[0],
+            deportes:          deportesArray,
+            modulos: esFree ? {
+              dashboard:    true,
+              jugadores:    true,
+              uniformes:    false,
+              arbitraje:    false,
+              cobro:        false,
+              whatsapp:     false,
+              conciliacion: false,
+              calendario:   false,
+              equipos:      false,
+              torneos:      false,
+              finanzas:     false,
+              plantillas:   false,
+              documentos:   false,
+            } : {
+              dashboard:    true,
+              jugadores:    true,
+              uniformes:    true,
+              arbitraje:    deportesArray.includes('futbol'),
+              cobro:        true,
+              whatsapp:     true,
+              conciliacion: true,
+            },
+          },
+        }).select('id').single(),
+        supabase.auth.signInWithPassword({ email: emailNorm, password }),
+      ]),
+      20000,
+      'crearClub',
+    );
+  } catch (err) {
+    if (err.message?.startsWith('TIMEOUT')) {
+      return res.status(504).json({
+        success: false,
+        error: 'El servidor está tardando más de lo normal en responder. Espera un minuto e intenta iniciar sesión antes de registrarte de nuevo — es posible que tu cuenta ya haya quedado creada.',
+      });
+    }
+    throw err;
+  }
 
   if (clubError) {
     await supabase.auth.admin.deleteUser(userId).catch(() => {});

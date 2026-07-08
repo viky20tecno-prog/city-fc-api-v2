@@ -43,6 +43,11 @@ const requireAdmin = (req, res, next) => {
 
 const app = express();
 
+// Vercel sirve la app detrás de su propio proxy — sin esto, Express no confía
+// en X-Forwarded-For y express-rate-limit no puede identificar la IP real del
+// cliente (ver warning "trust proxy setting is false" en los logs).
+app.set('trust proxy', 1);
+
 // Supabase admin client (service role) — usado para validación de club
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
