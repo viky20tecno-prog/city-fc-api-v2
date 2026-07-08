@@ -44,7 +44,6 @@ function withTimeout(promise, ms, label) {
 }
 
 router.post('/', async (req, res) => {
-  console.log('[registro] handler invocado');
   const { nombre_club, ciudad, email, password, nombre_admin, celular_admin, color, codigo_pais, deporte, deportes, plan } = req.body || {};
 
   // Normalizar deportes: acepta array nuevo o string legacy
@@ -67,7 +66,6 @@ router.post('/', async (req, res) => {
   const slug = generarSlug(nombre_club.trim());
 
   // Crear usuario en Supabase Auth
-  console.log(`[registro] ${slug}: iniciando createUser`);
   let authData, authError;
   try {
     ({ data: authData, error: authError } = await withTimeout(
@@ -80,9 +78,7 @@ router.post('/', async (req, res) => {
       20000,
       'createUser',
     ));
-    console.log(`[registro] ${slug}: createUser resuelto, authError=${!!authError}`);
   } catch (err) {
-    console.error(`[registro] ${slug}: createUser catch — ${err?.message}`);
     if (err.message?.startsWith('TIMEOUT')) {
       return res.status(504).json({
         success: false,
@@ -102,7 +98,6 @@ router.post('/', async (req, res) => {
 
   const userId = authData.user.id;
   const emailNorm = email.trim().toLowerCase();
-  console.log(`[registro] ${slug}: userId=${userId}, iniciando crearClub+signIn`);
 
   // Crear club + sign-in en paralelo (ambos dependen de userId pero no entre sí)
   let clubData, clubError, signInResult;
@@ -156,9 +151,7 @@ router.post('/', async (req, res) => {
       20000,
       'crearClub',
     );
-    console.log(`[registro] ${slug}: crearClub+signIn resuelto, clubError=${!!clubError}`);
   } catch (err) {
-    console.error(`[registro] ${slug}: crearClub catch — ${err?.message}`);
     if (err.message?.startsWith('TIMEOUT')) {
       return res.status(504).json({
         success: false,
@@ -201,8 +194,8 @@ router.post('/', async (req, res) => {
   return res.status(201).json({
     success:       true,
     club_slug:     slug,
-    access_token:  signIn?.session?.access_token  || null,
-    refresh_token: signIn?.session?.refresh_token || null,
+    access_token:  signIn?.data?.session?.access_token  || null,
+    refresh_token: signIn?.data?.session?.refresh_token || null,
   });
 });
 
