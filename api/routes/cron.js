@@ -26,6 +26,21 @@ function verifyCronSecret(req, res) {
   return true;
 }
 
+// GET /api/cron/warmup — llamado por Vercel Cron cada pocos minutos para evitar
+// cold starts en funciones poco usadas (ej. /api/registro, que casi no recibe
+// tráfico porque el registro real pasa por consultor de WhatsApp). Hace un query
+// mínimo real para mantener también viva la conexión a Supabase, no solo el
+// contenedor de Vercel.
+router.all('/warmup', async (req, res) => {
+  if (!verifyCronSecret(req, res)) return;
+  try {
+    await db.getAllActiveClubs();
+    res.json({ success: true, timestamp: new Date().toISOString() });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // POST /api/cron/emails — llamado por Vercel Cron diariamente
 // También acepta GET para facilitar pruebas manuales desde el admin
 router.all('/emails', async (req, res) => {
