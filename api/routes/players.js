@@ -67,7 +67,7 @@ router.patch('/:cedula', async (req, res) => {
     if (req.body.descuento_pct !== undefined) {
       const mesActual  = new Date().getMonth() + 1;
       const anioActual = new Date().getFullYear();
-      const valorMensual = Number(club.config?.valor_mensualidad ?? 65000);
+      const valorMensual = Number(club.config?.valor_mensualidad ?? 0);
       const nuevoPct     = Math.max(0, Math.min(100, Number(req.body.descuento_pct ?? 0)));
       const nuevoOficial = Math.round(valorMensual * (1 - nuevoPct / 100));
 
@@ -200,7 +200,7 @@ router.patch('/:cedula/exento', async (req, res) => {
       : null;
 
     const anio   = new Date().getFullYear();
-    const cuota  = parseFloat(club.config?.valor_mensualidad ?? 65000);
+    const cuota  = parseFloat(club.config?.valor_mensualidad ?? 0);
     const cedula = req.params.cedula;
 
     // 1. Actualizar el jugador: descuento_pct=100 es la señal de EXENTO
@@ -499,7 +499,7 @@ router.post('/bulk', async (req, res) => {
       insertados = await db.bulkInsert('players', filas);
 
       // Crear mensualidades para cada jugador insertado
-      const CUOTA      = parseFloat(club.config?.valor_mensualidad ?? 65000);
+      const CUOTA      = parseFloat(club.config?.valor_mensualidad ?? 0);
       const anioActual = new Date().getFullYear();
       const mesActual  = new Date().getMonth() + 1;
 

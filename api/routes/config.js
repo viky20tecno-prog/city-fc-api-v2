@@ -29,7 +29,7 @@ router.get('/', async (req, res) => {
       club_id:           club.slug,
       nombre:            club.config?.nombre            || club.name,
       ciudad:            club.config?.ciudad            || '',
-      valor_mensualidad: club.config?.valor_mensualidad ?? 65000,
+      valor_mensualidad: club.config?.valor_mensualidad ?? 0,
       color:             club.config?.color             || '#00AAFF',
       subtitulo:         club.config?.subtitulo         || '',
       logo_url:          club.config?.logo_url          || null,
@@ -40,8 +40,8 @@ router.get('/', async (req, res) => {
       onboarding_completed: club.config?.onboarding_completed || false,
       prendas_uniforme:  club.config?.prendas_uniforme  || [],
       whatsapp:                   club.config?.whatsapp                   || '',
-      dias_gracia_mora:           club.config?.dias_gracia_mora           ?? 7,
-      penalidad_mora:             club.config?.penalidad_mora             ?? 5000,
+      dias_gracia_mora:           club.config?.dias_gracia_mora           ?? 0,
+      penalidad_mora:             club.config?.penalidad_mora             ?? 0,
       torneos_iniciales:          club.config?.torneos_iniciales          || [],
       categorias_jugadores:       club.config?.categorias_jugadores       || [],
       categorias_finanzas_ingreso: club.config?.categorias_finanzas_ingreso || [],
@@ -125,7 +125,7 @@ router.post('/aplicar-mensualidad-pendientes', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Club no encontrado' });
     }
 
-    const nuevoValor = parseFloat(club.config?.valor_mensualidad ?? 65000);
+    const nuevoValor = parseFloat(club.config?.valor_mensualidad ?? 0);
 
     const ahora    = new Date();
     const anioAct  = ahora.getFullYear();

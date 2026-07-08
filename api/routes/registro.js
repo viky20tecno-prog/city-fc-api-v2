@@ -82,7 +82,7 @@ router.post('/', async (req, res) => {
       config: {
         nombre:            nombre_club.trim(),
         ciudad:            ciudad?.trim() || '',
-        valor_mensualidad: 65000,
+        valor_mensualidad: 0,
         color:             color || '#00AAFF',
         subtitulo:         '',
         codigo_pais:       codigo_pais || '57',

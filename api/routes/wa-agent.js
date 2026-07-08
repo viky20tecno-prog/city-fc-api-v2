@@ -1558,7 +1558,7 @@ async function procesarPagoComprobante(from, contexto, analisis, mediaUrl, buffe
 
   // Si el pago es mayor a una mensualidad, preguntar en qué se aplica el resto
   // — la respuesta se adjunta a Conciliación para que el admin la use al aprobar.
-  const cuotaMensual = parseFloat(contexto.config?.valor_mensualidad ?? 65000);
+  const cuotaMensual = parseFloat(contexto.config?.valor_mensualidad ?? 0);
   const preguntaExcedente = pagoCreado && monto > cuotaMensual;
 
   let mensajeJugador = `🎉 *¡Recibido, ${primerNombre}!*\n\nTu comprobante de *${montoFmt(monto)}* ya está en revisión.\n\nEn cuanto el administrador lo confirme, quedará aplicado a tu mensualidad — ¡gracias por estar al día! 💙`;

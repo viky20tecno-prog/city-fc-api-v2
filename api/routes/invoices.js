@@ -13,7 +13,7 @@ router.get('/', async (req, res) => {
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
     // Auto-marcar vencidos antes de devolver datos (fire-and-forget)
-    db.marcarMensualidadesVencidas(club.id).catch(e => console.error('[invoices] marcarVencidos:', e.message));
+    db.marcarMensualidadesVencidas(club.id, club.config?.dias_gracia_mora ?? 0).catch(e => console.error('[invoices] marcarVencidos:', e.message));
 
     let invoices = await db.getMensualidades(club.id);
     invoices = invoices.filter(inv => String(inv.anio) === String(anio));
@@ -180,7 +180,7 @@ router.post('/generar-anio', async (req, res) => {
     const anio = anioParam ? parseInt(anioParam) : new Date().getFullYear();
 
     // Si viene nueva cuota → actualizarla en el config del club antes de generar
-    let cuotaFinal = parseFloat(club.config?.valor_mensualidad ?? 65000);
+    let cuotaFinal = parseFloat(club.config?.valor_mensualidad ?? 0);
     if (nueva_cuota !== undefined && nueva_cuota !== null) {
       cuotaFinal = Math.max(0, parseFloat(nueva_cuota) || 0);
       const nuevoConfig = { ...(club.config || {}), valor_mensualidad: cuotaFinal };
@@ -253,7 +253,7 @@ router.get('/plantilla-excel', async (req, res) => {
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
     const anio    = parseInt(req.query.anio) || new Date().getFullYear();
-    const CUOTA   = parseFloat(club.config?.valor_mensualidad ?? 65000);
+    const CUOTA   = parseFloat(club.config?.valor_mensualidad ?? 0);
     const players = await db.getPlayers(club.id);
     players.sort((a, b) => {
       const na = `${a.nombre} ${a.apellidos}`.toLowerCase();
@@ -343,7 +343,7 @@ router.post('/importar-estados', async (req, res) => {
     if (!Array.isArray(filas) || filas.length === 0)
       return res.status(400).json({ success: false, error: 'Faltan filas para importar' });
 
-    const CUOTA   = parseFloat(club.config?.valor_mensualidad ?? 65000);
+    const CUOTA   = parseFloat(club.config?.valor_mensualidad ?? 0);
     const players = await db.getPlayers(club.id);
     const playerMap = {};
     players.forEach(p => { playerMap[String(p.cedula)] = p; });
@@ -427,7 +427,7 @@ router.post('/marcar-vencidos', async (req, res) => {
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
-    const actualizados = await db.marcarMensualidadesVencidas(club.id);
+    const actualizados = await db.marcarMensualidadesVencidas(club.id, club.config?.dias_gracia_mora ?? 0);
     res.json({ success: true, actualizados, message: `${actualizados} mensualidades marcadas como MORA` });
   } catch (err) {
     console.error('POST /invoices/marcar-vencidos', err.message);

@@ -664,7 +664,7 @@ async function deletePlayer(club_id, cedula) {
 /**
  * Marcar mensualidad en MORA y aplicar penalidad (solo una vez por mes)
  */
-async function aplicarMoraConPenalidad(mensualidad_id, penalidad = 10000) {
+async function aplicarMoraConPenalidad(mensualidad_id, penalidad = 0) {
   const { data: mens, error: fetchErr } = await supabase
     .from('mensualidades')
     .select('valor_oficial, valor_pagado, penalidad')
@@ -1037,10 +1037,10 @@ async function upsertWaSession(phone, { rol, contexto, messages, last_interactio
 /**
  * Marca como MORA todas las mensualidades PENDIENTE vencidas.
  * - Meses anteriores al actual: siempre MORA.
- * - Mes actual: MORA si ya pasaron los días de gracia (dia > dias_gracia_mora, default 7).
+ * - Mes actual: MORA si ya pasaron los días de gracia (dia > dias_gracia_mora).
  * - Meses futuros: intocables.
  */
-async function marcarMensualidadesVencidas(club_id, diasGracia = 7) {
+async function marcarMensualidadesVencidas(club_id, diasGracia = 0) {
   const now     = new Date();
   const diaAct  = now.getDate();
   const mesAct  = now.getMonth() + 1;

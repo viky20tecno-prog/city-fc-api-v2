@@ -141,7 +141,7 @@ router.delete('/:id', async (req, res) => {
     await db.deactivateSuspension(id, club.id);
 
     // 3. Restaurar mensualidades al estado calculado según pagos reales
-    const cuota = parseFloat(club.config?.valor_mensualidad ?? 65000);
+    const cuota = parseFloat(club.config?.valor_mensualidad ?? 0);
     await restaurarMensualidades(club.id, susp.cedula, susp.mes_inicio, susp.mes_fin, susp.anio, cuota);
 
     res.json({ success: true, message: 'Suspensión cancelada y mensualidades restauradas' });
