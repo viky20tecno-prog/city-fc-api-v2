@@ -181,7 +181,12 @@ router.post('/', async (req, res) => {
 
   // Vincular usuario al club (no bloquea la respuesta)
   // club_members.club_id es el slug del club, no el UUID (ver migracion_roles_club_members.sql)
-  supabase.from('club_members').insert({ user_id: userId, club_id: slug, role: 'ADMIN', activo: true }).catch(() => {});
+  // El query builder de supabase-js es "thenable" (solo .then), no una Promise real — no tiene
+  // .catch() propio. Llamarlo directo tira un TypeError no controlado que aborta el handler
+  // ANTES de responder al cliente (la causa real del cuelgue de 300s, no un tema de Supabase).
+  Promise.resolve(
+    supabase.from('club_members').insert({ user_id: userId, club_id: slug, role: 'ADMIN', activo: true })
+  ).catch(() => {});
 
   const signIn = signInResult;
 
