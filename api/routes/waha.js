@@ -60,10 +60,20 @@ router.post('/conectar', async (req, res) => {
 
     const sessionName = club.slug;
 
-    // Si ya existe sesión activa, borrarla primero para reiniciar limpio
-    try {
-      await wahaFetch(`/api/sessions/${sessionName}`, { method: 'DELETE' });
-    } catch (_) { /* no existía, ok */ }
+    // Idempotente: si ya hay una sesión de este club iniciando/conectada, reusarla
+    // en vez de crear otra. Sin esto, cada clic en "reintentar" (ej. tras un QR
+    // vencido) dejaba una sesión WAHA duplicada con el mismo nombre.
+    const rCheck = await wahaFetch(`/api/sessions/${sessionName}`);
+    if (rCheck.ok) {
+      const dataCheck = await rCheck.json();
+      if (['WORKING', 'STARTING', 'SCAN_QR_CODE'].includes(dataCheck.status)) {
+        return res.json({ success: true, session: sessionName, status: dataCheck.status });
+      }
+      // Sesión muerta (FAILED/STOPPED) — borrarla antes de crear una nueva
+      try {
+        await wahaFetch(`/api/sessions/${sessionName}`, { method: 'DELETE' });
+      } catch (_) { /* ok */ }
+    }
 
     // Crear nueva sesión
     const rCreate = await wahaFetch('/api/sessions', {
@@ -73,14 +83,7 @@ router.post('/conectar', async (req, res) => {
 
     if (!rCreate.ok) {
       const err = await rCreate.text();
-      if (err.includes('only') && err.includes('default')) {
-        return res.status(402).json({
-          success: false,
-          error: 'Tu instancia de WAHA es la versión Core que solo soporta 1 sesión. Para conectar el número de cada club por separado se necesita WAHA Plus.',
-          waha_plus_required: true,
-        });
-      }
-      // Si ya existe, continuar (puede que la delete anterior no eliminó a tiempo)
+      // Si ya existe (carrera con otro request concurrente), continuar igual
       if (!err.includes('already exists') && rCreate.status !== 409) {
         return res.status(502).json({ success: false, error: `Error WAHA: ${err}` });
       }
