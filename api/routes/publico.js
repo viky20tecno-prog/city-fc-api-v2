@@ -522,15 +522,16 @@ function normalizePhone(raw) {
   return digits;
 }
 
-async function sendWAHAText(phone, text) {
+async function sendWAHAText(phone, text, session = 'default') {
   const WAHA_URL = process.env.WAHA_URL || 'https://zensports-waha-production.up.railway.app';
   const WAHA_KEY = process.env.WAHA_API_KEY || '';
   const chatId   = `${phone}@c.us`;
   const res = await fetch(`${WAHA_URL}/api/sendText`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Api-Key': WAHA_KEY },
-    body: JSON.stringify({ session: 'default', chatId, text }),
+    body: JSON.stringify({ session, chatId, text }),
   });
+  if (!res.ok) console.error('[sendWAHAText] WAHA respondió', res.status, await res.text().catch(() => ''));
   return res.ok;
 }
 
@@ -567,7 +568,8 @@ router.post('/otp/solicitar', otpLimiter, async (req, res) => {
 
     const clubNombre = club.config?.nombre || club_slug;
     const sent = await sendWAHAText(phone,
-      `🔐 *${clubNombre}* — Código de verificación:\n\n*${code}*\n\nVigente 10 minutos. No lo compartas con nadie.`
+      `🔐 *${clubNombre}* — Código de verificación:\n\n*${code}*\n\nVigente 10 minutos. No lo compartas con nadie.`,
+      club.config?.waha_session || 'default'
     );
 
     if (!sent) {
