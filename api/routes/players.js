@@ -262,6 +262,19 @@ router.post('/estado-cuenta-masivo', async (req, res) => {
     const adminDigits = club.celular_admin ? String(club.celular_admin).replace(/\D/g, '') : null;
     const adminWaLink = adminDigits ? `wa.me/${adminDigits.startsWith('57') ? adminDigits : '57' + adminDigits}` : null;
 
+    const qrPagoUrl      = club.config?.qr_pago_url  || null;
+    const llavePago      = club.config?.llave_pago   || null;
+    const cuentaBancaria = club.config?.cuenta_bancaria || null;
+    const razonSocial    = club.config?.razon_social || null;
+    const nit            = club.config?.nit || null;
+
+    let medioPagoMsg = '';
+    if (razonSocial || nit) medioPagoMsg += `${[razonSocial, nit ? `NIT: ${nit}` : null].filter(Boolean).join('\n')}\n\n`;
+    if (llavePago)          medioPagoMsg += `🔑 *Nequi / Daviplata:*\n${llavePago}\n\n`;
+    if (cuentaBancaria && (cuentaBancaria.numero || cuentaBancaria.banco)) {
+      medioPagoMsg += `🏦 *Transferencia bancaria:*\n${[cuentaBancaria.banco, cuentaBancaria.tipo, cuentaBancaria.numero].filter(Boolean).join(' · ')}\n\n`;
+    }
+
     const cedulaFiltro = req.query.cedula ? String(req.query.cedula) : null;
     const todosJugadores = await db.getPlayers(club.id);
     const activos    = todosJugadores.filter(j => j.activo);
@@ -354,9 +367,18 @@ router.post('/estado-cuenta-masivo', async (req, res) => {
             msg += `📅 *MENSUALIDADES*\n${lineaMens}\n\n`;
             msg += `👕 *UNIFORMES*\n${lineaUnif}\n\n`;
             msg += `🏆 *TORNEOS*\n${lineaTorneos}\n\n`;
+            if (medioPagoMsg) msg += `💳 *MEDIOS DE PAGO*\n${medioPagoMsg}`;
             msg += `Ver tu cuenta completa:\n${portalLink}`;
             if (adminWaLink) {
               msg += `\n\n_Si crees que hay alguna inconsistencia, escríbele directamente al administrador del club:_\n${adminWaLink}`;
+            }
+
+            if (qrPagoUrl) {
+              await fetch(`${wahaUrl}/api/sendImage`, {
+                method: 'POST',
+                headers: waHeaders,
+                body: JSON.stringify({ chatId: chatId(celular), file: { url: qrPagoUrl }, caption: '📷 QR de pago', session: clubSession }),
+              });
             }
 
             await fetch(`${wahaUrl}/api/sendText`, {
