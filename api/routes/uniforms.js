@@ -98,11 +98,14 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { prendas, talla, numero, nombre_estampar, total, estado } = req.body;
+    const { prendas, talla, numero, nombre_estampar, total, estado, valor_pagado } = req.body;
 
-    const ESTADOS_VALIDOS = ['PENDIENTE', 'PAGADO', 'ENTREGADO'];
+    const ESTADOS_VALIDOS = ['PENDIENTE', 'ABONO', 'PAGADO', 'ENTREGADO'];
     if (estado !== undefined && !ESTADOS_VALIDOS.includes(estado)) {
       return res.status(400).json({ success: false, error: `Estado inválido. Debe ser uno de: ${ESTADOS_VALIDOS.join(', ')}` });
+    }
+    if (valor_pagado !== undefined && (isNaN(Number(valor_pagado)) || Number(valor_pagado) < 0)) {
+      return res.status(400).json({ success: false, error: 'El valor pagado debe ser un número mayor o igual a 0' });
     }
 
     const club = await db.getClubBySlug(req.club_id);
@@ -113,21 +116,31 @@ router.put('/:id', async (req, res) => {
     const pedido = pedidos.find(p => String(p.id) === String(id));
     if (!pedido) return res.status(404).json({ success: false, error: 'Pedido no encontrado' });
 
-    const updated = await db.updatePedidoUniforme(id, {
+    const fields = {
       ...(prendas         !== undefined && { prendas }),
       ...(talla           !== undefined && { talla }),
       ...(numero          !== undefined && { numero_estampar: String(numero) }),
       ...(nombre_estampar !== undefined && { nombre_estampar }),
       ...(total           !== undefined && { total: Number(total) }),
+      ...(valor_pagado    !== undefined && { valor_pagado: Number(valor_pagado) }),
       ...(estado          !== undefined && { estado }),
-    });
+    };
+
+    // Si se actualiza el abono sin fijar un estado explícito, derivarlo del saldo
+    if (valor_pagado !== undefined && estado === undefined && pedido.estado !== 'ENTREGADO') {
+      const totalRef = fields.total !== undefined ? fields.total : (Number(pedido.total) || 0);
+      const pagado    = Number(valor_pagado);
+      fields.estado = pagado <= 0 ? 'PENDIENTE' : pagado >= totalRef ? 'PAGADO' : 'ABONO';
+    }
+
+    const updated = await db.updatePedidoUniforme(id, fields);
 
     db.logClubActivity({
       club_id: club.id, club_slug: req.club_id,
       user_id: req.user?.id, user_email: req.user?.email, user_role: req.userRole, user_name: req.memberName,
-      action: 'UNIFORME_ACTUALIZADO', entity_type: 'uniforme', entity_id: id,
+      action: valor_pagado !== undefined ? 'UNIFORME_ABONO' : 'UNIFORME_ACTUALIZADO', entity_type: 'uniforme', entity_id: id,
       entity_label: `${pedido.nombre} #${pedido.numero_estampar}`,
-      details: { ...(estado && { estado }), ...(talla && { talla }), ...(numero && { numero }) },
+      details: { ...(fields.estado && { estado: fields.estado }), ...(valor_pagado !== undefined && { valor_pagado }), ...(talla && { talla }), ...(numero && { numero }) },
     });
 
     res.json({ success: true, message: 'Pedido actualizado', data: updated });
