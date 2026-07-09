@@ -405,7 +405,7 @@ router.post('/estado-cuenta-masivo', async (req, res) => {
             await fetch(`${wahaUrl}/api/sendText`, {
               method: 'POST',
               headers: waHeaders,
-              body: JSON.stringify({ chatId: chatId(celular), text: msg, session: clubSession }),
+              body: JSON.stringify({ chatId: chatId(celular), text: msg, session: clubSession, linkPreview: false }),
             });
 
             await new Promise(r => setTimeout(r, 3000));
