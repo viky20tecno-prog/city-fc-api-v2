@@ -254,6 +254,67 @@ async function getPagos(club_id, { cedula, estado_revision, limit = 100 } = {}) 
 }
 
 /**
+ * Anti-fraude: referencias bancarias repetidas dentro del club — detecta el
+ * mismo comprobante reenviado y aplicado a pagos distintos. Cruza contra TODOS
+ * los pagos del club (no solo pendientes), porque el original pudo ya haber
+ * sido aprobado o rechazado.
+ */
+async function getReferenciasDuplicadas(club_id) {
+  const { data, error } = await supabase
+    .from('pagos')
+    .select('id, referencia, cedula, estado_revision, created_at')
+    .eq('club_id', club_id)
+    .not('referencia', 'is', null)
+    .neq('referencia', '');
+  if (error) throw error;
+
+  const grupos = {};
+  (data || []).forEach(p => {
+    const key = String(p.referencia).trim().toLowerCase();
+    if (!key) return;
+    (grupos[key] ||= []).push(p);
+  });
+
+  const duplicadas = {}; // { pagoId: [otrosPagosConLaMismaReferencia] }
+  Object.values(grupos).forEach(grupo => {
+    if (grupo.length > 1) grupo.forEach(p => { duplicadas[p.id] = grupo.filter(g => g.id !== p.id); });
+  });
+  return duplicadas;
+}
+
+/**
+ * Anti-fraude: hash de imagen de comprobante repetido (mismo archivo reenviado,
+ * incluso con otra referencia/monto declarado). El hash se guarda en
+ * club_activity_logs (action HASH_COMPROBANTE) en vez de una columna nueva en
+ * `pagos` — mismo patrón que la nota del jugador sobre excedentes, para no
+ * depender de una migración de esquema.
+ */
+async function getHashesDuplicados(club_id) {
+  const { data, error } = await supabase
+    .from('club_activity_logs')
+    .select('entity_id, details')
+    .eq('club_id', club_id)
+    .eq('action', 'HASH_COMPROBANTE');
+  if (error) throw error;
+
+  const grupos = {};
+  (data || []).forEach(r => {
+    const hash = r.details?.hash;
+    if (!hash || !r.entity_id) return;
+    (grupos[hash] ||= new Set()).add(r.entity_id);
+  });
+
+  const duplicados = {}; // { pagoId(string): [otrosPagoIdsConLaMismaImagen] }
+  Object.values(grupos).forEach(set => {
+    if (set.size > 1) {
+      const ids = [...set];
+      ids.forEach(id => { duplicados[id] = ids.filter(i => i !== id); });
+    }
+  });
+  return duplicados;
+}
+
+/**
  * Obtener todos los clubs activos con su owner_user_id para secuencias de email
  */
 async function getAllActiveClubs() {
@@ -1123,6 +1184,8 @@ module.exports = {
   updateTorneo,
   createPago,
   getPagos,
+  getReferenciasDuplicadas,
+  getHashesDuplicados,
   getPagoById,
   updatePago,
   createPlayer,

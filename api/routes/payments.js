@@ -34,6 +34,25 @@ router.get('/', async (req, res) => {
       pagos.forEach(p => { if (notaPorPago[p.id]) p.nota_jugador = notaPorPago[p.id]; });
     }
 
+    // Anti-fraude: cruzar referencia bancaria y hash de imagen contra TODOS los
+    // pagos del club (no solo el filtro de estado actual) — el original pudo
+    // ya estar aprobado o rechazado y aun así el reenvío es fraude.
+    try {
+      const [refDuplicadas, hashDuplicados] = await Promise.all([
+        db.getReferenciasDuplicadas(club.id),
+        db.getHashesDuplicados(club.id),
+      ]);
+      pagos.forEach(p => {
+        const otrosPorRef  = refDuplicadas[p.id];
+        const otrosPorHash = hashDuplicados[String(p.id)];
+        if (otrosPorRef || otrosPorHash) {
+          p.alerta_fraude = { referencia_duplicada: !!otrosPorRef, imagen_duplicada: !!otrosPorHash };
+        }
+      });
+    } catch (e) {
+      console.error('[payments] chequeo anti-fraude falló:', e.message);
+    }
+
     res.json({
       success: true,
       club_id: req.club_id,

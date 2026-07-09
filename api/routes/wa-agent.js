@@ -1556,6 +1556,35 @@ async function procesarPagoComprobante(from, contexto, analisis, mediaUrl, buffe
     console.error('[comprobante] createPago error:', e.message);
   }
 
+  // Anti-fraude: guardar el hash de la imagen (para detectar el mismo archivo
+  // reenviado más adelante) y cruzar contra referencia/hash ya usados antes en
+  // este club — igual comprobante aplicado a meses distintos, o reenviado tal cual.
+  let alertaFraude = null;
+  if (pagoCreado) {
+    try {
+      if (buffer) {
+        const hashImagen = crypto.createHash('sha256').update(buffer).digest('hex');
+        await db.logClubActivity({
+          club_id: contexto.club_id, club_slug: contexto.club_slug,
+          action: 'HASH_COMPROBANTE', entity_type: 'pago', entity_id: pagoCreado.id,
+          entity_label: contexto.nombre || null,
+          details: { hash: hashImagen },
+        });
+      }
+      const [refDup, hashDup] = await Promise.all([
+        db.getReferenciasDuplicadas(contexto.club_id),
+        db.getHashesDuplicados(contexto.club_id),
+      ]);
+      const refDuplicada  = !!refDup[pagoCreado.id];
+      const hashDuplicado = !!hashDup[String(pagoCreado.id)];
+      if (refDuplicada || hashDuplicado) {
+        alertaFraude = { referencia_duplicada: refDuplicada, imagen_duplicada: hashDuplicado };
+      }
+    } catch (e) {
+      console.error('[comprobante] chequeo anti-fraude falló:', e.message);
+    }
+  }
+
   // Si el pago es mayor a una mensualidad, preguntar en qué se aplica el resto
   // — la respuesta se adjunta a Conciliación para que el admin la use al aprobar.
   const cuotaMensual = parseFloat(contexto.config?.valor_mensualidad ?? 0);
@@ -1565,7 +1594,10 @@ async function procesarPagoComprobante(from, contexto, analisis, mediaUrl, buffe
   if (preguntaExcedente) {
     mensajeJugador += `\n\n🤔 Vimos que el pago es mayor a una mensualidad (*${montoFmt(cuotaMensual)}*). ¿En qué se debe aplicar el resto? (uniforme, torneo, otra mensualidad, etc.)`;
   }
-  const mensajeAdmin   = `💰 *Comprobante recibido — pendiente de aprobar*\n\nJugador: *${contexto.nombre}* · C.C. ${contexto.cedula}\nMonto: ${montoFmt(monto)}\nBanco: ${banco || 'N/A'} · Ref: ${referencia || 'N/A'}\n\nRevísalo en Conciliación 👉`;
+  const alertaTexto = alertaFraude
+    ? `⚠️ *POSIBLE FRAUDE* — ${alertaFraude.referencia_duplicada ? 'esta referencia ya se usó en otro pago. ' : ''}${alertaFraude.imagen_duplicada ? 'esta imagen ya fue enviada antes. ' : ''}Revisa con cuidado antes de aprobar.\n\n`
+    : '';
+  const mensajeAdmin   = `${alertaTexto}💰 *Comprobante recibido — pendiente de aprobar*\n\nJugador: *${contexto.nombre}* · C.C. ${contexto.cedula}\nMonto: ${montoFmt(monto)}\nBanco: ${banco || 'N/A'} · Ref: ${referencia || 'N/A'}\n\nRevísalo en Conciliación 👉`;
 
   await sendWAHA(from, mensajeJugador);
 
