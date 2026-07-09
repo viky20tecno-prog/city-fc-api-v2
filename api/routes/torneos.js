@@ -60,6 +60,53 @@ router.post('/', async (req, res) => {
   }
 });
 
+// PUT /api/torneos/definicion/:torneo_id — propagar cambios de nombre/precio de la plantilla a todos los ya inscritos
+router.put('/definicion/:torneo_id', async (req, res) => {
+  try {
+    const { torneo_id } = req.params;
+    const { nombre_torneo, valor_oficial, valor_inscrito } = req.body;
+
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const todos = await db.getTorneos(club.id);
+    const inscritos = todos.filter(t => String(t.torneo_id) === String(torneo_id));
+    if (inscritos.length === 0) return res.json({ success: true, actualizados: 0 });
+
+    const actualizados = [];
+    for (const t of inscritos) {
+      const nuevoOficial  = valor_oficial  !== undefined ? parseFloat(valor_oficial)  : parseFloat(t.valor_oficial)  || 0;
+      const nuevoInscrito = valor_inscrito !== undefined ? parseFloat(valor_inscrito) : parseFloat(t.valor_inscrito) || 0;
+      const nuevoPagado   = parseFloat(t.valor_pagado) || 0;
+      const descuento     = parseFloat(t.descuento)    || 0;
+      const baseInscrito  = nuevoInscrito || nuevoOficial || 0;
+      const valorNeto     = Math.max(0, baseInscrito - descuento);
+      const saldo         = Math.max(0, valorNeto - nuevoPagado);
+      const estado        = saldo === 0 ? 'AL_DIA' : nuevoPagado > 0 ? 'ABONO' : 'PENDIENTE';
+
+      const updated = await db.updateTorneo(t.id, {
+        ...(nombre_torneo !== undefined && { nombre_torneo }),
+        valor_oficial: nuevoOficial, valor_inscrito: nuevoInscrito,
+        saldo_pendiente: saldo, estado,
+      });
+      actualizados.push(updated);
+    }
+
+    db.logClubActivity({
+      club_id: club.id, club_slug: req.club_id,
+      user_id: req.user?.id, user_email: req.user?.email, user_role: req.userRole, user_name: req.memberName,
+      action: 'TORNEO_DEFINICION_PROPAGADA', entity_type: 'torneo', entity_id: torneo_id,
+      entity_label: nombre_torneo || inscritos[0]?.nombre_torneo,
+      details: { actualizados: actualizados.length, valor_oficial, valor_inscrito, nombre_torneo },
+    });
+
+    res.json({ success: true, actualizados: actualizados.length, data: actualizados });
+  } catch (error) {
+    console.error('Error en PUT /torneos/definicion/:torneo_id:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // PUT /api/torneos/:id — actualizar pago y/o descuento
 router.put('/:id', async (req, res) => {
   try {
