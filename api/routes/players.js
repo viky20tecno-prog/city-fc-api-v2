@@ -269,32 +269,17 @@ router.post('/estado-cuenta-masivo', async (req, res) => {
     const razonSocial    = club.config?.razon_social || null;
     const nit            = club.config?.nit || null;
 
-    // Links directos a la app/web del banco — abren la app si está instalada (App Links / Universal Links),
-    // si no, abren la web. No prellenan monto ni destinatario, son solo un atajo para no buscar el ícono.
-    const BANK_LINKS = {
-      bancolombia:        'https://www.bancolombia.com',
-      davivienda:         'https://www.davivienda.com',
-      bbva:                'https://www.bbva.com.co',
-      'banco de bogota':  'https://www.bancodebogota.com',
-      'banco de bogotá':  'https://www.bancodebogota.com',
-      'banco popular':    'https://www.bancopopular.com.co',
-      'banco caja social': 'https://www.bancocajasocial.com',
-      'av villas':         'https://www.avvillas.com.co',
-      scotiabank:          'https://www.scotiabankcolpatria.com',
-      colpatria:           'https://www.scotiabankcolpatria.com',
-    };
-    const bancoLink = cuentaBancaria?.banco ? BANK_LINKS[cuentaBancaria.banco.trim().toLowerCase()] : null;
-
+    // Nota: antes se incluían links "Abrir Nequi/Daviplata/banco" a las páginas genéricas
+    // de cada entidad (no abren el pago, solo el home del banco). El admin de city-fc pidió
+    // quitarlos — no aportan nada real y un link inesperado en un mensaje de cobro genera
+    // desconfianza. Se dejan solo los datos de pago en texto plano.
     let medioPagoMsg = '';
     if (razonSocial || nit) medioPagoMsg += `${[razonSocial, nit ? `NIT: ${nit}` : null].filter(Boolean).join('\n')}\n\n`;
     if (llavePago) {
-      medioPagoMsg += `🔑 *Nequi / Daviplata:*\n${llavePago}\n`;
-      medioPagoMsg += `Abrir Nequi: https://www.nequi.com.co\nAbrir Daviplata: https://www.daviplata.com\n\n`;
+      medioPagoMsg += `🔑 *Nequi / Daviplata:*\n${llavePago}\n\n`;
     }
     if (cuentaBancaria && (cuentaBancaria.numero || cuentaBancaria.banco)) {
-      medioPagoMsg += `🏦 *Transferencia bancaria:*\n${[cuentaBancaria.banco, cuentaBancaria.tipo, cuentaBancaria.numero].filter(Boolean).join(' · ')}\n`;
-      if (bancoLink) medioPagoMsg += `Abrir ${cuentaBancaria.banco}: ${bancoLink}\n`;
-      medioPagoMsg += `\n`;
+      medioPagoMsg += `🏦 *Transferencia bancaria:*\n${[cuentaBancaria.banco, cuentaBancaria.tipo, cuentaBancaria.numero].filter(Boolean).join(' · ')}\n\n`;
     }
 
     const cedulaFiltro = req.query.cedula ? String(req.query.cedula) : null;
