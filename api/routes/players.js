@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../services/db');
 const { MESES } = require('../services/meses');
+const { mesesEnMora } = require('../services/mora');
 const router = express.Router();
 
 // GET /api/players?club_id=city-fc
@@ -293,11 +294,16 @@ router.post('/estado-cuenta-masivo', async (req, res) => {
 
     setImmediate(async () => {
       try {
-        const [allMens, allTorneos, allPedidos] = await Promise.all([
+        const [allMens, allTorneos, allPedidos, suspensiones] = await Promise.all([
           db.getMensualidades(club.id),
           db.getTorneos(club.id),
           db.getPedidoUniformes(club.id),
+          db.getSuspensiones(club.id),
         ]);
+
+        const anioAct         = new Date().getFullYear();
+        const mesActualNum    = new Date().getMonth() + 1;
+        const pastGracePeriod = new Date().getDate() > 7;
 
         const mensByCedula    = {};
         const torneosByCedula = {};
@@ -336,9 +342,10 @@ router.post('/estado-cuenta-masivo', async (req, res) => {
             const { cedula, nombre, apellidos, celular } = jugador;
             const nombreCompleto = `${nombre || ''} ${apellidos || ''}`.trim();
 
-            // — Mensualidades —
+            // — Mensualidades — solo lo causado hasta hoy, nunca meses futuros del año
+            // (mismo criterio que el dashboard y consultar_pagos_club/consultar_morosos del bot)
             const mens     = (mensByCedula[String(cedula)] || []).filter(m => (m.valor_oficial || 0) > 0);
-            const pendMens = mens.filter(m => ['PENDIENTE', 'PARCIAL', 'MORA'].includes(m.estado));
+            const pendMens = mesesEnMora(mens, cedula, anioAct, mesActualNum, pastGracePeriod, suspensiones);
             const enMora   = pendMens.some(m => m.estado === 'MORA');
             const saldoMens = pendMens.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
 

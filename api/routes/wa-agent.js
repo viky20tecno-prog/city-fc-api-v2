@@ -2,6 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const Anthropic = require('@anthropic-ai/sdk');
 const db = require('../services/db');
+const { mesesEnMora } = require('../services/mora');
 const { generarTokenAsistencia } = require('./publico');
 
 const DIAS_ES  = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
@@ -163,23 +164,6 @@ function aplicarTemplate(template, vars) {
     .replace(/{deuda}/g, vars.deuda != null ? `$${Math.round(vars.deuda).toLocaleString('es-CO')}` : '')
     .replace(/{meses}/g, String(vars.meses || ''))
     .replace(/{club_nombre}/g, vars.club_nombre || '');
-}
-
-// Mismo criterio de "moroso" que usa el dashboard (routes/reports.js: /summary y /defaulters):
-// solo cuenta meses ya causados (mes actual incluido tras el día 7 de gracia), nunca meses futuros.
-function mesesEnMora(mensualidades, cedula, anio, mesActual, pastGracePeriod, suspensiones) {
-  const isSuspendido = (mesNum) => (suspensiones || []).some(s =>
-    String(s.cedula) === String(cedula) && parseInt(s.anio) === anio && s.mes_inicio <= mesNum && mesNum <= s.mes_fin);
-  return (mensualidades || []).filter(m => {
-    if (String(m.anio) !== String(anio)) return false;
-    if (m.estado === 'AL_DIA' || m.estado === 'EXENTO' || m.estado === 'SUSPENDIDO') return false;
-    const mesNum = parseInt(m.numero_mes);
-    if (isSuspendido(mesNum)) return false;
-    if (m.estado === 'PARCIAL' && mesNum === mesActual) return false; // abono parcial en curso no es mora todavía
-    if (mesNum < mesActual) return true;
-    if (mesNum === mesActual && pastGracePeriod) return true;
-    return false;
-  });
 }
 
 // ── Enviar mensaje de vuelta al usuario vía Meta API ─────────────────────────
