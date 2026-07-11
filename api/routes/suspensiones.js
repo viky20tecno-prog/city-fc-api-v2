@@ -10,7 +10,7 @@ async function suspenderMensualidades(club_id, cedula, mes_inicio, mes_fin, anio
   for (let mes = mes_inicio; mes <= mes_fin; mes++) {
     await db.supabase
       .from('mensualidades')
-      .update({ estado: 'SUSPENDIDO', saldo_pendiente: 0 })
+      .update({ estado: 'SUSPENDIDO', saldo_pendiente: 0, valor_oficial: 0 })
       .eq('club_id', club_id)
       .eq('cedula', String(cedula))
       .eq('anio', parseInt(anio))
