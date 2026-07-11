@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../services/db');
 const { MESES } = require('../services/meses');
 const { mesesEnMora } = require('../services/mora');
+const { recalcularMensualidadesPorDescuento } = require('../services/descuentos');
 const router = express.Router();
 
 // GET /api/players?club_id=city-fc
@@ -68,34 +69,11 @@ router.patch('/:cedula', async (req, res) => {
     // aplican a todo el año, no solo desde que se configuran). Los meses ya pagados en su
     // totalidad (AL_DIA) no se tocan, para no reabrir historial ya cerrado.
     if (req.body.descuento_pct !== undefined) {
-      const anioActual = new Date().getFullYear();
       const valorMensual = Number(club.config?.valor_mensualidad ?? 0);
-      const nuevoPct     = Math.max(0, Math.min(100, Number(req.body.descuento_pct ?? 0)));
-      const nuevoOficial = Math.round(valorMensual * (1 - nuevoPct / 100));
-
-      const { data: mensualidadesAjustar } = await db.supabase
-        .from('mensualidades')
-        .select('id, valor_pagado, penalidad')
-        .eq('club_id', club.id)
-        .eq('cedula', req.params.cedula)
-        .eq('anio', anioActual)
-        .neq('estado', 'AL_DIA');
-
-      for (const mens of (mensualidadesAjustar || [])) {
-        const penalidad  = Number(mens.penalidad   ?? 0);
-        const pagado     = Number(mens.valor_pagado ?? 0);
-        const nuevoSaldo = Math.max(0, nuevoOficial + penalidad - pagado);
-        const nuevoEstado =
-          nuevoOficial === 0 || pagado >= nuevoOficial + penalidad ? 'AL_DIA'
-          : pagado > 0 ? 'PARCIAL'
-          : 'PENDIENTE';
-
-        await db.supabase.from('mensualidades').update({
-          valor_oficial:   nuevoOficial,
-          saldo_pendiente: nuevoSaldo,
-          estado:          nuevoEstado,
-        }).eq('id', mens.id);
-      }
+      await recalcularMensualidadesPorDescuento({
+        supabase: db.supabase, clubId: club.id, cedula: req.params.cedula,
+        valorMensual, nuevoPct: req.body.descuento_pct,
+      });
     }
 
     res.json({ success: true, data: updated });
