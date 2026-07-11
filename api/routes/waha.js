@@ -165,11 +165,24 @@ router.get('/estado', async (req, res) => {
     }
 
     const sessionName = club.slug;
-    const r = await wahaFetch(`/api/sessions/${sessionName}`);
 
-    if (!r.ok) {
-      // Sesión no existe aún
+    let r;
+    try {
+      r = await wahaFetch(`/api/sessions/${sessionName}`);
+    } catch (fetchErr) {
+      // No se pudo contactar a WAHA (timeout, red, contenedor momentáneamente ocupado) —
+      // NO asumir que la sesión murió ni tocar lo guardado, solo avisar que no se pudo verificar.
+      return res.json({ success: true, status: 'UNKNOWN', session: sessionName });
+    }
+
+    if (r.status === 404) {
+      // WAHA confirma que la sesión no existe — esto sí es un STOPPED real
       return res.json({ success: true, status: 'STOPPED', session: sessionName });
+    }
+    if (!r.ok) {
+      // WAHA respondió con error pero no confirmó que la sesión no existe (5xx, etc.) —
+      // no es evidencia de que se cayó, solo que no pudimos verificar ahora mismo.
+      return res.json({ success: true, status: 'UNKNOWN', session: sessionName });
     }
 
     const data = await r.json();
