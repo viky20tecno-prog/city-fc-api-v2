@@ -165,6 +165,23 @@ function aplicarTemplate(template, vars) {
     .replace(/{club_nombre}/g, vars.club_nombre || '');
 }
 
+// Mismo criterio de "moroso" que usa el dashboard (routes/reports.js: /summary y /defaulters):
+// solo cuenta meses ya causados (mes actual incluido tras el día 7 de gracia), nunca meses futuros.
+function mesesEnMora(mensualidades, cedula, anio, mesActual, pastGracePeriod, suspensiones) {
+  const isSuspendido = (mesNum) => (suspensiones || []).some(s =>
+    String(s.cedula) === String(cedula) && parseInt(s.anio) === anio && s.mes_inicio <= mesNum && mesNum <= s.mes_fin);
+  return (mensualidades || []).filter(m => {
+    if (String(m.anio) !== String(anio)) return false;
+    if (m.estado === 'AL_DIA' || m.estado === 'EXENTO' || m.estado === 'SUSPENDIDO') return false;
+    const mesNum = parseInt(m.numero_mes);
+    if (isSuspendido(mesNum)) return false;
+    if (m.estado === 'PARCIAL' && mesNum === mesActual) return false; // abono parcial en curso no es mora todavía
+    if (mesNum < mesActual) return true;
+    if (mesNum === mesActual && pastGracePeriod) return true;
+    return false;
+  });
+}
+
 // ── Enviar mensaje de vuelta al usuario vía Meta API ─────────────────────────
 async function sendWA(to, text) {
   const url = `https://graph.facebook.com/v20.0/${process.env.WA_PHONE_NUMBER_ID}/messages`;
@@ -263,12 +280,12 @@ const TOOLS_BASE = [
   },
   {
     name: 'consultar_morosos',
-    description: 'SOLO ADMIN. Lista de jugadores con pagos pendientes. Si se pasa "mes" (número 1-12), filtra solo ese mes; si no, muestra todos los morosos del año. Devuelve total_morosos, morosos[] y total_deuda.',
+    description: 'SOLO ADMIN. Lista de jugadores con pagos pendientes. Si se pasa "mes" (número 1-12), filtra solo ese mes puntual; si no, muestra los morosos con meses ya causados hasta hoy (nunca meses futuros del año). Devuelve total_morosos, morosos[] y total_deuda.',
     input_schema: {
       type: 'object',
       properties: {
         club_id: { type: 'string' },
-        mes: { type: 'number', description: 'Número del mes (1=Enero...12=Diciembre). Omitir para ver todos los morosos del año.' },
+        mes: { type: 'number', description: 'Número del mes (1=Enero...12=Diciembre) para consultar ese mes puntual. Omitir para ver los morosos causados hasta el mes actual.' },
       },
       required: ['club_id'],
     },
@@ -614,19 +631,19 @@ async function runTool(name, input, contexto = {}) {
       const clubId = contexto.club_id;
       if (!clubId) return { error: 'No se encontró el club en el contexto' };
       const anio = new Date().getFullYear();
+      const mesActual = new Date().getMonth() + 1;
+      const pastGracePeriod = new Date().getDate() > 7;
       const supabase = db.supabase;
-      const { data: players } = await supabase
-        .from('players')
-        .select('cedula, nombre, apellidos')
-        .eq('club_id', clubId)
-        .eq('activo', true);
+      const [{ data: players }, suspensiones] = await Promise.all([
+        supabase.from('players').select('cedula, nombre, apellidos').eq('club_id', clubId).eq('activo', true),
+        db.getSuspensiones(clubId),
+      ]);
       if (!players?.length) return { total: 0, al_dia: 0, pendientes: 0, deuda_total: 0 };
 
       let alDia = 0, pendientes = 0, deudaTotal = 0;
       for (const p of players) {
         const mens = await db.getMensualidades(clubId, p.cedula);
-        const delAnio = mens.filter(m => String(m.anio) === String(anio));
-        const pend = delAnio.filter(m => m.estado !== 'AL_DIA' && m.estado !== 'EXENTO');
+        const pend = mesesEnMora(mens, p.cedula, anio, mesActual, pastGracePeriod, suspensiones);
         if (pend.length === 0) alDia++;
         else {
           pendientes++;
@@ -638,27 +655,28 @@ async function runTool(name, input, contexto = {}) {
 
     if (name === 'consultar_morosos') {
       const anio = new Date().getFullYear();
+      const mesActual = new Date().getMonth() + 1;
+      const pastGracePeriod = new Date().getDate() > 7;
       // Siempre usar el club_id del contexto autenticado, no el que pasa el LLM
       const clubId = contexto.club_id;
       if (!clubId) return { error: 'No se encontró el club en el contexto' };
       const mesNum = input.mes ? parseInt(input.mes) : null;
       const supabase = db.supabase;
-      const { data: players } = await supabase
-        .from('players')
-        .select('cedula, nombre, apellidos, celular, equipo')
-        .eq('club_id', clubId)
-        .eq('activo', true);
+      const [{ data: players }, suspensiones] = await Promise.all([
+        supabase.from('players').select('cedula, nombre, apellidos, celular, equipo').eq('club_id', clubId).eq('activo', true),
+        db.getSuspensiones(clubId),
+      ]);
       if (!players?.length) return { morosos: [], total_deuda: 0, pdf_url: null };
 
       const morosos = [];
       for (const p of players) {
         const mens = await db.getMensualidades(clubId, p.cedula);
-        const pend = mens.filter(m => {
-          if (String(m.anio) !== String(anio)) return false;
-          if (m.estado === 'AL_DIA' || m.estado === 'EXENTO') return false;
-          if (mesNum !== null) return parseInt(m.numero_mes) === mesNum;
-          return true;
-        });
+        // Sin "mes" explícito: mismo criterio de mora causada que el dashboard (nunca meses futuros).
+        // Con "mes" explícito: el admin pidió ese mes puntual, se respeta tal cual.
+        const pend = mesNum !== null
+          ? mens.filter(m => String(m.anio) === String(anio) && parseInt(m.numero_mes) === mesNum &&
+              m.estado !== 'AL_DIA' && m.estado !== 'EXENTO' && m.estado !== 'SUSPENDIDO')
+          : mesesEnMora(mens, p.cedula, anio, mesActual, pastGracePeriod, suspensiones);
         if (pend.length > 0) {
           const deuda = pend.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
           morosos.push({ nombre: `${p.nombre} ${p.apellidos}`.trim(), celular: p.celular, equipo: p.equipo, meses_pendientes: pend.length, deuda });
@@ -681,6 +699,8 @@ async function runTool(name, input, contexto = {}) {
       if (!clubId) return { error: 'No se encontró el club en el contexto' };
       const clubNombre = contexto.club_nombre;
       const anio = new Date().getFullYear();
+      const mesActual = new Date().getMonth() + 1;
+      const pastGracePeriod = new Date().getDate() > 7;
       const supabase = db.supabase;
 
       // Obtener la sesión propia del club — nunca usar el número central para masivos
@@ -700,12 +720,13 @@ async function runTool(name, input, contexto = {}) {
 
       if (!process.env.WAHA_URL) return { error: 'WAHA no configurado' };
 
+      const suspensiones = await db.getSuspensiones(clubId);
       const template = input.mensaje_personalizado || TEMPLATE_RECORDATORIO_DEFAULT;
       let enviados = 0;
 
       for (const p of players) {
         const mens = await db.getMensualidades(clubId, p.cedula);
-        const pend = mens.filter(m => String(m.anio) === String(anio) && m.estado !== 'AL_DIA' && m.estado !== 'EXENTO' && m.estado !== 'SUSPENDIDO');
+        const pend = mesesEnMora(mens, p.cedula, anio, mesActual, pastGracePeriod, suspensiones);
         if (!pend.length) continue;
         const deuda = pend.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
         const msg = aplicarTemplate(template, { nombre: p.nombre, deuda, meses: pend.length, club_nombre: clubNombre });
