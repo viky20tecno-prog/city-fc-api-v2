@@ -246,19 +246,6 @@ router.post('/estado-cuenta-masivo', async (req, res) => {
     const razonSocial    = club.config?.razon_social || null;
     const nit            = club.config?.nit || null;
 
-    // Nota: antes se incluían links "Abrir Nequi/Daviplata/banco" a las páginas genéricas
-    // de cada entidad (no abren el pago, solo el home del banco). El admin de city-fc pidió
-    // quitarlos — no aportan nada real y un link inesperado en un mensaje de cobro genera
-    // desconfianza. Se dejan solo los datos de pago en texto plano.
-    let medioPagoMsg = '';
-    if (razonSocial || nit) medioPagoMsg += `${[razonSocial, nit ? `NIT: ${nit}` : null].filter(Boolean).join('\n')}\n\n`;
-    if (llavePago) {
-      medioPagoMsg += `🔑 *Nequi / Daviplata:*\n${llavePago}\n\n`;
-    }
-    if (cuentaBancaria && (cuentaBancaria.numero || cuentaBancaria.banco)) {
-      medioPagoMsg += `🏦 *Transferencia bancaria:*\n${[cuentaBancaria.banco, cuentaBancaria.tipo, cuentaBancaria.numero].filter(Boolean).join(' · ')}\n\n`;
-    }
-
     const cedulaFiltro = req.query.cedula ? String(req.query.cedula) : null;
     const todosJugadores = await db.getPlayers(club.id);
     const activos    = todosJugadores.filter(j => j.activo);
@@ -304,7 +291,6 @@ router.post('/estado-cuenta-masivo', async (req, res) => {
 
         const nowCol    = new Date(Date.now() - 5 * 3600000);
         const MESES_ES  = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-        const periodo   = `${MESES_ES[nowCol.getMonth()].charAt(0).toUpperCase() + MESES_ES[nowCol.getMonth()].slice(1)} ${nowCol.getFullYear()}`;
 
         const fmtCOP = n => '$' + Math.round(Number(n) || 0).toLocaleString('es-CO');
 
@@ -339,10 +325,9 @@ router.post('/estado-cuenta-masivo', async (req, res) => {
               lineaTorneos = 'Sin inscripciones activas';
             } else {
               lineaTorneos = torneos.map(t => {
-                const ico    = t.estado === 'AL_DIA' ? '✅' : t.estado === 'ABONO' ? '⏳' : '🔴';
                 const saldoT = parseFloat(t.saldo_pendiente) || 0;
                 const valorT = parseFloat(t.valor_inscrito)  || parseFloat(t.valor_oficial) || 0;
-                return `• ${t.nombre_torneo}\n  Valor: ${fmtCOP(valorT)} | Saldo: ${fmtCOP(saldoT)} ${ico}`;
+                return `* ${t.nombre_torneo}: saldo pendiente ${fmtCOP(saldoT)} (valor total ${fmtCOP(valorT)}).`;
               }).join('\n');
             }
 
@@ -352,13 +337,29 @@ router.post('/estado-cuenta-masivo', async (req, res) => {
             const lineaUnif = saldoUnif > 0 ? `🔴 Saldo: ${fmtCOP(saldoUnif)}` : '✅ Sin saldo pendiente';
 
             // — Mensaje —
+            const mesActualLower = MESES_ES[nowCol.getMonth()];
+            let msg = `Hola *${nombreCompleto}* 👋\n\n`;
+            msg += `Te compartimos tu estado de cuenta con ${clubNombre} hasta ( ${mesActualLower} ) de ${nowCol.getFullYear()}\n`;
+            msg += `📅 MENSUALIDADES\n${lineaMens}\n\n`;
+            msg += `👕 UNIFORMES\n${lineaUnif}\n\n`;
+            msg += `🏆 Torneos\n\n${lineaTorneos}\n\n`;
+
+            let footerEmpresa = '';
+            if (razonSocial) footerEmpresa += `🏪 ${razonSocial}\n`;
+            if (nit)         footerEmpresa += `NIT: ${nit}\n`;
+            if (footerEmpresa) msg += footerEmpresa + '\n';
+
+            let medios = '';
+            if (cuentaBancaria && (cuentaBancaria.numero || cuentaBancaria.banco)) {
+              medios += `- 🏦 ${[cuentaBancaria.tipo, cuentaBancaria.banco].filter(Boolean).join(' ')}: ${cuentaBancaria.numero || ''}\n`;
+            }
+            if (llavePago) {
+              medios += `- 🔑 Bre-b (llave) : ${llavePago}\n`;
+            }
+            if (medios) msg += `💳 MEDIOS DE PAGO 💳\n\n${medios}`;
+
             const portalLink = `https://zensports.zenpra.ai/p/${clubSlug}/${cedula}`;
-            let msg = `Hola *${nombreCompleto}* 👋\n\nTu estado de cuenta en *${clubNombre}* — ${periodo}:\n\n`;
-            msg += `📅 *MENSUALIDADES*\n${lineaMens}\n\n`;
-            msg += `👕 *UNIFORMES*\n${lineaUnif}\n\n`;
-            msg += `🏆 *TORNEOS*\n${lineaTorneos}\n\n`;
-            if (medioPagoMsg) msg += `💳 *MEDIOS DE PAGO*\n${medioPagoMsg}`;
-            msg += `Ver tu cuenta completa:\n${portalLink}`;
+            msg += `\nVer tu cuenta completa:\n${portalLink}`;
             if (adminWaLink) {
               msg += `\n\n_Si crees que hay alguna inconsistencia, escríbele directamente al administrador del club:_\n${adminWaLink}`;
             }
