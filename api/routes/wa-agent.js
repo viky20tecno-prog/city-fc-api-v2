@@ -1654,6 +1654,12 @@ router.post('/waha', async (req, res) => {
     if (event !== 'message' || payload?.fromMe) {
       return res.status(200).json({ status: 'ignored' });
     }
+    // Actualizaciones de Estado de WhatsApp (Stories) de los contactos del número vinculado —
+    // no son mensajes reales, no aportan nada al agente, y procesarlas genera ráfagas enormes
+    // de tráfico (cientos/miles por reconexión) que aumentan el riesgo de baneo por WhatsApp.
+    if (payload?.from === 'status@broadcast' || String(payload?.from).endsWith('@broadcast')) {
+      return res.status(200).json({ status: 'ignored_broadcast' });
+    }
 
     const msgId   = payload.id;
     const msgType = payload.type || 'chat';

@@ -177,6 +177,9 @@ router.get('/estado', async (req, res) => {
 
     if (r.status === 404) {
       // WAHA confirma que la sesión no existe — esto sí es un STOPPED real
+      if (club.config?.waha_session === sessionName) {
+        await setWahaSession(req.club_uuid, null);
+      }
       return res.json({ success: true, status: 'STOPPED', session: sessionName });
     }
     if (!r.ok) {
