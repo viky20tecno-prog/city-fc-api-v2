@@ -1118,11 +1118,15 @@ async function getRankingAsistenciaEntrenamientos(club_id, club_slug, { anio, me
 
   function buildRanking(acum) {
     return Object.entries(acum)
+      // Solo jugadores activos hoy — la tabla asistencia puede tener registros de
+      // cédulas placeholder/duplicadas ya limpiadas (ej. "PEND_02") que nunca
+      // fueron un jugador real, o de jugadores dados de baja desde entonces.
+      .filter(([cedula]) => nombreMap[cedula])
       .map(([cedula, { presentes, eventos: evs }]) => {
         const total = evs.size;
         return {
           cedula,
-          nombre: nombreMap[cedula] || cedula,
+          nombre: nombreMap[cedula],
           presentes,
           total_eventos: total,
           porcentaje: total > 0 ? Math.round((presentes / total) * 100) : 0,
