@@ -363,6 +363,37 @@ async function sendAdminPasswordReset(email, resetUrl) {
   return sendEmail({ to: email, subject, html });
 }
 
+const ALERT_EMAIL = process.env.ALERT_EMAIL || 'diego31escobar@gmail.com';
+
+// Alerta interna (no es un correo de marca para clientes) — avisa cuando una sesión de
+// WhatsApp (WAHA) deja de estar WORKING, para no depender de que alguien revise el dashboard.
+async function sendWahaSessionAlert({ sessionName, status, recuperada = false }) {
+  const subject = recuperada
+    ? `✅ WhatsApp recuperado — sesión "${sessionName}"`
+    : `⚠️ WhatsApp desconectado — sesión "${sessionName}" (${status})`;
+
+  const html = shell({
+    preheader: recuperada
+      ? `La sesión "${sessionName}" volvió a estar WORKING.`
+      : `La sesión "${sessionName}" de WAHA cambió a estado ${status} — revisa si necesita reconexión.`,
+    body: `
+    ${mainCard({
+      badge: recuperada ? 'Sesión recuperada' : 'Alerta de infraestructura',
+      badgeColor: recuperada ? '#00D084' : '#EF4444',
+      bgColor: recuperada ? 'rgba(0,208,132,0.04)' : 'rgba(239,68,68,0.05)',
+      borderColor: recuperada ? 'rgba(0,208,132,0.18)' : 'rgba(239,68,68,0.2)',
+      title: recuperada
+        ? `La sesión "${sessionName}" volvió a conectar`
+        : `La sesión "${sessionName}" no está WORKING`,
+      body: recuperada
+        ? `Confirmado directo contra la API de WAHA: el estado actual es <strong style="color:#00D084;">WORKING</strong>.`
+        : `Estado actual reportado por WAHA: <strong style="color:#EF4444;">${status}</strong>. Si es "${sessionName === 'default' ? 'default' : sessionName}", revisa antes de reconectar manualmente — reconectar repetidas veces puede empeorar el riesgo de bloqueo.`,
+    })}`,
+  });
+
+  return sendEmail({ to: ALERT_EMAIL, subject, html });
+}
+
 module.exports = {
   sendEmail,
   sendWelcomeClub,
@@ -371,4 +402,5 @@ module.exports = {
   sendPlanActivated,
   sendOnboardingDay3,
   sendAdminPasswordReset,
+  sendWahaSessionAlert,
 };

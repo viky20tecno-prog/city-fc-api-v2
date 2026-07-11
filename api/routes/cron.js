@@ -7,6 +7,7 @@ const {
   sendTrialExpired,
   sendOnboardingDay3,
   sendOnboardingDay7,
+  sendWahaSessionAlert,
 } = require('../services/email');
 
 const router = express.Router();
@@ -424,6 +425,83 @@ router.all('/cleanup-sessions', async (req, res) => {
     res.json({ success: true, eliminadas: deleted?.length || 0 });
   } catch (err) {
     console.error('[cron] cleanup-sessions error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/cron/waha-health — revisa la sesión 'default' y las sesiones propias de cada
+// club, y avisa por correo si alguna deja de estar WORKING. Pensado para correr cada 10-15 min.
+router.all('/waha-health', async (req, res) => {
+  if (!verifyCronSecret(req, res)) return;
+
+  const wahaUrl = process.env.WAHA_URL;
+  const apiKey  = process.env.WAHA_API_KEY;
+  if (!wahaUrl) return res.status(500).json({ success: false, error: 'WAHA_URL no configurado' });
+
+  const waHeaders = { 'Content-Type': 'application/json' };
+  if (apiKey) waHeaders['X-Api-Key'] = apiKey;
+
+  async function estadoSesion(name) {
+    try {
+      const r = await fetch(`${wahaUrl}/api/sessions/${name}`, { headers: waHeaders });
+      if (r.status === 404) return 'STOPPED';
+      if (!r.ok) return 'UNKNOWN';
+      const data = await r.json();
+      return data.status || 'UNKNOWN';
+    } catch (_) {
+      return 'UNKNOWN';
+    }
+  }
+
+  const resultados = { revisadas: [], alertas: [] };
+
+  try {
+    // 'default' — sin persistencia de "ya alertado": si sigue caído, se avisa en cada corrida
+    // a propósito (es la sesión más crítica, mejor recordatorio repetido que silencio).
+    const statusDefault = await estadoSesion('default');
+    resultados.revisadas.push({ session: 'default', status: statusDefault });
+    if (statusDefault !== 'WORKING' && statusDefault !== 'UNKNOWN') {
+      await sendWahaSessionAlert({ sessionName: 'default', status: statusDefault });
+      resultados.alertas.push('default');
+    }
+
+    // Clubes con WhatsApp propio — sí llevamos el último estado en config para no repetir alertas
+    const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+    const { data: clubes } = await sb
+      .from('clubs')
+      .select('id, slug, config')
+      .not('config->>waha_session', 'is', null);
+
+    for (const club of (clubes || [])) {
+      const sessionName = club.config.waha_session;
+      const status = await estadoSesion(sessionName);
+      resultados.revisadas.push({ session: sessionName, status });
+      if (status === 'UNKNOWN') continue; // no se pudo verificar, no tocar nada
+
+      const wahaHealth  = club.config?.waha_health || {};
+      const yaAlertado  = wahaHealth.alertado === true;
+
+      if (status !== 'WORKING' && !yaAlertado) {
+        await sendWahaSessionAlert({ sessionName, status });
+        resultados.alertas.push(sessionName);
+        await sb.from('clubs').update({
+          config: { ...club.config, waha_health: { ultimo_estado: status, alertado: true } },
+        }).eq('id', club.id);
+      } else if (status === 'WORKING' && yaAlertado) {
+        await sendWahaSessionAlert({ sessionName, status, recuperada: true });
+        await sb.from('clubs').update({
+          config: { ...club.config, waha_health: { ultimo_estado: status, alertado: false } },
+        }).eq('id', club.id);
+      } else if (status !== wahaHealth.ultimo_estado) {
+        await sb.from('clubs').update({
+          config: { ...club.config, waha_health: { ultimo_estado: status, alertado: yaAlertado } },
+        }).eq('id', club.id);
+      }
+    }
+
+    res.json({ success: true, ...resultados });
+  } catch (err) {
+    console.error('[cron/waha-health] error:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });

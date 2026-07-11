@@ -32,6 +32,46 @@ async function setWahaSession(club_uuid, sessionName) {
   await sb.from('clubs').update({ config }).eq('id', club_uuid);
 }
 
+// Devuelve el número vinculado (me.id) de una sesión WAHA, o null si no está WORKING/no existe
+async function obtenerNumeroVinculado(sessionName) {
+  try {
+    const r = await wahaFetch(`/api/sessions/${sessionName}`);
+    if (!r.ok) return null;
+    const data = await r.json();
+    return data?.status === 'WORKING' ? (data.me?.id || null) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// Busca si el número recién vinculado ya está en uso en otra sesión (default u otro club) —
+// vincular el mismo número en varias sesiones "distintas" es una señal de automatización
+// que el antifraude de WhatsApp puede penalizar, además de ser un error de configuración real.
+async function buscarConflictoDeNumero(numeroVinculado, sessionNameActual, club_uuid) {
+  if (!numeroVinculado) return null;
+
+  if (sessionNameActual !== 'default') {
+    const numeroDefault = await obtenerNumeroVinculado('default');
+    if (numeroDefault && numeroDefault === numeroVinculado) return 'default';
+  }
+
+  const sb = supabaseAdmin();
+  const { data: otrosClubes } = await sb
+    .from('clubs')
+    .select('id, slug, config')
+    .neq('id', club_uuid)
+    .not('config->>waha_session', 'is', null);
+
+  for (const otro of (otrosClubes || [])) {
+    const suSesion = otro.config?.waha_session;
+    if (!suSesion || suSesion === sessionNameActual) continue;
+    const suNumero = await obtenerNumeroVinculado(suSesion);
+    if (suNumero && suNumero === numeroVinculado) return suSesion;
+  }
+
+  return null;
+}
+
 // Verifica plan Pro/Scale
 function verificarPlan(req, res) {
   const plan = (req.clubConfig?.plan || req.clubPlan || 'trial').toLowerCase();
@@ -191,8 +231,21 @@ router.get('/estado', async (req, res) => {
     const data = await r.json();
     const status = data.status || 'UNKNOWN'; // STOPPED | STARTING | SCAN_QR_CODE | WORKING | FAILED
 
-    // Si ya está conectado, guardar la sesión en config del club
+    // Si ya está conectado, verificar que el número no esté ya vinculado en otra sesión
+    // (default u otro club) antes de guardarlo — reusar un mismo número en varias
+    // sesiones "distintas" es una señal de automatización que WhatsApp puede penalizar.
     if (status === 'WORKING' && club.config?.waha_session !== sessionName) {
+      const conflicto = await buscarConflictoDeNumero(data.me?.id || null, sessionName, req.club_uuid);
+      if (conflicto) {
+        try { await wahaFetch(`/api/sessions/${sessionName}/logout`, { method: 'POST' }); } catch (_) {}
+        try { await wahaFetch(`/api/sessions/${sessionName}`, { method: 'DELETE' }); } catch (_) {}
+        return res.json({
+          success: true,
+          status: 'DUPLICATE_NUMBER',
+          session: sessionName,
+          error: `Este número de WhatsApp ya está conectado en otra sesión (${conflicto}). Usa un número diferente para este club.`,
+        });
+      }
       await setWahaSession(req.club_uuid, sessionName);
     }
 
