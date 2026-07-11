@@ -64,11 +64,10 @@ router.patch('/:cedula', async (req, res) => {
       details: { campos: Object.keys(req.body) },
     });
 
-    // Si se modificó el descuento, recalcular el mes actual y todos los meses futuros
-    // del año en curso (para que el convenio/beca quede aplicado el resto del año, no
-    // solo el mes en que se configuró). Los meses ya pasados no se tocan — son historial.
+    // Si se modificó el descuento, recalcular los 12 meses del año en curso (convenios/becas
+    // aplican a todo el año, no solo desde que se configuran). Los meses ya pagados en su
+    // totalidad (AL_DIA) no se tocan, para no reabrir historial ya cerrado.
     if (req.body.descuento_pct !== undefined) {
-      const mesActual  = new Date().getMonth() + 1;
       const anioActual = new Date().getFullYear();
       const valorMensual = Number(club.config?.valor_mensualidad ?? 0);
       const nuevoPct     = Math.max(0, Math.min(100, Number(req.body.descuento_pct ?? 0)));
@@ -80,7 +79,6 @@ router.patch('/:cedula', async (req, res) => {
         .eq('club_id', club.id)
         .eq('cedula', req.params.cedula)
         .eq('anio', anioActual)
-        .gte('numero_mes', mesActual)
         .neq('estado', 'AL_DIA');
 
       for (const mens of (mensualidadesAjustar || [])) {
