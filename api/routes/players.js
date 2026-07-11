@@ -338,7 +338,7 @@ router.post('/estado-cuenta-masivo', async (req, res) => {
 
             // — Mensaje —
             const mesActualLower = MESES_ES[nowCol.getMonth()];
-            let msg = `Hola *${nombreCompleto}* 👋\n\n`;
+            let msg = `Hola *${nombre || nombreCompleto}* 👋\n\n`;
             msg += `Te compartimos tu estado de cuenta con ${clubNombre} hasta ( ${mesActualLower} ) de ${nowCol.getFullYear()}\n`;
             msg += `📅 MENSUALIDADES\n${lineaMens}\n\n`;
             msg += `👕 UNIFORMES\n${lineaUnif}\n\n`;
