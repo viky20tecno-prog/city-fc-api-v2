@@ -1057,6 +1057,91 @@ async function getAsistenciaStatsClub(club_id, club_slug) {
   });
 }
 
+// Ranking de asistencia a ENTRENAMIENTOS (nunca partidos — las convocatorias no son
+// las mismas para todos) para un período dado, para dar incentivos/premiación.
+// Agrupa por el campo `equipo` del propio evento (no un equipo fijo del jugador) —
+// así un jugador que entrena con varios equipos queda evaluado por separado en cada
+// uno, y un club de una sola categoría (todo sin equipo o un único valor) simplemente
+// no genera desglose por equipo, solo el general.
+// club_slug: slug del club (calendario.club_id guarda el slug, no el uuid)
+async function getRankingAsistenciaEntrenamientos(club_id, club_slug, { anio, mes } = {}) {
+  const anioNum = parseInt(anio) || new Date().getFullYear();
+  let desde, hasta;
+  if (mes) {
+    const mesNum = parseInt(mes);
+    desde = new Date(Date.UTC(anioNum, mesNum - 1, 1));
+    hasta = new Date(Date.UTC(anioNum, mesNum, 1));
+  } else {
+    desde = new Date(Date.UTC(anioNum, 0, 1));
+    hasta = new Date(Date.UTC(anioNum + 1, 0, 1));
+  }
+
+  const { data: eventos, error } = await supabase
+    .from('calendario')
+    .select('id, equipo')
+    .eq('club_id', club_slug)
+    .eq('tipo', 'ENTRENAMIENTO')
+    .or('suspendido.eq.false,suspendido.is.null')
+    .gte('fecha_inicio', desde.toISOString())
+    .lt('fecha_inicio', hasta.toISOString());
+  if (error) throw error;
+  if (!eventos || eventos.length === 0) return { general: [], por_equipo: {}, total_entrenamientos: 0 };
+
+  const eventoIds    = eventos.map(e => e.id);
+  const eventoEquipo = {};
+  eventos.forEach(e => { eventoEquipo[e.id] = e.equipo || null; });
+
+  const [{ data: registros }, { data: jugadores }] = await Promise.all([
+    supabase.from('asistencia').select('cedula, estado, evento_id').eq('club_id', club_id).in('evento_id', eventoIds),
+    supabase.from('players').select('cedula, nombre, apellidos').eq('club_id', club_id).eq('activo', true),
+  ]);
+
+  const nombreMap = {};
+  (jugadores || []).forEach(j => { nombreMap[j.cedula] = `${j.nombre || ''} ${j.apellidos || ''}`.trim(); });
+
+  const acumGeneral = {}; // cedula -> { presentes, eventos: Set }
+  const acumEquipo  = {}; // equipo -> cedula -> { presentes, eventos: Set }
+
+  (registros || []).forEach(r => {
+    if (!acumGeneral[r.cedula]) acumGeneral[r.cedula] = { presentes: 0, eventos: new Set() };
+    acumGeneral[r.cedula].eventos.add(r.evento_id);
+    if (r.estado === 'PRESENTE') acumGeneral[r.cedula].presentes++;
+
+    const equipo = eventoEquipo[r.evento_id];
+    if (equipo) {
+      if (!acumEquipo[equipo]) acumEquipo[equipo] = {};
+      if (!acumEquipo[equipo][r.cedula]) acumEquipo[equipo][r.cedula] = { presentes: 0, eventos: new Set() };
+      acumEquipo[equipo][r.cedula].eventos.add(r.evento_id);
+      if (r.estado === 'PRESENTE') acumEquipo[equipo][r.cedula].presentes++;
+    }
+  });
+
+  function buildRanking(acum) {
+    return Object.entries(acum)
+      .map(([cedula, { presentes, eventos: evs }]) => {
+        const total = evs.size;
+        return {
+          cedula,
+          nombre: nombreMap[cedula] || cedula,
+          presentes,
+          total_eventos: total,
+          porcentaje: total > 0 ? Math.round((presentes / total) * 100) : 0,
+        };
+      })
+      .sort((a, b) => b.porcentaje - a.porcentaje || b.presentes - a.presentes);
+  }
+
+  const equiposDistintos = Object.keys(acumEquipo);
+  const general   = buildRanking(acumGeneral);
+  // Solo desglosar por equipo si hay más de uno — un club de una sola categoría no
+  // necesita un segundo listado idéntico al general.
+  const por_equipo = equiposDistintos.length > 1
+    ? Object.fromEntries(equiposDistintos.map(eq => [eq, buildRanking(acumEquipo[eq])]))
+    : {};
+
+  return { general, por_equipo, total_entrenamientos: eventos.length };
+}
+
 async function upsertAsistencia({ club_id, evento_id, cedula, estado, nota, pago_arbitraje, registrado_por }) {
   const { data, error } = await supabase
     .from('asistencia')
@@ -1233,6 +1318,7 @@ module.exports = {
   getTotalEventosClub,
   getAsistenciaJugador,
   getAsistenciaStatsClub,
+  getRankingAsistenciaEntrenamientos,
   upsertAsistencia,
   getAllActiveClubs,
   marcarEmailEnviado,

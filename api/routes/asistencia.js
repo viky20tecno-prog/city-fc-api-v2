@@ -31,6 +31,22 @@ router.get('/stats', async (req, res) => {
   }
 });
 
+// GET /api/asistencia/ranking-entrenamientos?club_id=&anio=&mes=
+// Ranking de asistencia a entrenamientos (nunca partidos) para un mes o año completo,
+// para dar incentivos/premiación. mes es opcional — sin él, se agrega el año completo.
+router.get('/ranking-entrenamientos', async (req, res) => {
+  try {
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+    const { anio, mes } = req.query;
+    const data = await db.getRankingAsistenciaEntrenamientos(club.id, req.club_id, { anio, mes });
+    res.json({ success: true, ...data });
+  } catch (err) {
+    console.error('GET /asistencia/ranking-entrenamientos:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // GET /api/asistencia/:eventoId?club_id=
 // Retorna lista de jugadores (filtrada por equipo si el evento es PARTIDO)
 // con su estado de asistencia para ese evento.
