@@ -63,7 +63,9 @@ router.patch('/:cedula', async (req, res) => {
       details: { campos: Object.keys(req.body) },
     });
 
-    // Si se modificó el descuento, recalcular la mensualidad del mes actual (si no está AL_DIA)
+    // Si se modificó el descuento, recalcular el mes actual y todos los meses futuros
+    // del año en curso (para que el convenio/beca quede aplicado el resto del año, no
+    // solo el mes en que se configuró). Los meses ya pasados no se tocan — son historial.
     if (req.body.descuento_pct !== undefined) {
       const mesActual  = new Date().getMonth() + 1;
       const anioActual = new Date().getFullYear();
@@ -71,17 +73,16 @@ router.patch('/:cedula', async (req, res) => {
       const nuevoPct     = Math.max(0, Math.min(100, Number(req.body.descuento_pct ?? 0)));
       const nuevoOficial = Math.round(valorMensual * (1 - nuevoPct / 100));
 
-      const { data: mens } = await db.supabase
+      const { data: mensualidadesAjustar } = await db.supabase
         .from('mensualidades')
         .select('id, valor_pagado, penalidad')
         .eq('club_id', club.id)
         .eq('cedula', req.params.cedula)
-        .eq('numero_mes', mesActual)
         .eq('anio', anioActual)
-        .neq('estado', 'AL_DIA')
-        .maybeSingle();
+        .gte('numero_mes', mesActual)
+        .neq('estado', 'AL_DIA');
 
-      if (mens) {
+      for (const mens of (mensualidadesAjustar || [])) {
         const penalidad  = Number(mens.penalidad   ?? 0);
         const pagado     = Number(mens.valor_pagado ?? 0);
         const nuevoSaldo = Math.max(0, nuevoOficial + penalidad - pagado);
