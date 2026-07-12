@@ -167,16 +167,35 @@ function detectarConcepto(text: string): 'mensualidad' | 'uniforme' | 'torneo' {
 
 // ─── Actualizar mensualidad más antigua pendiente ────────────────────────────
 async function actualizarMensualidad(clubId: string, cedula: string, monto: number) {
-  const { data: pendientes, error } = await supabase
-    .from('mensualidades')
-    .select('*')
-    .eq('club_id', clubId)
-    .eq('cedula', String(cedula))
-    .in('estado', ['PENDIENTE', 'PARCIAL', 'MORA'])
-    .gt('valor_oficial', 0)
-    .order('numero_mes', { ascending: true });
+  const [{ data: pendientesRaw, error }, { data: susp }] = await Promise.all([
+    supabase
+      .from('mensualidades')
+      .select('*')
+      .eq('club_id', clubId)
+      .eq('cedula', String(cedula))
+      .in('estado', ['PENDIENTE', 'PARCIAL', 'MORA'])
+      .gt('valor_oficial', 0)
+      .order('numero_mes', { ascending: true }),
+    supabase
+      .from('suspensiones')
+      .select('mes_inicio, mes_fin, anio')
+      .eq('club_id', clubId)
+      .eq('cedula', String(cedula))
+      .eq('activa', true),
+  ]);
 
   if (error) { console.error('[mensualidad] select error:', error.message); return null; }
+
+  // Nunca aplicar el pago a un mes con suspensión activa, aunque su `estado` haya
+  // quedado desincronizado (ej. sigue en MORA/PENDIENTE tras suspender).
+  const suspendido = (anio: number, mes: number) => (susp || []).some(
+    (s: { mes_inicio: number; mes_fin: number; anio: number }) =>
+      parseInt(String(s.anio)) === parseInt(String(anio)) && s.mes_inicio <= mes && mes <= s.mes_fin,
+  );
+  const pendientes = (pendientesRaw || []).filter(
+    (m: { anio: number; numero_mes: number }) => !suspendido(m.anio, parseInt(String(m.numero_mes))),
+  );
+
   if (!pendientes?.length) { console.log('[mensualidad] sin pendientes para cedula', cedula); return null; }
 
   const target      = pendientes[0];
@@ -591,15 +610,30 @@ Deno.serve(async (req: Request) => {
       let porPagar = 0;
 
       if (concepto === 'mensualidad') {
-        const { data: pendientes } = await supabase
-          .from('mensualidades')
-          .select('valor_oficial, valor_pagado')
-          .eq('club_id', club.id)
-          .eq('cedula', player.cedula)
-          .in('estado', ['PENDIENTE', 'PARCIAL', 'MORA'])
-          .gt('valor_oficial', 0)
-          .order('numero_mes', { ascending: true })
-          .limit(1);
+        const [{ data: pendientesRaw }, { data: susp }] = await Promise.all([
+          supabase
+            .from('mensualidades')
+            .select('valor_oficial, valor_pagado, numero_mes, anio')
+            .eq('club_id', club.id)
+            .eq('cedula', player.cedula)
+            .in('estado', ['PENDIENTE', 'PARCIAL', 'MORA'])
+            .gt('valor_oficial', 0)
+            .order('numero_mes', { ascending: true }),
+          supabase
+            .from('suspensiones')
+            .select('mes_inicio, mes_fin, anio')
+            .eq('club_id', club.id)
+            .eq('cedula', player.cedula)
+            .eq('activa', true),
+        ]);
+        // Nunca contar como "por pagar" un mes con suspensión activa
+        const suspendido = (anio: number, mes: number) => (susp || []).some(
+          (s: { mes_inicio: number; mes_fin: number; anio: number }) =>
+            parseInt(String(s.anio)) === parseInt(String(anio)) && s.mes_inicio <= mes && mes <= s.mes_fin,
+        );
+        const pendientes = (pendientesRaw || []).filter(
+          (m: { anio: number; numero_mes: number }) => !suspendido(m.anio, parseInt(String(m.numero_mes))),
+        );
         if (pendientes?.length) {
           const t = pendientes[0];
           porPagar = Math.max(0, parseFloat(t.valor_oficial) - (parseFloat(t.valor_pagado) || 0));

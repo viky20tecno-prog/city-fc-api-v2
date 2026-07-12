@@ -318,6 +318,28 @@ async function procesarClub(
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+// Cédulas con una suspensión ACTIVA (si se cancela, la deuda del mes vuelve a contar —
+// criterio unificado con el resto del proyecto) que cubre ese mes/año exacto.
+async function cedulasSuspendidasEnMes(
+  supabase: ReturnType<typeof createClient>,
+  club_id: string,
+  mes: number,
+  anio: number,
+): Promise<Set<string>> {
+  const { data: susp } = await supabase
+    .from('suspensiones')
+    .select('cedula, mes_inicio, mes_fin')
+    .eq('club_id', club_id)
+    .eq('activa', true)
+    .eq('anio', anio);
+
+  return new Set(
+    (susp || [])
+      .filter((s: { mes_inicio: number; mes_fin: number }) => s.mes_inicio <= mes && mes <= s.mes_fin)
+      .map((s: { cedula: string }) => s.cedula)
+  );
+}
+
 async function jugadoresConDeuda(
   supabase: ReturnType<typeof createClient>,
   club_id: string,
@@ -325,15 +347,22 @@ async function jugadoresConDeuda(
   mes: number,
   anio: number,
 ) {
-  const { data: mens } = await supabase
-    .from('mensualidades')
-    .select('cedula')
-    .eq('club_id', club_id)
-    .eq('numero_mes', mes)
-    .eq('anio', anio)
-    .neq('estado', 'AL_DIA');
+  const [{ data: mens }, suspendidas] = await Promise.all([
+    supabase
+      .from('mensualidades')
+      .select('cedula')
+      .eq('club_id', club_id)
+      .eq('numero_mes', mes)
+      .eq('anio', anio)
+      .neq('estado', 'AL_DIA'),
+    cedulasSuspendidasEnMes(supabase, club_id, mes, anio),
+  ]);
 
-  const cedulasDeuda = new Set((mens || []).map((m: { cedula: string }) => m.cedula));
+  const cedulasDeuda = new Set(
+    (mens || [])
+      .map((m: { cedula: string }) => m.cedula)
+      .filter((cedula: string) => !suspendidas.has(cedula))
+  );
   return jugadores.filter(j => cedulasDeuda.has(j.cedula));
 }
 
@@ -344,15 +373,22 @@ async function jugadoresEnMora(
   mes: number,
   anio: number,
 ) {
-  const { data: mens } = await supabase
-    .from('mensualidades')
-    .select('cedula')
-    .eq('club_id', club_id)
-    .eq('numero_mes', mes)
-    .eq('anio', anio)
-    .eq('estado', 'MORA');
+  const [{ data: mens }, suspendidas] = await Promise.all([
+    supabase
+      .from('mensualidades')
+      .select('cedula')
+      .eq('club_id', club_id)
+      .eq('numero_mes', mes)
+      .eq('anio', anio)
+      .eq('estado', 'MORA'),
+    cedulasSuspendidasEnMes(supabase, club_id, mes, anio),
+  ]);
 
-  const cedulasMora = new Set((mens || []).map((m: { cedula: string }) => m.cedula));
+  const cedulasMora = new Set(
+    (mens || [])
+      .map((m: { cedula: string }) => m.cedula)
+      .filter((cedula: string) => !suspendidas.has(cedula))
+  );
   return jugadores.filter(j => cedulasMora.has(j.cedula));
 }
 
