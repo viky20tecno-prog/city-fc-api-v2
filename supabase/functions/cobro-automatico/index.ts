@@ -10,6 +10,11 @@ const WAHA_SESSION              = Deno.env.get('WAHA_SESSION') || 'default';
 const DEFAULT_PENALIDAD_MORA    = 10_000;
 const DEFAULT_VALOR_MENSUALIDAD = 65_000;
 
+// ⚠️ PAUSADO 12 jul 2026 — el envío masivo automático de cobro está contribuyendo a que
+// WhatsApp banee el número. No mandar nada (ni registrar como enviado) hasta nueva orden
+// explícita de Diego. Para reactivar: cambiar a `false`.
+const PAUSA_ENVIOS = true;
+
 // ─── Entry point ─────────────────────────────────────────────────────────────
 serve(async (req) => {
   if (req.method !== 'POST') {
@@ -420,10 +425,17 @@ async function logEnvio(
   mes: number,
   anio: number,
 ) {
+  // Con PAUSA_ENVIOS activo no se registra nada — así, al reactivar, los mensajes
+  // de este período no quedan marcados como "ya enviados" sin haberse enviado nunca.
+  if (PAUSA_ENVIOS) return;
   await supabase.from('wa_log_envios').insert({ club_id, cedula, tipo_mensaje, mes, anio });
 }
 
 async function enviarWA(celular: string, body: string, session: string, _conQR = false, _qrUrl = '') {
+  if (PAUSA_ENVIOS) {
+    console.log('[cobro-automatico] PAUSADO — no se envía WA a', celular, '(session:', session + ')');
+    return;
+  }
   if (!WAHA_URL) throw new Error('WAHA_URL no configurado');
   const numero = String(celular).replace(/\D/g, '').replace(/^57/, '');
   const chatId = `57${numero}@c.us`;
