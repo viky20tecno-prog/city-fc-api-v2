@@ -20,11 +20,20 @@ router.get('/', async (req, res) => {
     if (mes) invoices = invoices.filter(inv => String(inv.numero_mes) === String(mes));
     if (status) invoices = invoices.filter(inv => inv.estado === status);
 
+    // Solo suspensiones activas excusan un mes — si se cancela, la deuda vuelve a contar
+    const suspensiones = await db.getSuspensiones(club.id);
+    const isSuspendido = (cedula, mesNum, anioCheck) => suspensiones.some(s =>
+      s.activa && String(s.cedula) === String(cedula) && parseInt(s.anio) === parseInt(anioCheck) &&
+      s.mes_inicio <= mesNum && mesNum <= s.mes_fin);
+
     const stats = {
       total_invoices: invoices.length,
       total_oficial: invoices.reduce((sum, inv) => sum + (parseFloat(inv.valor_oficial) || 0), 0),
       total_pagado: invoices.reduce((sum, inv) => sum + (parseFloat(inv.valor_pagado) || 0), 0),
-      total_pendiente: invoices.reduce((sum, inv) => sum + (parseFloat(inv.saldo_pendiente) || 0), 0),
+      total_pendiente: invoices.reduce((sum, inv) => {
+        if (isSuspendido(inv.cedula, parseInt(inv.numero_mes), inv.anio)) return sum;
+        return sum + (parseFloat(inv.saldo_pendiente) || 0);
+      }, 0),
       por_estado: {
         AL_DIA:    invoices.filter(inv => inv.estado === 'AL_DIA').length,
         PENDIENTE: invoices.filter(inv => inv.estado === 'PENDIENTE').length,
@@ -81,7 +90,15 @@ router.get('/player/:cedula', async (req, res) => {
     const player = await db.getPlayerByCedula(club.id, cedula);
     if (!player) return res.status(404).json({ success: false, error: 'Player not found', cedula });
 
-    const invoices = await db.getMensualidades(club.id, cedula);
+    const [invoices, suspensiones] = await Promise.all([
+      db.getMensualidades(club.id, cedula),
+      db.getSuspensiones(club.id),
+    ]);
+
+    // Solo suspensiones activas excusan un mes — si se cancela, la deuda vuelve a contar
+    const isSuspendido = (mesNum, anioCheck) => suspensiones.some(s =>
+      s.activa && String(s.cedula) === String(cedula) && parseInt(s.anio) === parseInt(anioCheck) &&
+      s.mes_inicio <= mesNum && mesNum <= s.mes_fin);
 
     const invoicesByYear = {};
     invoices.forEach(inv => {
@@ -102,7 +119,10 @@ router.get('/player/:cedula', async (req, res) => {
 
     const totalOficial   = invoices.reduce((sum, inv) => sum + (parseFloat(inv.valor_oficial) || 0), 0);
     const totalPagado    = invoices.reduce((sum, inv) => sum + (parseFloat(inv.valor_pagado) || 0), 0);
-    const totalPendiente = invoices.reduce((sum, inv) => sum + (parseFloat(inv.saldo_pendiente) || 0), 0);
+    const totalPendiente = invoices.reduce((sum, inv) => {
+      if (isSuspendido(parseInt(inv.numero_mes), inv.anio)) return sum;
+      return sum + (parseFloat(inv.saldo_pendiente) || 0);
+    }, 0);
 
     res.json({
       success: true,

@@ -4,7 +4,7 @@
 // PARCIAL en el mes actual no cuenta como mora todavía; meses SUSPENDIDO no cuentan.
 function mesesEnMora(mensualidades, cedula, anio, mesActual, pastGracePeriod, suspensiones = []) {
   const isSuspendido = (mesNum) => (suspensiones || []).some(s =>
-    String(s.cedula) === String(cedula) && parseInt(s.anio) === anio && s.mes_inicio <= mesNum && mesNum <= s.mes_fin);
+    s.activa && String(s.cedula) === String(cedula) && parseInt(s.anio) === anio && s.mes_inicio <= mesNum && mesNum <= s.mes_fin);
 
   return (mensualidades || []).filter(m => {
     if (String(m.anio) !== String(anio)) return false;

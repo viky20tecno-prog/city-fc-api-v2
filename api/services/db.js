@@ -520,17 +520,31 @@ async function createArbitrajePago(pagoData) {
  * Mensualidades pendientes de un jugador (para procesar pagos)
  */
 async function getMensualidadesPendientes(club_id, cedula) {
-  const { data, error } = await supabase
-    .from('mensualidades')
-    .select('*')
-    .eq('club_id', club_id)
-    .eq('cedula', String(cedula))
-    .in('estado', ['PENDIENTE', 'PARCIAL', 'MORA'])
-    .gt('valor_oficial', 0)
-    .order('anio',       { ascending: true })
-    .order('numero_mes', { ascending: true });
+  const [{ data, error }, { data: susp }] = await Promise.all([
+    supabase
+      .from('mensualidades')
+      .select('*')
+      .eq('club_id', club_id)
+      .eq('cedula', String(cedula))
+      .in('estado', ['PENDIENTE', 'PARCIAL', 'MORA'])
+      .gt('valor_oficial', 0)
+      .order('anio',       { ascending: true })
+      .order('numero_mes', { ascending: true }),
+    supabase
+      .from('suspensiones')
+      .select('mes_inicio, mes_fin, anio')
+      .eq('club_id', club_id)
+      .eq('cedula', String(cedula))
+      .eq('activa', true),
+  ]);
   if (error) throw error;
-  return data;
+
+  // Nunca aplicar un pago a un mes con suspensión activa, aunque su `estado` en la fila
+  // haya quedado desincronizado (ej. sigue en MORA/PENDIENTE tras suspender).
+  const suspendido = (anio, mes) => (susp || []).some(s =>
+    parseInt(s.anio) === parseInt(anio) && s.mes_inicio <= mes && mes <= s.mes_fin);
+
+  return (data || []).filter(m => !suspendido(m.anio, parseInt(m.numero_mes)));
 }
 
 /**

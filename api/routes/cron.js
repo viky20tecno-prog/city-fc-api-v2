@@ -350,17 +350,25 @@ router.all('/plantillas', async (req, res) => {
           if (!jugadores?.length) { resultados.omitidos++; continue; }
 
           // Traer todas las mensualidades del año de una sola vez
-          const { data: todasMens } = await sb
-            .from('mensualidades')
-            .select('cedula, estado, saldo_pendiente, numero_mes')
-            .eq('club_id', club.id)
-            .eq('anio', anio)
-            .in('estado', ['MORA','PENDIENTE','PARCIAL'])
-            .gt('valor_oficial', 0);
+          const [{ data: todasMens }, suspensionesCron] = await Promise.all([
+            sb.from('mensualidades')
+              .select('cedula, estado, saldo_pendiente, numero_mes')
+              .eq('club_id', club.id)
+              .eq('anio', anio)
+              .in('estado', ['MORA','PENDIENTE','PARCIAL'])
+              .gt('valor_oficial', 0),
+            db.getSuspensiones(club.id),
+          ]);
+
+          // Solo suspensiones activas excusan un mes — si se cancela, la deuda vuelve a contar
+          const isSuspendidoMesCron = (cedula, mesNum) => (suspensionesCron || []).some(s =>
+            s.activa && String(s.cedula) === String(cedula) && parseInt(s.anio) === anio &&
+            s.mes_inicio <= mesNum && mesNum <= s.mes_fin);
 
           // Agrupar por cédula
           const porCedula = {};
           for (const m of (todasMens || [])) {
+            if (isSuspendidoMesCron(m.cedula, parseInt(m.numero_mes))) continue;
             if (!porCedula[m.cedula]) porCedula[m.cedula] = [];
             porCedula[m.cedula].push(m);
           }

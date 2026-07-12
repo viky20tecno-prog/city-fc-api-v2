@@ -20,10 +20,11 @@ router.get('/summary', async (req, res) => {
       db.getSuspensiones(club.id),
     ]);
 
-    // Suspensiones excluyen meses de mora independientemente de si están activas o canceladas
-    // (el jugador no estuvo presente — hecho histórico inmutable)
+    // Solo suspensiones ACTIVAS excluyen un mes de mora — si se cancela la suspensión,
+    // la deuda de esos meses vuelve a contar (criterio unificado en todo el proyecto).
     const isSuspendido = (cedula, mesNum, anioCheck) =>
       suspensiones.some(s =>
+        s.activa &&
         s.cedula === String(cedula) &&
         parseInt(s.anio) === parseInt(anioCheck) &&
         s.mes_inicio <= mesNum &&
@@ -42,16 +43,17 @@ router.get('/summary', async (req, res) => {
       valor_pagado_mes:       0,
       valor_pendiente_mes:    0,
       porcentaje_recaudacion: 0,
-      por_estado: { AL_DIA: 0, PARCIAL: 0, PENDIENTE: 0, MORA: 0 },
+      por_estado: { AL_DIA: 0, PARCIAL: 0, PENDIENTE: 0, MORA: 0, SUSPENDIDO: 0 },
       'morosos_cédulas': [],
     };
 
     currentMonthInvoices.forEach(inv => {
-      invoiceStats.valor_oficial_mes   += parseFloat(inv.valor_oficial)   || 0;
-      invoiceStats.valor_pagado_mes    += parseFloat(inv.valor_pagado)     || 0;
-      invoiceStats.valor_pendiente_mes += parseFloat(inv.saldo_pendiente)  || 0;
-      // Si ya pasó el día de gracia, PENDIENTE se cuenta como MORA
-      const estadoReal = (inv.estado === 'PENDIENTE' && pastGracePeriod) ? 'MORA' : inv.estado;
+      const suspendido = isSuspendido(inv.cedula, parseInt(inv.numero_mes), anio);
+      invoiceStats.valor_oficial_mes += parseFloat(inv.valor_oficial) || 0;
+      invoiceStats.valor_pagado_mes  += parseFloat(inv.valor_pagado)  || 0;
+      if (!suspendido) invoiceStats.valor_pendiente_mes += parseFloat(inv.saldo_pendiente) || 0;
+      // Si ya pasó el día de gracia, PENDIENTE se cuenta como MORA — un mes suspendido no cuenta en ningún estado de deuda
+      const estadoReal = suspendido ? 'SUSPENDIDO' : (inv.estado === 'PENDIENTE' && pastGracePeriod) ? 'MORA' : inv.estado;
       invoiceStats.por_estado[estadoReal] = (invoiceStats.por_estado[estadoReal] || 0) + 1;
     });
 

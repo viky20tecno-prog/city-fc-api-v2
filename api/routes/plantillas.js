@@ -301,15 +301,23 @@ router.post('/:id/enviar', async (req, res) => {
         } else if (tipo === 'cobro') {
           const mesActual = nowCol.getMonth() + 1;
 
-          const { data: mens } = await sb
-            .from('mensualidades')
-            .select('cedula, estado, saldo_pendiente, numero_mes')
-            .eq('club_id', club.id).eq('anio', anio)
-            .in('estado', ['MORA', 'PENDIENTE', 'PARCIAL'])
-            .gt('valor_oficial', 0);
+          const [{ data: mens }, suspensionesCobro] = await Promise.all([
+            sb.from('mensualidades')
+              .select('cedula, estado, saldo_pendiente, numero_mes')
+              .eq('club_id', club.id).eq('anio', anio)
+              .in('estado', ['MORA', 'PENDIENTE', 'PARCIAL'])
+              .gt('valor_oficial', 0),
+            db.getSuspensiones(club.id),
+          ]);
+
+          // Solo suspensiones activas excusan un mes — si se cancela, la deuda vuelve a contar
+          const isSuspendidoMes = (cedula, mesNum) => (suspensionesCobro || []).some(s =>
+            s.activa && String(s.cedula) === String(cedula) && parseInt(s.anio) === anio &&
+            s.mes_inicio <= mesNum && mesNum <= s.mes_fin);
 
           const porCedula = {};
           for (const m of (mens || [])) {
+            if (isSuspendidoMes(m.cedula, parseInt(m.numero_mes))) continue;
             if (!porCedula[m.cedula]) porCedula[m.cedula] = [];
             porCedula[m.cedula].push(m);
           }
