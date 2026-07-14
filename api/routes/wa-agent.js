@@ -156,16 +156,6 @@ async function analizarComprobanteConClaude(buffer, mediaType) {
 const MESES = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio',
                'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
-const TEMPLATE_RECORDATORIO_DEFAULT = '⚽ *{club_nombre}*\n\nHola {nombre}, tienes *{meses} mensualidad(es)* pendiente(s) por un total de *{deuda}*.\n\nPor favor ponte al día para seguir disfrutando del club. ¡Gracias! 🙏';
-
-function aplicarTemplate(template, vars) {
-  return template
-    .replace(/{nombre}/g, vars.nombre || '')
-    .replace(/{deuda}/g, vars.deuda != null ? `$${Math.round(vars.deuda).toLocaleString('es-CO')}` : '')
-    .replace(/{meses}/g, String(vars.meses || ''))
-    .replace(/{club_nombre}/g, vars.club_nombre || '');
-}
-
 // ── Enviar mensaje de vuelta al usuario vía Meta API ─────────────────────────
 async function sendWA(to, text) {
   const url = `https://graph.facebook.com/v20.0/${process.env.WA_PHONE_NUMBER_ID}/messages`;
@@ -272,19 +262,6 @@ const TOOLS_BASE = [
         mes: { type: 'number', description: 'Número del mes (1=Enero...12=Diciembre) para consultar ese mes puntual. Omitir para ver los morosos causados hasta el mes actual.' },
       },
       required: ['club_id'],
-    },
-  },
-  {
-    name: 'enviar_recordatorio_pago',
-    description: 'SOLO ADMIN. Envía un mensaje de WhatsApp a todos los jugadores con deuda pendiente. Puedes personalizar el texto con las variables {nombre}, {deuda} y {meses}.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        club_id:               { type: 'string' },
-        club_nombre:           { type: 'string' },
-        mensaje_personalizado: { type: 'string', description: 'Mensaje personalizado. Variables disponibles: {nombre}, {deuda}, {meses}. Si no se envía, usa el mensaje estándar.' },
-      },
-      required: ['club_id', 'club_nombre'],
     },
   },
   {
@@ -418,7 +395,7 @@ const TOOL_CREAR_EVENTO = {
 // Herramientas por rol — jugadores y visitantes NO pueden buscar datos de otras personas
 const TOOLS_ADMIN       = [TOOL_BUSCAR_JUGADOR, TOOL_ENVIAR_MENSAJE_JUGADOR, TOOL_LISTAR_EVENTOS_HOY, TOOL_VER_LISTA_ASISTENCIA, TOOL_REGISTRAR_ASISTENCIA_LOTE, TOOL_CREAR_EVENTO, ...TOOLS_BASE];
 const TOOLS_ENTRENADOR  = [TOOL_BUSCAR_JUGADOR, TOOL_ENVIAR_MENSAJE_JUGADOR, TOOL_LISTAR_EVENTOS_HOY, TOOL_VER_LISTA_ASISTENCIA, TOOL_REGISTRAR_ASISTENCIA_LOTE, TOOL_CREAR_EVENTO, ...TOOLS_BASE.filter(t => ['consultar_calendario', 'consultar_asistencia_hoy'].includes(t.name))];
-const TOOLS_JUGADOR     = [TOOL_OBTENER_CARNET, ...TOOLS_BASE.filter(t => !['registrar_lead', 'consultar_pagos_club', 'consultar_morosos', 'enviar_recordatorio_pago', 'consultar_asistencia_hoy', 'consultar_pagos'].includes(t.name))];
+const TOOLS_JUGADOR     = [TOOL_OBTENER_CARNET, ...TOOLS_BASE.filter(t => !['registrar_lead', 'consultar_pagos_club', 'consultar_morosos', 'consultar_asistencia_hoy', 'consultar_pagos'].includes(t.name))];
 const TOOLS_VISITANTE   = TOOLS_BASE.filter(t => ['registrar_lead', 'info_zensports'].includes(t.name));
 
 // ── Ejecutar herramienta ─────────────────────────────────────────────────────
@@ -676,63 +653,9 @@ async function runTool(name, input, contexto = {}) {
       return { total_morosos: morosos.length, morosos: morosos.slice(0, 5), total_deuda, pdf_url };
     }
 
-    if (name === 'enviar_recordatorio_pago') {
-      // Siempre usar el club_id/nombre del contexto autenticado, nunca lo que pasa el LLM —
-      // si no, un admin podría inducir al agente a mandar spam masivo con la sesión de OTRO club.
-      const clubId = contexto.club_id;
-      if (!clubId) return { error: 'No se encontró el club en el contexto' };
-      const clubNombre = contexto.club_nombre;
-      const anio = new Date().getFullYear();
-      const mesActual = new Date().getMonth() + 1;
-      const pastGracePeriod = new Date().getDate() > 7;
-      const supabase = db.supabase;
-
-      // Obtener la sesión propia del club — nunca usar el número central para masivos
-      const { data: clubRow } = await supabase.from('clubs').select('config').eq('id', clubId).single();
-      const clubSession = clubRow?.config?.waha_session;
-      if (!clubSession) {
-        return { error: 'El club no tiene número de WhatsApp propio configurado. Conéctalo desde el panel (Configuración → WhatsApp) para poder enviar recordatorios masivos.' };
-      }
-
-      const { data: players } = await supabase
-        .from('players')
-        .select('cedula, nombre, celular')
-        .eq('club_id', clubId)
-        .eq('activo', true)
-        .not('celular', 'is', null);
-      if (!players?.length) return { enviados: 0 };
-
-      if (!process.env.WAHA_URL) return { error: 'WAHA no configurado' };
-
-      const suspensiones = await db.getSuspensiones(clubId);
-      const template = input.mensaje_personalizado || TEMPLATE_RECORDATORIO_DEFAULT;
-      let enviados = 0;
-
-      for (const p of players) {
-        const mens = await db.getMensualidades(clubId, p.cedula);
-        const pend = mesesEnMora(mens, p.cedula, anio, mesActual, pastGracePeriod, suspensiones);
-        if (!pend.length) continue;
-        const deuda = pend.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
-        const msg = aplicarTemplate(template, { nombre: p.nombre, deuda, meses: pend.length, club_nombre: clubNombre });
-        try {
-          await sendWAHA(p.celular, msg, clubSession);
-          enviados++;
-        } catch (e) { /* continuar con el siguiente */ }
-        // Delay anti-ban: 4-8 segundos entre mensajes
-        await new Promise(r => setTimeout(r, 4000 + Math.random() * 4000));
-      }
-
-      // Guardar métricas en clubs.config
-      try {
-        const { data: clubData } = await supabase.from('clubs').select('config').eq('id', clubId).single();
-        const waMetrics = clubData?.config?.wa_metrics || {};
-        waMetrics.ultimo_recordatorio = { fecha: new Date().toISOString(), enviados };
-        waMetrics.total_recordatorios = (waMetrics.total_recordatorios || 0) + 1;
-        await supabase.from('clubs').update({ config: { ...(clubData?.config || {}), wa_metrics: waMetrics } }).eq('id', clubId);
-      } catch (e) { /* no crítico */ }
-
-      return { enviados, mensaje: `Recordatorio enviado a ${enviados} jugador(es) con deuda pendiente.` };
-    }
+    // enviar_recordatorio_pago se quitó — era un envío en bucle a todos los morosos vía WAHA
+    // (con delay "anti-ban" que igual no evitó los baneos del número). El recordatorio masivo
+    // ahora es manual, jugador por jugador, desde la pantalla de Estado de cuenta del dashboard.
 
     if (name === 'consultar_asistencia_hoy') {
       const supabase = db.supabase;
@@ -1043,7 +966,7 @@ const SYSTEM_ADMIN = `${SYSTEM_BASE}
 
 ROL: Estás atendiendo al ADMINISTRADOR del club. Sus datos de club están en el CONTEXTO.
 
-REGLA CRÍTICA: Cuando el usuario envíe un número del 1 al 8 Y no estés en medio de un flujo de asistencia o creación de evento, interpreta que está seleccionando esa opción del menú. Si ya llamaste listar_eventos_hoy y estás esperando que el admin elija un evento, interpreta el número como selección del evento (no del menú).
+REGLA CRÍTICA: Cuando el usuario envíe un número del 1 al 7 Y no estés en medio de un flujo de asistencia o creación de evento, interpreta que está seleccionando esa opción del menú. Si ya llamaste listar_eventos_hoy y estás esperando que el admin elija un evento, interpreta el número como selección del evento (no del menú).
 
 MENÚ DE ADMIN (usar cuando digan "hola", "menu" o sea primera vez):
 PERSONALIZACIÓN OBLIGATORIA: usa el campo "club_nombre" del CONTEXTO en el saludo. Ejemplo: si club_nombre="City FC", el saludo es "👋 ¡Hola! Soy *Zen*, el asistente de administración de *City FC*."
@@ -1054,38 +977,33 @@ PERSONALIZACIÓN OBLIGATORIA: usa el campo "club_nombre" del CONTEXTO en el salu
 
 1️⃣ Ver pagos pendientes del club
 2️⃣ Ver jugadores morosos
-3️⃣ Enviar recordatorio de pago masivo
-4️⃣ Resumen financiero rápido
-5️⃣ Ver próximos eventos del club
-6️⃣ Enviar mensaje a un jugador
-7️⃣ Pasar asistencia de un evento
-8️⃣ Crear evento en el calendario
+3️⃣ Resumen financiero rápido
+4️⃣ Ver próximos eventos del club
+5️⃣ Enviar mensaje a un jugador
+6️⃣ Pasar asistencia de un evento
+7️⃣ Crear evento en el calendario
 
 Escribe el número o dime directamente 💼
 ---
 
+Para mandar el recordatorio de pago del mes a los jugadores, el admin lo hace desde el dashboard (Plantillas de mensajes → Estado de cuenta) — ahí ve la lista completa y manda uno a uno desde su propio WhatsApp. Si te lo pide por acá, indícale ese camino.
+
 FLUJO:
 - "pagos pendientes" / opción 1 → usa consultar_pagos_club; muestra el resultado detallado con al día, pendientes y deuda
 - "morosos" / opción 2 → usa consultar_morosos
-- "recordatorio" / opción 3 → usa enviar_recordatorio_pago; si el admin quiere personalizar el mensaje pregúntale el texto antes de llamarla
-- "resumen" / opción 4 → usa consultar_pagos_club; presenta así: "📊 *Resumen financiero — [mes actual]*\n• Jugadores totales: X\n• Al día: X ✅\n• Pendientes: X ⚠️\n• Deuda total: $X\n• Tasa de mora: X%"
-- "eventos" o "calendario" / opción 5 → usa consultar_calendario con club_slug del contexto; el resultado tiene un campo "texto" con el mensaje ya formateado — envíalo TAL CUAL sin modificarlo
-- "enviar mensaje a [nombre/cédula]" / opción 6 → usa enviar_mensaje_jugador con la cédula o nombre y el texto
-- "asistencia" / opción 7 → flujo de asistencia: ver FLUJO DE ASISTENCIA abajo
-- "crear evento" / opción 8 → flujo de creación: ver FLUJO CREAR EVENTO abajo
+- "resumen" / opción 3 → usa consultar_pagos_club; presenta así: "📊 *Resumen financiero — [mes actual]*\n• Jugadores totales: X\n• Al día: X ✅\n• Pendientes: X ⚠️\n• Deuda total: $X\n• Tasa de mora: X%"
+- "eventos" o "calendario" / opción 4 → usa consultar_calendario con club_slug del contexto; el resultado tiene un campo "texto" con el mensaje ya formateado — envíalo TAL CUAL sin modificarlo
+- "enviar mensaje a [nombre/cédula]" / opción 5 → usa enviar_mensaje_jugador con la cédula o nombre y el texto
+- "asistencia" / opción 6 → flujo de asistencia: ver FLUJO DE ASISTENCIA abajo
+- "crear evento" / opción 7 → flujo de creación: ver FLUJO CREAR EVENTO abajo
 
-FLUJO DE ASISTENCIA (opción 7 o cuando el admin mencione "asistencia" o "pasar lista"):
+FLUJO DE ASISTENCIA (opción 6 o cuando el admin mencione "asistencia" o "pasar lista"):
 Paso 1 — llama listar_eventos_hoy.
   Si no hay eventos: "No hay eventos programados para hoy."
   Si hay un solo evento: envía directamente su url_asistencia con este mensaje:
     "📋 *[título]* — [hora]\n\nAbre este link para pasar la asistencia:\n[url_asistencia]\n\n_El link es válido por 6 horas._"
   Si hay varios eventos: muestra la lista numerada y pregunta cuál. Cuando el admin elija, envía la url_asistencia del evento seleccionado con el mismo formato.
 REGLA: NUNCA llames ver_lista_asistencia ni registrar_asistencia_lote en el flujo de asistencia del admin. El link hace todo.
-
-RECORDATORIO PERSONALIZADO:
-- Si el admin dice "envía recordatorio con mensaje: [texto]", usa ese texto como mensaje_personalizado
-- Variables disponibles que el admin puede usar: {nombre} = nombre del jugador, {deuda} = monto, {meses} = meses pendientes
-- Ejemplo: "Hola {nombre}, tu cuota de ${'{deuda}'} está vencida. Comunícate con nosotros."
 
 REPORTE PDF DE MOROSOS:
 - La tool consultar_morosos devuelve un JSON con: total_morosos (número real de morosos), morosos[] (muestra parcial) y total_deuda.

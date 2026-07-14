@@ -222,173 +222,195 @@ router.patch('/:cedula/exento', async (req, res) => {
   }
 });
 
-// POST /api/players/estado-cuenta-masivo?club_id= — envía WA personalizado con estado de cuenta a todos los jugadores activos con celular
-router.post('/estado-cuenta-masivo', async (req, res) => {
+// Arma el texto de estado de cuenta de un jugador (mensualidades + torneos + uniformes +
+// medios de pago). Sin QR: un link `wa.me` solo puede prellenar texto, no adjuntar imagen —
+// el admin comparte el QR por fuera si hace falta.
+function construirTextoEstadoCuenta(club, jugador, datos) {
+  const { mensByCedula, torneosByCedula, pedidosByCedula, anioAct, mesActualNum, pastGracePeriod, suspensiones } = datos;
+
+  const clubNombre     = club.config?.nombre || club.name;
+  const clubSlug       = club.slug;
+  const adminDigits    = club.celular_admin ? String(club.celular_admin).replace(/\D/g, '') : null;
+  const adminWaLink    = adminDigits ? `wa.me/${adminDigits.startsWith('57') ? adminDigits : '57' + adminDigits}` : null;
+  const llavePago      = club.config?.llave_pago   || null;
+  const cuentaBancaria = club.config?.cuenta_bancaria || null;
+  const razonSocial    = club.config?.razon_social || null;
+  const nit            = club.config?.nit || null;
+
+  const fmtCOP    = n => '$' + Math.round(Number(n) || 0).toLocaleString('es-CO');
+  const nowCol    = new Date(Date.now() - 5 * 3600000);
+  const MESES_ES  = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+
+  const { cedula, nombre, apellidos } = jugador;
+  const nombreCompleto = `${nombre || ''} ${apellidos || ''}`.trim();
+
+  // — Mensualidades — solo lo causado hasta hoy, nunca meses futuros del año
+  // (mismo criterio que el dashboard y consultar_pagos_club/consultar_morosos del bot)
+  const mens     = (mensByCedula[String(cedula)] || []).filter(m => (m.valor_oficial || 0) > 0);
+  const pendMens = mesesEnMora(mens, cedula, anioAct, mesActualNum, pastGracePeriod, suspensiones);
+  const enMora   = pendMens.some(m => m.estado === 'MORA');
+  const saldoMens = pendMens.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
+
+  let lineaMens;
+  if (pendMens.length === 0) {
+    lineaMens = '✅ Al día';
+  } else {
+    lineaMens = `${enMora ? '🔴 En mora' : '⏳ Pendiente'}\nMeses: ${pendMens.length} | Saldo: ${fmtCOP(saldoMens)}`;
+  }
+
+  // — Torneos —
+  const torneos = (torneosByCedula[String(cedula)] || []);
+  let lineaTorneos;
+  if (torneos.length === 0) {
+    lineaTorneos = 'Sin inscripciones activas';
+  } else {
+    lineaTorneos = torneos.map(t => {
+      const saldoT = parseFloat(t.saldo_pendiente) || 0;
+      const valorT = parseFloat(t.valor_inscrito)  || parseFloat(t.valor_oficial) || 0;
+      return `* ${t.nombre_torneo}: saldo pendiente ${fmtCOP(saldoT)} (valor total ${fmtCOP(valorT)}).`;
+    }).join('\n');
+  }
+
+  // — Uniformes (pedidos PENDIENTE) —
+  const pedPend  = (pedidosByCedula[String(cedula)] || []).filter(p => p.estado === 'PENDIENTE');
+  const saldoUnif = pedPend.reduce((s, p) => s + (parseFloat(p.total) || 0), 0);
+  const lineaUnif = saldoUnif > 0 ? `🔴 Saldo: ${fmtCOP(saldoUnif)}` : '✅ Sin saldo pendiente';
+
+  // — Mensaje —
+  const mesActualLower = MESES_ES[nowCol.getMonth()];
+  let msg = `Hola *${nombre || nombreCompleto}* 👋\n\n`;
+  msg += `Te compartimos tu estado de cuenta con ${clubNombre} hasta ( ${mesActualLower} ) de ${nowCol.getFullYear()}\n`;
+  msg += `📅 MENSUALIDADES\n${lineaMens}\n\n`;
+  msg += `👕 UNIFORMES\n${lineaUnif}\n\n`;
+  msg += `🏆 Torneos\n\n${lineaTorneos}\n\n`;
+
+  let footerEmpresa = '';
+  if (razonSocial) footerEmpresa += `🏪 ${razonSocial}\n`;
+  if (nit)         footerEmpresa += `NIT: ${nit}\n`;
+  if (footerEmpresa) msg += footerEmpresa + '\n';
+
+  let medios = '';
+  if (cuentaBancaria && (cuentaBancaria.numero || cuentaBancaria.banco)) {
+    medios += `- 🏦 ${[cuentaBancaria.tipo, cuentaBancaria.banco].filter(Boolean).join(' ')}: ${cuentaBancaria.numero || ''}\n`;
+  }
+  if (llavePago) {
+    medios += `- 🔑 Bre-b (llave) : ${llavePago}\n`;
+  }
+  if (medios) msg += `💳 MEDIOS DE PAGO 💳\n\n${medios}`;
+
+  const portalLink = `https://zensports.zenpra.ai/p/${clubSlug}/${cedula}`;
+  msg += `\nVer tu cuenta completa:\n${portalLink}`;
+  if (adminWaLink) {
+    msg += `\n\n_Si crees que hay alguna inconsistencia, escríbele directamente al administrador del club:_\n${adminWaLink}`;
+  }
+
+  return msg;
+}
+
+// GET /api/players/estado-cuenta-lista?club_id=city-fc — jugadores activos con celular,
+// cada uno con su link wa.me (texto prellenado, sin adjuntar nada) y si el admin ya lo
+// marcó como enviado este mes. Reemplaza el envío masivo automático vía WAHA — ese patrón
+// (ráfaga de mensajes casi idénticos a números que no te tienen guardado) fue el que causó
+// los baneos del número del club. Ahora el envío real lo hace el admin, un clic a la vez,
+// desde su propio WhatsApp.
+router.get('/estado-cuenta-lista', async (req, res) => {
   try {
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
-    const wahaUrl    = process.env.WAHA_URL;
-    const apiKey     = process.env.WAHA_API_KEY;
-    if (!wahaUrl) return res.status(500).json({ success: false, error: 'WAHA_URL no configurado' });
-
-    const clubSession = club.config?.waha_session;
-    if (!clubSession) return res.status(400).json({ success: false, error: 'Club sin sesión WhatsApp configurada' });
-
-    const clubNombre  = club.config?.nombre || club.name;
-    const clubSlug    = club.slug;
-    const adminDigits = club.celular_admin ? String(club.celular_admin).replace(/\D/g, '') : null;
-    const adminWaLink = adminDigits ? `wa.me/${adminDigits.startsWith('57') ? adminDigits : '57' + adminDigits}` : null;
-
-    const qrPagoUrl      = club.config?.qr_pago_url  || null;
-    const llavePago      = club.config?.llave_pago   || null;
-    const cuentaBancaria = club.config?.cuenta_bancaria || null;
-    const razonSocial    = club.config?.razon_social || null;
-    const nit            = club.config?.nit || null;
-
-    const cedulaFiltro = req.query.cedula ? String(req.query.cedula) : null;
     const todosJugadores = await db.getPlayers(club.id);
-    const activos    = todosJugadores.filter(j => j.activo);
-    const filtrados  = cedulaFiltro ? activos.filter(j => String(j.cedula) === cedulaFiltro) : activos;
-    const conNumero  = filtrados.filter(j => j.celular);
-    const sinNumero  = filtrados.filter(j => !j.celular).length;
+    const conNumero = todosJugadores.filter(j => j.activo && j.celular);
 
-    res.json({ success: true, iniciado: true, total: conNumero.length, sin_numero: sinNumero });
+    const anioAct         = new Date().getFullYear();
+    const mesActualNum    = new Date().getMonth() + 1;
+    const pastGracePeriod = new Date().getDate() > 7;
 
-    setImmediate(async () => {
-      try {
-        const [allMens, allTorneos, allPedidos, suspensiones] = await Promise.all([
-          db.getMensualidades(club.id),
-          db.getTorneos(club.id),
-          db.getPedidoUniformes(club.id),
-          db.getSuspensiones(club.id),
-        ]);
+    const [allMens, allTorneos, allPedidos, suspensiones, enviosMes] = await Promise.all([
+      db.getMensualidades(club.id),
+      db.getTorneos(club.id),
+      db.getPedidoUniformes(club.id),
+      db.getSuspensiones(club.id),
+      db.supabase
+        .from('wa_log_envios')
+        .select('cedula')
+        .eq('club_id', club.id)
+        .eq('tipo_mensaje', 'estado_cuenta')
+        .eq('mes', mesActualNum)
+        .eq('anio', anioAct),
+    ]);
 
-        const anioAct         = new Date().getFullYear();
-        const mesActualNum    = new Date().getMonth() + 1;
-        const pastGracePeriod = new Date().getDate() > 7;
+    const enviadosSet = new Set((enviosMes.data || []).map(e => String(e.cedula)));
 
-        const mensByCedula    = {};
-        const torneosByCedula = {};
-        const pedidosByCedula = {};
-
-        allMens.forEach(m => {
-          if (!mensByCedula[m.cedula]) mensByCedula[m.cedula] = [];
-          mensByCedula[m.cedula].push(m);
-        });
-        allTorneos.forEach(t => {
-          if (!torneosByCedula[t.cedula]) torneosByCedula[t.cedula] = [];
-          torneosByCedula[t.cedula].push(t);
-        });
-        allPedidos.forEach(p => {
-          if (!p.cedula) return;
-          if (!pedidosByCedula[p.cedula]) pedidosByCedula[p.cedula] = [];
-          pedidosByCedula[p.cedula].push(p);
-        });
-
-        const waHeaders = { 'Content-Type': 'application/json' };
-        if (apiKey) waHeaders['X-Api-Key'] = apiKey;
-
-        const nowCol    = new Date(Date.now() - 5 * 3600000);
-        const MESES_ES  = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-
-        const fmtCOP = n => '$' + Math.round(Number(n) || 0).toLocaleString('es-CO');
-
-        function chatId(cel) {
-          const n = String(cel).replace(/\D/g, '');
-          return `${n.startsWith('57') ? n : '57' + n}@c.us`;
-        }
-
-        for (const jugador of conNumero) {
-          try {
-            const { cedula, nombre, apellidos, celular } = jugador;
-            const nombreCompleto = `${nombre || ''} ${apellidos || ''}`.trim();
-
-            // — Mensualidades — solo lo causado hasta hoy, nunca meses futuros del año
-            // (mismo criterio que el dashboard y consultar_pagos_club/consultar_morosos del bot)
-            const mens     = (mensByCedula[String(cedula)] || []).filter(m => (m.valor_oficial || 0) > 0);
-            const pendMens = mesesEnMora(mens, cedula, anioAct, mesActualNum, pastGracePeriod, suspensiones);
-            const enMora   = pendMens.some(m => m.estado === 'MORA');
-            const saldoMens = pendMens.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
-
-            let lineaMens;
-            if (pendMens.length === 0) {
-              lineaMens = '✅ Al día';
-            } else {
-              lineaMens = `${enMora ? '🔴 En mora' : '⏳ Pendiente'}\nMeses: ${pendMens.length} | Saldo: ${fmtCOP(saldoMens)}`;
-            }
-
-            // — Torneos —
-            const torneos = (torneosByCedula[String(cedula)] || []);
-            let lineaTorneos;
-            if (torneos.length === 0) {
-              lineaTorneos = 'Sin inscripciones activas';
-            } else {
-              lineaTorneos = torneos.map(t => {
-                const saldoT = parseFloat(t.saldo_pendiente) || 0;
-                const valorT = parseFloat(t.valor_inscrito)  || parseFloat(t.valor_oficial) || 0;
-                return `* ${t.nombre_torneo}: saldo pendiente ${fmtCOP(saldoT)} (valor total ${fmtCOP(valorT)}).`;
-              }).join('\n');
-            }
-
-            // — Uniformes (pedidos PENDIENTE) —
-            const pedPend  = (pedidosByCedula[String(cedula)] || []).filter(p => p.estado === 'PENDIENTE');
-            const saldoUnif = pedPend.reduce((s, p) => s + (parseFloat(p.total) || 0), 0);
-            const lineaUnif = saldoUnif > 0 ? `🔴 Saldo: ${fmtCOP(saldoUnif)}` : '✅ Sin saldo pendiente';
-
-            // — Mensaje —
-            const mesActualLower = MESES_ES[nowCol.getMonth()];
-            let msg = `Hola *${nombre || nombreCompleto}* 👋\n\n`;
-            msg += `Te compartimos tu estado de cuenta con ${clubNombre} hasta ( ${mesActualLower} ) de ${nowCol.getFullYear()}\n`;
-            msg += `📅 MENSUALIDADES\n${lineaMens}\n\n`;
-            msg += `👕 UNIFORMES\n${lineaUnif}\n\n`;
-            msg += `🏆 Torneos\n\n${lineaTorneos}\n\n`;
-
-            let footerEmpresa = '';
-            if (razonSocial) footerEmpresa += `🏪 ${razonSocial}\n`;
-            if (nit)         footerEmpresa += `NIT: ${nit}\n`;
-            if (footerEmpresa) msg += footerEmpresa + '\n';
-
-            let medios = '';
-            if (cuentaBancaria && (cuentaBancaria.numero || cuentaBancaria.banco)) {
-              medios += `- 🏦 ${[cuentaBancaria.tipo, cuentaBancaria.banco].filter(Boolean).join(' ')}: ${cuentaBancaria.numero || ''}\n`;
-            }
-            if (llavePago) {
-              medios += `- 🔑 Bre-b (llave) : ${llavePago}\n`;
-            }
-            if (medios) msg += `💳 MEDIOS DE PAGO 💳\n\n${medios}`;
-
-            const portalLink = `https://zensports.zenpra.ai/p/${clubSlug}/${cedula}`;
-            msg += `\nVer tu cuenta completa:\n${portalLink}`;
-            if (adminWaLink) {
-              msg += `\n\n_Si crees que hay alguna inconsistencia, escríbele directamente al administrador del club:_\n${adminWaLink}`;
-            }
-
-            if (qrPagoUrl) {
-              await fetch(`${wahaUrl}/api/sendImage`, {
-                method: 'POST',
-                headers: waHeaders,
-                body: JSON.stringify({ chatId: chatId(celular), file: { url: qrPagoUrl }, caption: '📷 QR de pago', session: clubSession }),
-              });
-            }
-
-            await fetch(`${wahaUrl}/api/sendText`, {
-              method: 'POST',
-              headers: waHeaders,
-              body: JSON.stringify({ chatId: chatId(celular), text: msg, session: clubSession, linkPreview: false }),
-            });
-
-            await new Promise(r => setTimeout(r, 3000));
-          } catch (e) {
-            console.error(`[estado-cuenta] jugador ${jugador.cedula}:`, e.message);
-          }
-        }
-      } catch (e) {
-        console.error('[estado-cuenta-masivo] error global:', e.message);
-      }
+    const mensByCedula    = {};
+    const torneosByCedula = {};
+    const pedidosByCedula = {};
+    allMens.forEach(m => {
+      if (!mensByCedula[m.cedula]) mensByCedula[m.cedula] = [];
+      mensByCedula[m.cedula].push(m);
     });
+    allTorneos.forEach(t => {
+      if (!torneosByCedula[t.cedula]) torneosByCedula[t.cedula] = [];
+      torneosByCedula[t.cedula].push(t);
+    });
+    allPedidos.forEach(p => {
+      if (!p.cedula) return;
+      if (!pedidosByCedula[p.cedula]) pedidosByCedula[p.cedula] = [];
+      pedidosByCedula[p.cedula].push(p);
+    });
+
+    const datos = { mensByCedula, torneosByCedula, pedidosByCedula, anioAct, mesActualNum, pastGracePeriod, suspensiones };
+    const codigoPais = club.config?.codigo_pais || '57';
+
+    const data = conNumero.map(j => {
+      const digitos = String(j.celular).replace(/\D/g, '');
+      const numero  = digitos.startsWith(codigoPais) ? digitos : `${codigoPais}${digitos}`;
+      const texto   = construirTextoEstadoCuenta(club, j, datos);
+      return {
+        cedula:     j.cedula,
+        nombre:     j.nombre,
+        apellidos:  j.apellidos,
+        celular:    j.celular,
+        wa_link:    `https://wa.me/${numero}?text=${encodeURIComponent(texto)}`,
+        ya_enviado: enviadosSet.has(String(j.cedula)),
+      };
+    });
+
+    res.json({ success: true, mes: mesActualNum, anio: anioAct, total: data.length, data });
   } catch (err) {
-    console.error('POST /players/estado-cuenta-masivo:', err.message);
+    console.error('GET /players/estado-cuenta-lista:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/players/estado-cuenta-marcar?club_id=city-fc — marca/desmarca que el admin ya
+// envió el estado de cuenta del mes a un jugador. Es un registro manual del propio admin,
+// no una confirmación real de entrega — el envío ocurre fuera del sistema, dentro de WhatsApp.
+router.post('/estado-cuenta-marcar', async (req, res) => {
+  try {
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const { cedula, enviado } = req.body;
+    if (!cedula) return res.status(400).json({ success: false, error: 'cedula requerida' });
+
+    const anioAct      = new Date().getFullYear();
+    const mesActualNum = new Date().getMonth() + 1;
+
+    if (enviado) {
+      await db.supabase.from('wa_log_envios').upsert({
+        club_id: club.id, cedula: String(cedula), tipo_mensaje: 'estado_cuenta',
+        mes: mesActualNum, anio: anioAct,
+      }, { onConflict: 'club_id,cedula,tipo_mensaje,mes,anio' });
+    } else {
+      await db.supabase.from('wa_log_envios')
+        .delete()
+        .eq('club_id', club.id).eq('cedula', String(cedula))
+        .eq('tipo_mensaje', 'estado_cuenta').eq('mes', mesActualNum).eq('anio', anioAct);
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('POST /players/estado-cuenta-marcar:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
