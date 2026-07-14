@@ -1072,14 +1072,22 @@ async function getAsistenciaStatsClub(club_id, club_slug) {
 }
 
 // Ranking de asistencia a ENTRENAMIENTOS y PARTIDOS para un período dado, para dar
-// incentivos/premiación. En partidos solo cuentan los jugadores que efectivamente
-// fueron convocados (los registros de `asistencia` para un partido ya vienen
-// acotados a los convocados/equipo del evento — ver getAsistencia — así que sumar
-// esos registros tal cual ya respeta esa regla, sin necesidad de recalcularla acá).
-// Agrupa por el campo `equipo` del propio evento (no un equipo fijo del jugador) —
-// así un jugador que entrena/juega con varios equipos queda evaluado por separado en
-// cada uno, y un club de una sola categoría (todo sin equipo o un único valor)
-// simplemente no genera desglose por equipo, solo el general.
+// incentivos/premiación. El denominador es el total de eventos PROGRAMADOS en el
+// período (ej. 2/50 si hubo 50 entrenamientos y fue a 2) — no cuántos eventos
+// alguien se acordó de marcar, que es lo que devolvía la versión anterior.
+//   - Entrenamientos: el panel de asistencia los abre a TODO jugador activo, nunca
+//     los restringe por convocados/equipo (ver getAsistencia) — así que el
+//     denominador general es el total de entrenamientos del período, igual para
+//     todos los jugadores activos.
+//   - Partidos: solo cuentan los partidos donde el jugador fue efectivamente
+//     convocado (o, si el partido no tiene convocados explícitos, coincide con el
+//     equipo del partido; si tampoco tiene equipo, aplica a todos) — misma regla
+//     de elegibilidad que ya usa getAsistencia para armar la lista del panel.
+// "por_equipo" agrupa por el campo `equipo` del propio evento. Para entrenamientos,
+// como el panel no restringe por equipo, se usa el equipo asignado al jugador
+// (players.equipo) solo para decidir si entra en ese bucket puntual — sin esto,
+// todos los activos caerían en todos los buckets. Un club de una sola categoría
+// (todo sin equipo o un único valor) no genera desglose, solo el general.
 // club_slug: slug del club (calendario.club_id guarda el slug, no el uuid)
 async function getRankingAsistencia(club_id, club_slug, { anio, mes } = {}) {
   const anioNum = parseInt(anio) || new Date().getFullYear();
@@ -1093,74 +1101,97 @@ async function getRankingAsistencia(club_id, club_slug, { anio, mes } = {}) {
     hasta = new Date(Date.UTC(anioNum + 1, 0, 1));
   }
 
-  const { data: eventos, error } = await supabase
-    .from('calendario')
-    .select('id, equipo')
-    .eq('club_id', club_slug)
-    .in('tipo', ['ENTRENAMIENTO', 'PARTIDO'])
-    .or('suspendido.eq.false,suspendido.is.null')
-    .gte('fecha_inicio', desde.toISOString())
-    .lt('fecha_inicio', hasta.toISOString());
-  if (error) throw error;
-  if (!eventos || eventos.length === 0) return { general: [], por_equipo: {}, total_eventos: 0 };
-
-  const eventoIds    = eventos.map(e => e.id);
-  const eventoEquipo = {};
-  eventos.forEach(e => { eventoEquipo[e.id] = e.equipo || null; });
-
-  const [{ data: registros }, { data: jugadores }] = await Promise.all([
-    supabase.from('asistencia').select('cedula, estado, evento_id').eq('club_id', club_id).in('evento_id', eventoIds),
-    supabase.from('players').select('cedula, nombre, apellidos').eq('club_id', club_id).eq('activo', true),
+  const [{ data: eventos, error }, { data: jugadores }] = await Promise.all([
+    supabase
+      .from('calendario')
+      .select('id, tipo, equipo, convocados')
+      .eq('club_id', club_slug)
+      .in('tipo', ['ENTRENAMIENTO', 'PARTIDO'])
+      .or('suspendido.eq.false,suspendido.is.null')
+      .gte('fecha_inicio', desde.toISOString())
+      .lt('fecha_inicio', hasta.toISOString()),
+    supabase.from('players').select('cedula, nombre, apellidos, equipo').eq('club_id', club_id).eq('activo', true),
   ]);
+  if (error) throw error;
+  if (!eventos || eventos.length === 0) {
+    return { entrenamientos: { general: [], por_equipo: {}, total: 0 }, partidos: { general: [], por_equipo: {}, total: 0 } };
+  }
 
-  const nombreMap = {};
-  (jugadores || []).forEach(j => { nombreMap[j.cedula] = `${j.nombre || ''} ${j.apellidos || ''}`.trim(); });
+  const nombreMap        = {};
+  const equipoJugadorMap = {};
+  (jugadores || []).forEach(j => {
+    nombreMap[j.cedula]        = `${j.nombre || ''} ${j.apellidos || ''}`.trim();
+    equipoJugadorMap[j.cedula] = j.equipo || null;
+  });
+  const cedulasActivas = Object.keys(nombreMap);
 
-  const acumGeneral = {}; // cedula -> { presentes, eventos: Set }
-  const acumEquipo  = {}; // equipo -> cedula -> { presentes, eventos: Set }
+  const eventoIds = eventos.map(e => e.id);
+  const { data: registros } = await supabase
+    .from('asistencia')
+    .select('cedula, estado, evento_id')
+    .eq('club_id', club_id)
+    .in('evento_id', eventoIds);
 
+  const presentesPorEvento = {}; // evento_id -> Set(cedula)
   (registros || []).forEach(r => {
-    if (!acumGeneral[r.cedula]) acumGeneral[r.cedula] = { presentes: 0, eventos: new Set() };
-    acumGeneral[r.cedula].eventos.add(r.evento_id);
-    if (r.estado === 'PRESENTE') acumGeneral[r.cedula].presentes++;
-
-    const equipo = eventoEquipo[r.evento_id];
-    if (equipo) {
-      if (!acumEquipo[equipo]) acumEquipo[equipo] = {};
-      if (!acumEquipo[equipo][r.cedula]) acumEquipo[equipo][r.cedula] = { presentes: 0, eventos: new Set() };
-      acumEquipo[equipo][r.cedula].eventos.add(r.evento_id);
-      if (r.estado === 'PRESENTE') acumEquipo[equipo][r.cedula].presentes++;
-    }
+    if (r.estado !== 'PRESENTE') return;
+    if (!presentesPorEvento[r.evento_id]) presentesPorEvento[r.evento_id] = new Set();
+    presentesPorEvento[r.evento_id].add(r.cedula);
   });
 
-  function buildRanking(acum) {
-    return Object.entries(acum)
-      // Solo jugadores activos hoy — la tabla asistencia puede tener registros de
-      // cédulas placeholder/duplicadas ya limpiadas (ej. "PEND_02") que nunca
-      // fueron un jugador real, o de jugadores dados de baja desde entonces.
-      .filter(([cedula]) => nombreMap[cedula])
-      .map(([cedula, { presentes, eventos: evs }]) => {
-        const total = evs.size;
-        return {
-          cedula,
-          nombre: nombreMap[cedula],
-          presentes,
-          total_eventos: total,
-          porcentaje: total > 0 ? Math.round((presentes / total) * 100) : 0,
-        };
-      })
+  function elegiblePartido(evento, cedula) {
+    if (evento.convocados && evento.convocados.length > 0) return evento.convocados.includes(cedula);
+    if (evento.equipo) return equipoJugadorMap[cedula] === evento.equipo;
+    return true;
+  }
+
+  function construirRanking(eventosBucket, tipo, restringirPorEquipoDelJugador) {
+    const acumulado = {};
+    cedulasActivas.forEach(cedula => { acumulado[cedula] = { presentes: 0, programados: 0 }; });
+
+    eventosBucket.forEach(ev => {
+      cedulasActivas.forEach(cedula => {
+        const elegible = tipo === 'PARTIDO'
+          ? elegiblePartido(ev, cedula)
+          : (!restringirPorEquipoDelJugador || equipoJugadorMap[cedula] === ev.equipo);
+        if (!elegible) return;
+        acumulado[cedula].programados++;
+        if (presentesPorEvento[ev.id]?.has(cedula)) acumulado[cedula].presentes++;
+      });
+    });
+
+    return Object.entries(acumulado)
+      .filter(([, v]) => v.programados > 0)
+      .map(([cedula, v]) => ({
+        cedula,
+        nombre: nombreMap[cedula],
+        presentes: v.presentes,
+        total_eventos: v.programados,
+        porcentaje: Math.round((v.presentes / v.programados) * 100),
+      }))
       .sort((a, b) => b.porcentaje - a.porcentaje || b.presentes - a.presentes);
   }
 
-  const equiposDistintos = Object.keys(acumEquipo);
-  const general   = buildRanking(acumGeneral);
-  // Solo desglosar por equipo si hay más de uno — un club de una sola categoría no
-  // necesita un segundo listado idéntico al general.
-  const por_equipo = equiposDistintos.length > 1
-    ? Object.fromEntries(equiposDistintos.map(eq => [eq, buildRanking(acumEquipo[eq])]))
-    : {};
+  function construirSeccion(tipo) {
+    const eventosTipo = eventos.filter(e => e.tipo === tipo);
+    if (eventosTipo.length === 0) return { general: [], por_equipo: {}, total: 0 };
 
-  return { general, por_equipo, total_eventos: eventos.length };
+    const equiposDistintos = [...new Set(eventosTipo.map(e => e.equipo).filter(Boolean))];
+    const general = construirRanking(eventosTipo, tipo, false);
+    // Solo desglosar por equipo si hay más de uno — un club de una sola categoría no
+    // necesita un segundo listado idéntico al general.
+    const por_equipo = equiposDistintos.length > 1
+      ? Object.fromEntries(equiposDistintos.map(eq =>
+          [eq, construirRanking(eventosTipo.filter(e => e.equipo === eq), tipo, true)]))
+      : {};
+
+    return { general, por_equipo, total: eventosTipo.length };
+  }
+
+  return {
+    entrenamientos: construirSeccion('ENTRENAMIENTO'),
+    partidos:       construirSeccion('PARTIDO'),
+  };
 }
 
 async function upsertAsistencia({ club_id, evento_id, cedula, estado, nota, pago_arbitraje, registrado_por }) {
