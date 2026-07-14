@@ -1414,32 +1414,14 @@ async function sendWAHA(to, text, session) {
   return data;
 }
 
-// ── Enviar imagen/archivo vía WAHA ───────────────────────────────────────────
-async function sendWAHAImage(to, imageUrl, caption = '', session) {
-  const wahaUrl = process.env.WAHA_URL;
-  const sess    = session || process.env.WAHA_SESSION || 'default';
-  if (!wahaUrl || !imageUrl) return;
-  try {
-    const chatId = wahaChatId(to);
-    const res = await fetch(`${wahaUrl}/api/sendImage`, {
-      method: 'POST',
-      headers: wahaHeaders(),
-      body: JSON.stringify({ chatId, file: { url: imageUrl }, caption, session: sess }),
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      console.error('[wa-agent] sendWAHAImage error:', res.status, err);
-    } else console.log('[wa-agent] sendWAHAImage ok');
-  } catch (e) {
-    console.error('[wa-agent] sendWAHAImage exception:', e.message);
-  }
-}
-
-// ── Reenviar media (foto/comprobante) al admin del club ──────────────────────
-async function reenviarMediaAlAdmin(adminCelular, playerNombre, mediaUrl, mediaCaption) {
-  if (!adminCelular || !mediaUrl) return;
-  const msg = `📎 *${playerNombre || 'Un jugador'}* envió una imagen:\n${mediaCaption || ''}\n${mediaUrl}`;
-  await sendWAHA(adminCelular, msg);
+// ── Respuesta cuando un jugador manda una imagen que no es un comprobante válido ─────────
+// El bot ya no le escribe al admin por su cuenta (eso fue lo que ayudó a que baneen el
+// número) — acá solo le pasamos al jugador el contacto directo para que sea él quien decida
+// escribirle, si hace falta.
+function mensajeImagenNoComprobante(contexto) {
+  const contacto = contexto.contacto_admin ? String(contexto.contacto_admin).replace(/\D/g, '') : null;
+  const link = contacto ? `\n\nSi necesitás algo puntual, escribile directo al administrador de *${contexto.club_nombre}*: https://wa.me/${contacto}` : '';
+  return `🧐 No pude leer esa imagen como un comprobante de pago.${link}`;
 }
 
 // ── Procesar comprobante de pago detectado por Vision ───────────────────────
@@ -1448,7 +1430,6 @@ async function reenviarMediaAlAdmin(adminCelular, playerNombre, mediaUrl, mediaC
 async function procesarPagoComprobante(from, contexto, analisis, mediaUrl, buffer, mediaType) {
   const { monto, banco, referencia } = analisis;
   const montoFmt = (n) => '$' + Math.round(n).toLocaleString('es-CO');
-  const clubSession = contexto.config?.waha_session || null;
   const primerNombre = (contexto.nombre || '').trim().split(' ')[0] || contexto.nombre;
 
   // Guardar la imagen de forma permanente — WAHA la borra de su disco en minutos
@@ -1479,32 +1460,22 @@ async function procesarPagoComprobante(from, contexto, analisis, mediaUrl, buffe
     console.error('[comprobante] createPago error:', e.message);
   }
 
-  // Anti-fraude: guardar el hash de la imagen (para detectar el mismo archivo
-  // reenviado más adelante) y cruzar contra referencia/hash ya usados antes en
-  // este club — igual comprobante aplicado a meses distintos, o reenviado tal cual.
-  let alertaFraude = null;
-  if (pagoCreado) {
+  // Anti-fraude: guardar el hash de la imagen para que Conciliación (payments.js, que
+  // recalcula getReferenciasDuplicadas/getHashesDuplicados al listar pagos pendientes)
+  // pueda detectar el mismo archivo reenviado más adelante. Antes esto también armaba una
+  // alerta para el WhatsApp del admin — se quitó junto con ese envío; la detección en sí
+  // sigue viva porque Conciliación la recalcula sola, no depende de este mensaje.
+  if (pagoCreado && buffer) {
     try {
-      if (buffer) {
-        const hashImagen = crypto.createHash('sha256').update(buffer).digest('hex');
-        await db.logClubActivity({
-          club_id: contexto.club_id, club_slug: contexto.club_slug,
-          action: 'HASH_COMPROBANTE', entity_type: 'pago', entity_id: pagoCreado.id,
-          entity_label: contexto.nombre || null,
-          details: { hash: hashImagen },
-        });
-      }
-      const [refDup, hashDup] = await Promise.all([
-        db.getReferenciasDuplicadas(contexto.club_id),
-        db.getHashesDuplicados(contexto.club_id),
-      ]);
-      const refDuplicada  = !!refDup[pagoCreado.id];
-      const hashDuplicado = !!hashDup[String(pagoCreado.id)];
-      if (refDuplicada || hashDuplicado) {
-        alertaFraude = { referencia_duplicada: refDuplicada, imagen_duplicada: hashDuplicado };
-      }
+      const hashImagen = crypto.createHash('sha256').update(buffer).digest('hex');
+      await db.logClubActivity({
+        club_id: contexto.club_id, club_slug: contexto.club_slug,
+        action: 'HASH_COMPROBANTE', entity_type: 'pago', entity_id: pagoCreado.id,
+        entity_label: contexto.nombre || null,
+        details: { hash: hashImagen },
+      });
     } catch (e) {
-      console.error('[comprobante] chequeo anti-fraude falló:', e.message);
+      console.error('[comprobante] no se pudo guardar el hash anti-fraude:', e.message);
     }
   }
 
@@ -1517,11 +1488,10 @@ async function procesarPagoComprobante(from, contexto, analisis, mediaUrl, buffe
   if (preguntaExcedente) {
     mensajeJugador += `\n\n🤔 Vimos que el pago es mayor a una mensualidad (*${montoFmt(cuotaMensual)}*). ¿En qué se debe aplicar el resto? (uniforme, torneo, otra mensualidad, etc.)`;
   }
-  const alertaTexto = alertaFraude
-    ? `⚠️ *POSIBLE FRAUDE* — ${alertaFraude.referencia_duplicada ? 'esta referencia ya se usó en otro pago. ' : ''}${alertaFraude.imagen_duplicada ? 'esta imagen ya fue enviada antes. ' : ''}Revisa con cuidado antes de aprobar.\n\n`
-    : '';
-  const mensajeAdmin   = `${alertaTexto}💰 *Comprobante recibido — pendiente de aprobar*\n\nJugador: *${contexto.nombre}* · C.C. ${contexto.cedula}\nMonto: ${montoFmt(monto)}\nBanco: ${banco || 'N/A'} · Ref: ${referencia || 'N/A'}\n\nRevísalo en Conciliación 👉`;
 
+  // Solo se le responde al jugador que mandó el comprobante — el bot ya no le escribe al
+  // admin por su cuenta. El pago queda pendiente en Conciliación, donde el admin lo revisa
+  // cuando entra (no hace falta empujarlo por WhatsApp para que se entere).
   await sendWAHA(from, mensajeJugador);
 
   if (preguntaExcedente) {
@@ -1536,11 +1506,6 @@ async function procesarPagoComprobante(from, contexto, analisis, mediaUrl, buffe
     } catch (e) {
       console.error('[comprobante] no se pudo guardar la pregunta pendiente:', e.message);
     }
-  }
-
-  if (contexto.celular_admin) {
-    await sendWAHA(contexto.celular_admin, mensajeAdmin, clubSession);
-    await sendWAHAImage(contexto.celular_admin, mediaUrl, `Comprobante de ${contexto.nombre}`, clubSession);
   }
 }
 
@@ -1644,7 +1609,6 @@ router.post('/waha', async (req, res) => {
       // nunca se reconocen como comprobante.
       const mediaType    = payload?.type || payload?._data?.type || '';
       let mediaUrl        = payload?.media?.url || payload?.fileUrl || null;
-      const mediaCaption = payload?.caption || '';
 
       // WAHA a veces devuelve la URL del archivo apuntando a su propio localhost
       // (http://localhost:8080/...), inalcanzable desde Vercel. Reescribir al host
@@ -1673,17 +1637,14 @@ router.post('/waha', async (req, res) => {
           console.error('[wa-agent] Vision error:', visionErr.message);
         }
 
+        // Ya no se le reenvía nada al admin por su cuenta — el bot solo responde a quien le
+        // escribe. Si la imagen no es un comprobante válido, le damos al jugador el contacto
+        // directo del admin para que sea él quien decida escribirle.
         if (!esComprobante) {
-          if (contexto.celular_admin) {
-            await reenviarMediaAlAdmin(contexto.celular_admin, contexto.nombre, mediaUrl, mediaCaption);
-            await sendWAHA(from, `✅ Tu imagen fue enviada al administrador de *${contexto.club_nombre}*. Te contactarán pronto.`);
-          } else {
-            await sendWAHA(from, 'Solo puedo procesar mensajes de texto por ahora. Escríbeme lo que necesitas 😊');
-          }
+          await sendWAHA(from, mensajeImagenNoComprobante(contexto));
         }
-      } else if (rol === 'jugador' && contexto.celular_admin && mediaUrl) {
-        await reenviarMediaAlAdmin(contexto.celular_admin, contexto.nombre, mediaUrl, mediaCaption);
-        await sendWAHA(from, `✅ Tu imagen fue enviada al administrador de *${contexto.club_nombre}*. Te contactarán pronto.`);
+      } else if (rol === 'jugador' && mediaUrl) {
+        await sendWAHA(from, mensajeImagenNoComprobante(contexto));
       } else {
         await sendWAHA(from, 'Solo puedo procesar mensajes de texto por ahora. Escríbeme lo que necesitas 😊');
       }

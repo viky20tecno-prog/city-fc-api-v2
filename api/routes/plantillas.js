@@ -9,46 +9,6 @@ function supabaseAdmin() {
   return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 }
 
-function wahaChatId(to) {
-  const n = String(to).replace(/\D/g, '');
-  return `${n.startsWith('57') ? n : '57' + n}@c.us`;
-}
-
-function wahaHeaders() {
-  const h = { 'Content-Type': 'application/json' };
-  if (process.env.WAHA_API_KEY) h['X-Api-Key'] = process.env.WAHA_API_KEY;
-  return h;
-}
-
-async function sendWAHA(to, text, session) {
-  const wahaUrl = process.env.WAHA_URL;
-  const sess    = session || process.env.WAHA_SESSION || 'default';
-  if (!wahaUrl) return;
-  await fetch(`${wahaUrl}/api/sendText`, {
-    method: 'POST', headers: wahaHeaders(),
-    body: JSON.stringify({ chatId: wahaChatId(to), text, session: sess }),
-  });
-}
-
-async function sendWAHAImage(to, imageUrl, session) {
-  const wahaUrl = process.env.WAHA_URL;
-  const sess    = session || process.env.WAHA_SESSION || 'default';
-  if (!wahaUrl || !imageUrl) return;
-  await fetch(`${wahaUrl}/api/sendImage`, {
-    method: 'POST', headers: wahaHeaders(),
-    body: JSON.stringify({ chatId: wahaChatId(to), file: { url: imageUrl }, caption: '', session: sess }),
-  });
-}
-
-// Rellena variables del template con datos reales
-function renderMensaje(plantilla, vars) {
-  let texto = plantilla;
-  for (const [k, v] of Object.entries(vars)) {
-    texto = texto.replaceAll(k, v ?? '');
-  }
-  return texto;
-}
-
 // GET /api/plantillas
 router.get('/', async (req, res) => {
   try {
@@ -70,6 +30,11 @@ router.get('/', async (req, res) => {
 // Solo tipo 'evento' — el tipo 'cobro' (recordatorio masivo automático de mensualidades) se
 // quitó por completo: era el mismo patrón de ráfaga por WAHA que causaba baneos del número.
 // El recordatorio de cobro ahora es manual, uno a uno, desde la pantalla de Estado de cuenta.
+//
+// Estas plantillas ya NO se envían solas — son texto guardado con variables para que el admin
+// lo copie y lo pegue en su propio WhatsApp. Ningún club conecta un número acá: el envío
+// automático por WAHA (cron + "Enviar ahora"/"Probar") se quitó por completo — se estaba
+// baneando el número apenas se conectaba, incluso probándolo una sola vez.
 router.post('/', async (req, res) => {
   const { nombre, mensaje, incluir_qr, hora_envio, activa, tipo_evento } = req.body;
   if (!nombre || !mensaje) return res.status(400).json({ success: false, error: 'nombre y mensaje son requeridos' });
@@ -140,152 +105,6 @@ router.delete('/:id', async (req, res) => {
     if (error) throw error;
     res.json({ success: true });
   } catch (e) {
-    res.status(500).json({ success: false, error: e.message });
-  }
-});
-
-// POST /api/plantillas/:id/probar — envía al celular del admin con datos de ejemplo
-router.post('/:id/probar', async (req, res) => {
-  try {
-    const sb = supabaseAdmin();
-    const { data: p } = await sb.from('plantillas_mensajes')
-      .select('*').eq('id', req.params.id).eq('club_id', req.club_uuid).single();
-    if (!p) return res.status(404).json({ success: false, error: 'Plantilla no encontrada' });
-
-    const { data: club } = await sb.from('clubs').select('*').eq('id', req.club_uuid).single();
-    const config     = club?.config || {};
-    const clubNombre = config.nombre || club?.name || 'Mi Club';
-    const qrUrl      = config.qr_pago_url || null;
-    const adminTel    = club?.celular_admin;
-    if (!adminTel) return res.status(400).json({ success: false, error: 'El club no tiene celular_admin configurado' });
-    const clubSession = config.waha_session || process.env.WAHA_SESSION || 'default';
-
-    const DIAS = ['DOMINGO','LUNES','MARTES','MIÉRCOLES','JUEVES','VIERNES','SÁBADO'];
-    const hoy  = new Date(Date.now() - 5 * 3600000);
-    const vars = {
-      '{dia}':          DIAS[hoy.getDay()],
-      '{lugar}':        'Campo de Prueba',
-      '{hora_inicio}':  '9:00 pm',
-      '{hora_fin}':     '11:00 pm',
-      '{club_nombre}':  clubNombre,
-      '{llave_pago}':   config.llave_pago || '000000000',
-    };
-
-    const texto = renderMensaje(p.mensaje, vars);
-
-    if (p.incluir_qr && qrUrl) await sendWAHAImage(adminTel, qrUrl, clubSession);
-    await sendWAHA(adminTel, `🧪 *PRUEBA DE PLANTILLA*\n\n${texto}`, clubSession);
-
-    res.json({ success: true, enviado_a: adminTel });
-  } catch (e) {
-    res.status(500).json({ success: false, error: e.message });
-  }
-});
-
-// POST /api/plantillas/:id/enviar — disparo manual inmediato a todos los jugadores del club
-router.post('/:id/enviar', async (req, res) => {
-  try {
-    const sb = supabaseAdmin();
-
-    const [{ data: p }, { data: club }] = await Promise.all([
-      sb.from('plantillas_mensajes').select('*').eq('id', req.params.id).eq('club_id', req.club_uuid).single(),
-      sb.from('clubs').select('*').eq('id', req.club_uuid).single(),
-    ]);
-
-    if (!p)    return res.status(404).json({ success: false, error: 'Plantilla no encontrada' });
-    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
-
-    const config      = club.config || {};
-    const clubSession = config.waha_session;
-    if (!clubSession) {
-      return res.status(400).json({ success: false, error: 'Conecta tu WhatsApp primero desde la sección de Plantillas.' });
-    }
-
-    const clubNombre = config.nombre || club.name || club.slug;
-    const qrUrl      = config.qr_pago_url || null;
-    const llavePago  = config.llave_pago  || '';
-
-    // Responder inmediatamente — el envío ocurre en background
-    res.json({ success: true, status: 'processing' });
-
-    setImmediate(async () => {
-      const ahora   = new Date();
-      const nowCol  = new Date(ahora.getTime() - 5 * 3600000);
-      const hoyCol  = nowCol.toISOString().split('T')[0];
-      const DIAS_ES = ['DOMINGO','LUNES','MARTES','MIÉRCOLES','JUEVES','VIERNES','SÁBADO'];
-      const fmtH    = d => `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2,'0')} ${d.getHours() < 12 ? 'am' : 'pm'}`;
-      const delay   = ms => new Promise(r => setTimeout(r, ms));
-
-      let enviados = 0, errores = 0;
-
-      try {
-        const { data: jugadores } = await sb
-          .from('players').select('cedula, nombre, apellidos, celular')
-          .eq('club_id', club.id).eq('activo', true);
-
-        if (!jugadores?.length) {
-          console.log(`[plantillas/enviar] ${p.id}: sin jugadores activos`);
-          return;
-        }
-
-        const mananaCol = new Date(nowCol.getTime() + 86400000).toISOString().split('T')[0];
-        const inicioUTC = `${hoyCol}T05:00:00Z`;
-        const finUTC    = `${mananaCol}T04:59:59Z`;
-
-        let query = sb.from('calendario')
-          .select('id, titulo, tipo, lugar, fecha_inicio, fecha_fin')
-          .eq('club_id', club.slug)
-          .gte('fecha_inicio', inicioUTC)
-          .lte('fecha_inicio', finUTC)
-          .or('suspendido.eq.false,suspendido.is.null');
-
-        if (p.tipo_evento && p.tipo_evento !== 'todos') {
-          query = query.eq('tipo', p.tipo_evento);
-        }
-        const { data: eventos } = await query.order('fecha_inicio');
-
-        if (!eventos?.length) {
-          console.log(`[plantillas/enviar] ${p.id}: sin eventos hoy`);
-          return;
-        }
-
-        for (const evento of eventos) {
-          const d  = new Date(new Date(evento.fecha_inicio).getTime() - 5 * 3600000);
-          const df = evento.fecha_fin ? new Date(new Date(evento.fecha_fin).getTime() - 5 * 3600000) : null;
-          const varsBase = {
-            '{dia}':         DIAS_ES[d.getDay()],
-            '{lugar}':       evento.lugar || '',
-            '{hora_inicio}': fmtH(d),
-            '{hora_fin}':    df ? fmtH(df) : '',
-            '{club_nombre}': clubNombre,
-            '{llave_pago}':  llavePago,
-          };
-
-          for (const j of jugadores) {
-            if (!j.celular) continue;
-            const texto = renderMensaje(p.mensaje, { ...varsBase, '{nombre}': j.nombre || '' });
-            try {
-              if (p.incluir_qr && qrUrl) await sendWAHAImage(j.celular, qrUrl, clubSession);
-              await sendWAHA(j.celular, texto, clubSession);
-              enviados++;
-            } catch (e) { errores++; console.error(`[plantillas/enviar] ${j.celular}:`, e.message); }
-            await delay(4000 + Math.random() * 4000);
-          }
-        }
-
-        // Actualizar ultimo_envio
-        await sb.from('plantillas_mensajes')
-          .update({ ultimo_envio: ahora.toISOString() })
-          .eq('id', p.id);
-
-        console.log(`[plantillas/enviar] ${p.nombre}: enviados=${enviados} errores=${errores}`);
-      } catch (e) {
-        console.error(`[plantillas/enviar] Error fatal plantilla ${p.id}:`, e.message);
-      }
-    });
-
-  } catch (e) {
-    console.error('[plantillas/enviar]', e.message);
     res.status(500).json({ success: false, error: e.message });
   }
 });
