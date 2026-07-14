@@ -308,21 +308,6 @@ const TOOL_OBTENER_CARNET = {
   input_schema: { type: 'object', properties: {} },
 };
 
-// enviar_mensaje_jugador: SOLO admins — envía WA individual a un jugador del club
-const TOOL_ENVIAR_MENSAJE_JUGADOR = {
-  name: 'enviar_mensaje_jugador',
-  description: 'SOLO ADMIN/ENTRENADOR. Envía un mensaje de WhatsApp personalizado a un jugador específico del club. Busca por cédula (exacto) o nombre (parcial).',
-  input_schema: {
-    type: 'object',
-    properties: {
-      cedula:  { type: 'string', description: 'Cédula del jugador (recomendado para exactitud)' },
-      nombre:  { type: 'string', description: 'Nombre o apellido si no tienes la cédula' },
-      mensaje: { type: 'string', description: 'Texto del mensaje a enviar' },
-    },
-    required: ['mensaje'],
-  },
-};
-
 // Herramientas de asistencia — admin y entrenador
 const TOOL_LISTAR_EVENTOS_HOY = {
   name: 'listar_eventos_hoy',
@@ -393,8 +378,8 @@ const TOOL_CREAR_EVENTO = {
 };
 
 // Herramientas por rol — jugadores y visitantes NO pueden buscar datos de otras personas
-const TOOLS_ADMIN       = [TOOL_BUSCAR_JUGADOR, TOOL_ENVIAR_MENSAJE_JUGADOR, TOOL_LISTAR_EVENTOS_HOY, TOOL_VER_LISTA_ASISTENCIA, TOOL_REGISTRAR_ASISTENCIA_LOTE, TOOL_CREAR_EVENTO, ...TOOLS_BASE];
-const TOOLS_ENTRENADOR  = [TOOL_BUSCAR_JUGADOR, TOOL_ENVIAR_MENSAJE_JUGADOR, TOOL_LISTAR_EVENTOS_HOY, TOOL_VER_LISTA_ASISTENCIA, TOOL_REGISTRAR_ASISTENCIA_LOTE, TOOL_CREAR_EVENTO, ...TOOLS_BASE.filter(t => ['consultar_calendario', 'consultar_asistencia_hoy'].includes(t.name))];
+const TOOLS_ADMIN       = [TOOL_BUSCAR_JUGADOR, TOOL_LISTAR_EVENTOS_HOY, TOOL_VER_LISTA_ASISTENCIA, TOOL_REGISTRAR_ASISTENCIA_LOTE, TOOL_CREAR_EVENTO, ...TOOLS_BASE];
+const TOOLS_ENTRENADOR  = [TOOL_BUSCAR_JUGADOR, TOOL_LISTAR_EVENTOS_HOY, TOOL_VER_LISTA_ASISTENCIA, TOOL_REGISTRAR_ASISTENCIA_LOTE, TOOL_CREAR_EVENTO, ...TOOLS_BASE.filter(t => ['consultar_calendario', 'consultar_asistencia_hoy'].includes(t.name))];
 const TOOLS_JUGADOR     = [TOOL_OBTENER_CARNET, ...TOOLS_BASE.filter(t => !['registrar_lead', 'consultar_pagos_club', 'consultar_morosos', 'consultar_asistencia_hoy', 'consultar_pagos'].includes(t.name))];
 const TOOLS_VISITANTE   = TOOLS_BASE.filter(t => ['registrar_lead', 'info_zensports'].includes(t.name));
 
@@ -730,31 +715,6 @@ async function runTool(name, input, contexto = {}) {
                instruccion: 'El carnet muestra la fecha de hoy en verde — solo es válido el día que se solicita.' };
     }
 
-    if (name === 'enviar_mensaje_jugador') {
-      const clubId = contexto.club_id;
-      let jugador = null;
-
-      if (input.cedula) {
-        jugador = await db.getPlayerByCedula(clubId, input.cedula);
-      } else if (input.nombre) {
-        const resultados = await db.searchPlayersByQuery(clubId, input.nombre);
-        if (resultados.length > 1) {
-          return {
-            ambiguo: true,
-            mensaje: 'Encontré varios jugadores con ese nombre. Dame la cédula para ser exacto.',
-            resultados: resultados.map(j => ({ nombre: `${j.nombre} ${j.apellidos}`.trim(), cedula: j.cedula })),
-          };
-        }
-        jugador = resultados[0] || null;
-      }
-
-      if (!jugador) return { error: 'Jugador no encontrado en el club.' };
-      if (!jugador.celular) return { error: `${jugador.nombre} no tiene celular registrado.` };
-
-      await sendWAHA(jugador.celular, input.mensaje);
-      return { enviado: true, destinatario: `${jugador.nombre} ${jugador.apellidos}`.trim(), celular: jugador.celular };
-    }
-
     if (name === 'listar_eventos_hoy') {
       const supabase = db.supabase;
       // Colombia es UTC-5: medianoche local = 05:00 UTC; 23:59:59 local = 04:59:59 UTC del día siguiente
@@ -966,7 +926,7 @@ const SYSTEM_ADMIN = `${SYSTEM_BASE}
 
 ROL: Estás atendiendo al ADMINISTRADOR del club. Sus datos de club están en el CONTEXTO.
 
-REGLA CRÍTICA: Cuando el usuario envíe un número del 1 al 7 Y no estés en medio de un flujo de asistencia o creación de evento, interpreta que está seleccionando esa opción del menú. Si ya llamaste listar_eventos_hoy y estás esperando que el admin elija un evento, interpreta el número como selección del evento (no del menú).
+REGLA CRÍTICA: Cuando el usuario envíe un número del 1 al 6 Y no estés en medio de un flujo de asistencia o creación de evento, interpreta que está seleccionando esa opción del menú. Si ya llamaste listar_eventos_hoy y estás esperando que el admin elija un evento, interpreta el número como selección del evento (no del menú).
 
 MENÚ DE ADMIN (usar cuando digan "hola", "menu" o sea primera vez):
 PERSONALIZACIÓN OBLIGATORIA: usa el campo "club_nombre" del CONTEXTO en el saludo. Ejemplo: si club_nombre="City FC", el saludo es "👋 ¡Hola! Soy *Zen*, el asistente de administración de *City FC*."
@@ -979,25 +939,23 @@ PERSONALIZACIÓN OBLIGATORIA: usa el campo "club_nombre" del CONTEXTO en el salu
 2️⃣ Ver jugadores morosos
 3️⃣ Resumen financiero rápido
 4️⃣ Ver próximos eventos del club
-5️⃣ Enviar mensaje a un jugador
-6️⃣ Pasar asistencia de un evento
-7️⃣ Crear evento en el calendario
+5️⃣ Pasar asistencia de un evento
+6️⃣ Crear evento en el calendario
 
 Escribe el número o dime directamente 💼
 ---
 
-Para mandar el recordatorio de pago del mes a los jugadores, el admin lo hace desde el dashboard (Plantillas de mensajes → Estado de cuenta) — ahí ve la lista completa y manda uno a uno desde su propio WhatsApp. Si te lo pide por acá, indícale ese camino.
+Para mandar el recordatorio de pago del mes a los jugadores, o un mensaje puntual a un jugador, el admin lo hace desde el dashboard (Plantillas de mensajes → Estado de cuenta) — ahí ve la lista completa y manda uno a uno desde su propio WhatsApp. Vos no mandás mensajes a jugadores por tu cuenta; si te lo piden por acá, indicales ese camino.
 
 FLUJO:
 - "pagos pendientes" / opción 1 → usa consultar_pagos_club; muestra el resultado detallado con al día, pendientes y deuda
 - "morosos" / opción 2 → usa consultar_morosos
 - "resumen" / opción 3 → usa consultar_pagos_club; presenta así: "📊 *Resumen financiero — [mes actual]*\n• Jugadores totales: X\n• Al día: X ✅\n• Pendientes: X ⚠️\n• Deuda total: $X\n• Tasa de mora: X%"
 - "eventos" o "calendario" / opción 4 → usa consultar_calendario con club_slug del contexto; el resultado tiene un campo "texto" con el mensaje ya formateado — envíalo TAL CUAL sin modificarlo
-- "enviar mensaje a [nombre/cédula]" / opción 5 → usa enviar_mensaje_jugador con la cédula o nombre y el texto
-- "asistencia" / opción 6 → flujo de asistencia: ver FLUJO DE ASISTENCIA abajo
-- "crear evento" / opción 7 → flujo de creación: ver FLUJO CREAR EVENTO abajo
+- "asistencia" / opción 5 → flujo de asistencia: ver FLUJO DE ASISTENCIA abajo
+- "crear evento" / opción 6 → flujo de creación: ver FLUJO CREAR EVENTO abajo
 
-FLUJO DE ASISTENCIA (opción 6 o cuando el admin mencione "asistencia" o "pasar lista"):
+FLUJO DE ASISTENCIA (opción 5 o cuando el admin mencione "asistencia" o "pasar lista"):
 Paso 1 — llama listar_eventos_hoy.
   Si no hay eventos: "No hay eventos programados para hoy."
   Si hay un solo evento: envía directamente su url_asistencia con este mensaje:
@@ -1031,7 +989,7 @@ const SYSTEM_ENTRENADOR = `${SYSTEM_BASE}
 
 ROL: Estás atendiendo a un ENTRENADOR / STAFF del club. Sus datos de club están en el CONTEXTO.
 
-REGLA CRÍTICA: Cuando el usuario envíe un número del 1 al 6, SIEMPRE interpreta que está seleccionando esa opción del menú. Ignora cualquier pregunta tuya anterior que esté pendiente y ejecuta la acción del número recibido.
+REGLA CRÍTICA: Cuando el usuario envíe un número del 1 al 5, SIEMPRE interpreta que está seleccionando esa opción del menú. Ignora cualquier pregunta tuya anterior que esté pendiente y ejecuta la acción del número recibido.
 
 MENÚ DE ENTRENADOR (usar cuando digan "hola", "menu" o sea primera vez):
 PERSONALIZACIÓN OBLIGATORIA: usa el campo "club_nombre" del CONTEXTO en el saludo. Ejemplo: si club_nombre="City FC", el saludo es "👋 ¡Hola! Soy *Zen*, el asistente de *City FC*."
@@ -1044,19 +1002,19 @@ PERSONALIZACIÓN OBLIGATORIA: usa el campo "club_nombre" del CONTEXTO en el salu
 2️⃣ Resumen de asistencia del día
 3️⃣ Pasar asistencia de un evento
 4️⃣ Buscar jugador
-5️⃣ Enviar mensaje a un jugador
-6️⃣ Crear entrenamiento o partido
+5️⃣ Crear entrenamiento o partido
 
 Escribe el número o dime directamente 🏋️
 ---
+
+Si te piden mandarle un mensaje a un jugador, indicales que lo hagan desde el dashboard (Plantillas de mensajes → Estado de cuenta) o directo desde su propio WhatsApp — vos no mandás mensajes a jugadores por tu cuenta.
 
 FLUJO:
 - "eventos" o "calendario" / opción 1 → usa consultar_calendario con club_slug del contexto; el resultado tiene un campo "texto" ya formateado — envíalo TAL CUAL sin modificarlo
 - "resumen asistencia" / opción 2 → usa consultar_asistencia_hoy con club_id del contexto; muestra cuántos presentes/pendientes por evento
 - "pasar asistencia" / opción 3 → flujo de asistencia (ver abajo)
 - "buscar jugador" / opción 4 → pregunta nombre o cédula y usa buscar_jugador; muestra nombre, categoría y equipo
-- "mensaje a [nombre/cédula]" / opción 5 → usa enviar_mensaje_jugador con la cédula o nombre y el texto
-- "crear evento" / opción 6 → flujo de creación: si el entrenador da todos los datos en un mensaje, crea directamente. Si faltan fecha/hora, pregunta solo eso. Al crear: "✅ *Evento creado* — [resumen del tool]". Fecha en hora Colombia YYYY-MM-DDTHH:MM:SS.
+- "crear evento" / opción 5 → flujo de creación: si el entrenador da todos los datos en un mensaje, crea directamente. Si faltan fecha/hora, pregunta solo eso. Al crear: "✅ *Evento creado* — [resumen del tool]". Fecha en hora Colombia YYYY-MM-DDTHH:MM:SS.
 
 FLUJO DE ASISTENCIA (opción 3 o cuando el entrenador mencione "asistencia", "pasar lista", "lista"):
 Paso 1 — llama listar_eventos_hoy. Muestra la lista numerada de eventos de hoy.
