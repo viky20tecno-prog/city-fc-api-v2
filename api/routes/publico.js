@@ -36,17 +36,29 @@ function calcSaldo(m) {
   return oficial;
 }
 
-// GET /api/publico/atleta/:clubSlug/:cedula
-router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
-  try {
-    const { clubSlug, cedula } = req.params;
+// Busca un jugador por celular con múltiples variantes de formato (con/sin
+// indicativo de país, con/sin +). Usado por el acceso al portal por celular.
+async function buscarJugadorPorCelular(club_id, phone) {
+  const digits = String(phone).replace(/\D/g, '');
+  const local  = digits.slice(-10); // últimos 10 dígitos
+  const { data, error } = await db.supabase
+    .from('players')
+    .select('*')
+    .eq('club_id', club_id)
+    .or(`celular.eq.${digits},celular.eq.${local},celular.eq.57${local},celular.eq.+57${local}`)
+    .limit(1)
+    .single();
+  if (error && error.code !== 'PGRST116') throw error;
+  return data || null;
+}
 
-    const club = await db.getClubBySlug(clubSlug);
-    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
-
-    const jugador = await db.getPlayerByCedula(club.id, cedula);
-    if (!jugador) return res.status(404).json({ success: false, error: 'Atleta no encontrado' });
-
+// Arma la respuesta completa del portal del atleta (estado de cuenta, torneos,
+// uniformes) dado un jugador ya resuelto. Compartido entre el acceso directo
+// por cédula (link de Estado de cuenta) y el acceso por celular (portal sin
+// link directo) — antes esto estaba duplicado entre /atleta/:cedula y el ya
+// eliminado /otp/verificar.
+async function construirRespuestaPortal(club, clubSlug, jugador) {
+    const cedula = jugador.cedula;
     const anioActual = new Date().getFullYear();
     // Buscar mensualidades por cedula Y por player_id por separado, luego combinar
     // (algunos registros solo tienen uno de los dos campos)
@@ -175,7 +187,7 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
     const saldo_pendiente = esExento ? 0 : pendientes.reduce((s, m) => s + m.saldo, 0);
     const total_pagado    = esExento ? 0 : resumen.reduce((s, m) => s + m.valor_pagado, 0);
 
-    res.json({
+    return {
       success: true,
       esExento,
       club: {
@@ -221,9 +233,44 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
       saldo_pendiente,
       total_pagado,
       meses_pendientes: pendientes.length,
-    });
+    };
+}
+
+// GET /api/publico/atleta/:clubSlug/:cedula — acceso directo (link de Estado de cuenta)
+router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
+  try {
+    const { clubSlug, cedula } = req.params;
+
+    const club = await db.getClubBySlug(clubSlug);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const jugador = await db.getPlayerByCedula(club.id, cedula);
+    if (!jugador) return res.status(404).json({ success: false, error: 'Atleta no encontrado' });
+
+    res.json(await construirRespuestaPortal(club, clubSlug, jugador));
   } catch (error) {
     console.error('Error en GET /publico/atleta:', error);
+    res.status(500).json({ success: false, error: 'Error al consultar datos del atleta' });
+  }
+});
+
+// POST /api/publico/atleta-por-celular — acceso al portal escribiendo el celular, sin
+// código de confirmación por WhatsApp (se quitó: WAHA no es confiable ahora mismo, y el
+// código no agregaba una barrera real ya que este mismo endpoint solo pide club+celular).
+router.post('/atleta-por-celular', portalLimiter, async (req, res) => {
+  try {
+    const { club_slug, celular } = req.body;
+    if (!club_slug || !celular) return res.status(400).json({ success: false, error: 'Faltan campos' });
+
+    const club = await db.getClubBySlug(club_slug);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const jugador = await buscarJugadorPorCelular(club.id, celular);
+    if (!jugador) return res.status(404).json({ success: false, error: 'No encontramos ese celular en el club. Contacta al administrador.' });
+
+    res.json(await construirRespuestaPortal(club, club_slug, jugador));
+  } catch (error) {
+    console.error('Error en POST /publico/atleta-por-celular:', error);
     res.status(500).json({ success: false, error: 'Error al consultar datos del atleta' });
   }
 });
@@ -491,231 +538,6 @@ async function handleMorososPdf(req, res) {
 
 router.get('/morosos-pdf/:clubId', handleMorososPdf);
 router.get('/morosos-pdf/:clubId/:mes', handleMorososPdf);
-
-// Busca un jugador por celular con múltiples variantes de formato
-async function buscarJugadorPorCelular(club_id, phone) {
-  const digits = String(phone).replace(/\D/g, '');
-  const local  = digits.slice(-10); // últimos 10 dígitos
-  const { data, error } = await db.supabase
-    .from('players')
-    .select('*')
-    .eq('club_id', club_id)
-    .or(`celular.eq.${digits},celular.eq.${local},celular.eq.57${local},celular.eq.+57${local}`)
-    .limit(1)
-    .single();
-  if (error && error.code !== 'PGRST116') throw error;
-  return data || null;
-}
-
-// ── OTP por WhatsApp ─────────────────────────────────────────────────────────
-
-const otpLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 5,
-  message: { success: false, error: 'Demasiados intentos. Espera un minuto.' },
-});
-
-function normalizePhone(raw) {
-  const digits = String(raw).replace(/\D/g, '');
-  // Si viene sin código de país Colombia, agregarlo
-  if (digits.length === 10 && digits.startsWith('3')) return `57${digits}`;
-  return digits;
-}
-
-async function sendWAHAText(phone, text, session = 'default') {
-  const WAHA_URL = process.env.WAHA_URL || 'https://zensports-waha-production.up.railway.app';
-  const WAHA_KEY = process.env.WAHA_API_KEY || '';
-  const chatId   = `${phone}@c.us`;
-  const res = await fetch(`${WAHA_URL}/api/sendText`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Api-Key': WAHA_KEY },
-    body: JSON.stringify({ session, chatId, text }),
-  });
-  if (!res.ok) console.error('[sendWAHAText] WAHA respondió', res.status, await res.text().catch(() => ''));
-  return res.ok;
-}
-
-// POST /api/publico/otp/solicitar
-router.post('/otp/solicitar', otpLimiter, async (req, res) => {
-  try {
-    const { phone: rawPhone, club_slug } = req.body;
-    if (!rawPhone || !club_slug) return res.status(400).json({ success: false, error: 'Faltan campos' });
-
-    const phone = normalizePhone(rawPhone);
-    if (phone.length < 10) return res.status(400).json({ success: false, error: 'Número inválido' });
-
-    const club = await db.getClubBySlug(club_slug);
-    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
-
-    // Verificar que el número existe en el club (buscar con variantes)
-    const jugador = await buscarJugadorPorCelular(club.id, phone);
-    if (!jugador) return res.status(404).json({ success: false, error: 'Número no registrado en este club. Contacta al administrador.' });
-
-    const code       = String(Math.floor(1000 + Math.random() * 9000));
-    const expires_at = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 min
-
-    // Invalida OTPs anteriores del mismo número en este club
-    await db.supabase.from('otp_tokens')
-      .update({ used: true })
-      .eq('phone', phone)
-      .eq('club_slug', club_slug)
-      .eq('used', false);
-
-    // Guarda nuevo OTP
-    const { error: dbErr } = await db.supabase.from('otp_tokens')
-      .insert({ phone, club_slug, code, expires_at });
-    if (dbErr) throw dbErr;
-
-    const clubNombre = club.config?.nombre || club_slug;
-    const sent = await sendWAHAText(phone,
-      `🔐 *${clubNombre}* — Código de verificación:\n\n*${code}*\n\nVigente 10 minutos. No lo compartas con nadie.`,
-      club.config?.waha_session || 'default'
-    );
-
-    if (!sent) {
-      console.error('[otp] No se pudo enviar WhatsApp a', phone);
-      return res.status(500).json({ success: false, error: 'No se pudo enviar el código. Intenta de nuevo.' });
-    }
-
-    res.json({ success: true, message: 'Código enviado por WhatsApp' });
-  } catch (err) {
-    console.error('[otp/solicitar]', err.message);
-    res.status(500).json({ success: false, error: 'Error interno' });
-  }
-});
-
-// POST /api/publico/otp/verificar
-router.post('/otp/verificar', otpLimiter, async (req, res) => {
-  try {
-    const { phone: rawPhone, club_slug, code } = req.body;
-    if (!rawPhone || !club_slug || !code) return res.status(400).json({ success: false, error: 'Faltan campos' });
-
-    const phone = normalizePhone(rawPhone);
-
-    const { data: tokens, error: fetchErr } = await db.supabase
-      .from('otp_tokens')
-      .select('*')
-      .eq('phone', phone)
-      .eq('club_slug', club_slug)
-      .eq('code', String(code).trim())
-      .gt('expires_at', new Date().toISOString())
-      .order('created_at', { ascending: false })
-      .limit(1);
-
-    if (fetchErr) throw fetchErr;
-    if (!tokens || tokens.length === 0) {
-      return res.status(401).json({ success: false, error: 'Código incorrecto o expirado' });
-    }
-
-    // Buscar jugador por celular y devolver su estado de cuenta
-    const club = await db.getClubBySlug(club_slug);
-    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
-
-    const jugador = await buscarJugadorPorCelular(club.id, phone);
-    if (!jugador) return res.status(404).json({ success: false, error: 'Jugador no encontrado' });
-
-    // Reusar la lógica de /atleta/:clubSlug/:cedula
-    const anioActual = new Date().getFullYear();
-    const [byCedula, byPlayerId, suspensiones, torneosJugador2, uniformesJugador2] = await Promise.all([
-      db.supabase.from('mensualidades').select('*').eq('club_id', club.id).eq('cedula', String(jugador.cedula)),
-      db.supabase.from('mensualidades').select('*').eq('club_id', club.id).eq('player_id', jugador.id),
-      db.getSuspensionesJugador(club.id, jugador.cedula),
-      db.getTorneos(club.id, String(jugador.cedula)),
-      db.getPedidoUniformesByCedula(club.id, String(jugador.cedula)),
-    ]);
-    const mensMap = {};
-    [...(byCedula.data || []), ...(byPlayerId.data || [])].forEach(m => { mensMap[m.id] = m; });
-    const todasMens = Object.values(mensMap);
-    const mensAnio  = todasMens.filter(m => String(m.anio) === String(anioActual));
-
-    const esExento = suspensiones.some(s => s.tipo === 'exento' || s.exento === true);
-
-    const suspActivas2 = (suspensiones || []).filter(s =>
-      s.activa && (s.anio == null || parseInt(s.anio) === anioActual)
-    );
-    const esSuspendido2 = (numMes) =>
-      suspActivas2.some(s => s.mes_inicio <= numMes && numMes <= s.mes_fin);
-    const getSusp2 = (numMes) =>
-      suspActivas2.find(s => s.mes_inicio <= numMes && numMes <= s.mes_fin) || null;
-
-    const mesActualV      = new Date().getMonth() + 1;
-
-    const mensualidades = mensAnio
-      .sort((a, b) => a.numero_mes - b.numero_mes)
-      .map(m => {
-        const numMes = parseInt(m.numero_mes);
-        if (esSuspendido2(numMes)) {
-          const susp = getSusp2(numMes);
-          return {
-            mes:           MESES[(numMes || 1) - 1] || `Mes ${numMes}`,
-            numero_mes:    numMes,
-            estado:        'suspendido',
-            valor_oficial: m.valor_oficial,
-            valor_pagado:  m.valor_pagado,
-            saldo:         0,
-            suspension:    { motivo: susp?.motivo || null, detalle: susp?.detalle || null },
-          };
-        }
-        return {
-          mes:           MESES[(numMes || 1) - 1] || `Mes ${numMes}`,
-          numero_mes:    numMes,
-          estado:        mapEstado(m.estado),
-          valor_oficial: m.valor_oficial,
-          valor_pagado:  m.valor_pagado,
-          saldo:         calcSaldo(m),
-        };
-      });
-
-    const saldo_pendiente  = esExento ? 0 : mensualidades
-      .filter(m => !['pagado','exento','suspendido'].includes(m.estado) && m.numero_mes <= mesActualV)
-      .reduce((s, m) => s + m.saldo, 0);
-    const total_pagado     = mensualidades.reduce((s, m) => s + (parseFloat(m.valor_pagado) || 0), 0);
-    const meses_pendientes = mensualidades.filter(m => !['pagado','exento','suspendido'].includes(m.estado) && m.numero_mes <= mesActualV).length;
-
-    res.json({
-      success:     true,
-      club:        club.config,
-      atleta: {
-        nombre:    jugador.nombre,
-        apellidos: jugador.apellidos,
-        cedula:    jugador.cedula,
-        categoria: jugador.categoria,
-        equipo:    jugador.equipo,
-        posicion:  jugador.posicion,
-        foto_url:  jugador.foto_url || null,
-      },
-      mensualidades,
-      torneos: (torneosJugador2 || []).map(t => ({
-        id:              t.id,
-        nombre_torneo:   t.nombre_torneo,
-        estado:          t.estado,
-        valor_inscrito:  parseFloat(t.valor_inscrito) || parseFloat(t.valor_oficial) || 0,
-        valor_pagado:    parseFloat(t.valor_pagado)   || 0,
-        saldo_pendiente: parseFloat(t.saldo_pendiente) || 0,
-      })),
-      uniformes: (uniformesJugador2 || []).map(u => ({
-        id:              u.id,
-        descripcion:     u.prendas || u.descripcion || u.tipo || 'Uniforme',
-        estado:          u.estado,
-        talla:           u.talla || '',
-        numero:          u.numero_estampar || u.numero || '',
-        nombre_estampar: u.nombre_estampar || '',
-        valor_oficial:   parseFloat(u.total) || parseFloat(u.valor_oficial) || 0,
-        valor_pagado:    parseFloat(u.valor_pagado) || 0,
-        saldo_pendiente: u.estado === 'PAGADO' || u.estado === 'ENTREGADO'
-          ? 0
-          : (parseFloat(u.total) || 0) - (parseFloat(u.valor_pagado) || 0),
-      })),
-      saldo_pendiente,
-      total_pagado,
-      meses_pendientes,
-      esExento,
-    });
-  } catch (err) {
-    console.error('[otp/verificar]', err.message);
-    res.status(500).json({ success: false, error: 'Error interno' });
-  }
-});
 
 // GET /api/publico/stats — métricas públicas para la landing
 router.get('/stats', async (req, res) => {
