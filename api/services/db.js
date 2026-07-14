@@ -1083,6 +1083,11 @@ async function getAsistenciaStatsClub(club_id, club_slug) {
 //     convocado (o, si el partido no tiene convocados explícitos, coincide con el
 //     equipo del partido; si tampoco tiene equipo, aplica a todos) — misma regla
 //     de elegibilidad que ya usa getAsistencia para armar la lista del panel.
+// Cada jugador sale en UNA sola fila con ambos datos (entren_* y part_*) — pedido
+// explícito para que el PDF no quede una tabla de entrenamientos seguida de otra
+// de partidos, sino una sola tabla más corta. El orden del ranking usa el % de
+// entrenamientos como criterio principal (histórico: esto nació como premiación
+// de asistencia a entrenamientos) y el % de partidos como desempate.
 // "por_equipo" agrupa por el campo `equipo` del propio evento. Para entrenamientos,
 // como el panel no restringe por equipo, se usa el equipo asignado al jugador
 // (players.equipo) solo para decidir si entra en ese bucket puntual — sin esto,
@@ -1114,7 +1119,7 @@ async function getRankingAsistencia(club_id, club_slug, { anio, mes } = {}) {
   ]);
   if (error) throw error;
   if (!eventos || eventos.length === 0) {
-    return { entrenamientos: { general: [], por_equipo: {}, total: 0 }, partidos: { general: [], por_equipo: {}, total: 0 } };
+    return { general: [], por_equipo: {}, total_entrenamientos: 0, total_partidos: 0 };
   }
 
   const nombreMap        = {};
@@ -1188,9 +1193,44 @@ async function getRankingAsistencia(club_id, club_slug, { anio, mes } = {}) {
     return { general, por_equipo, total: eventosTipo.length };
   }
 
+  // Une el ranking de entrenamientos y el de partidos en una sola fila por jugador
+  // (una lista trae presentes/total_eventos genéricos — acá se renombran a
+  // entren_*/part_* y se completa con ceros el lado que el jugador no tenga).
+  function combinarListas(listaEntren, listaPartidos) {
+    const map = {};
+    listaEntren.forEach(r => {
+      map[r.cedula] = {
+        cedula: r.cedula, nombre: r.nombre,
+        entren_presentes: r.presentes, entren_total: r.total_eventos, entren_pct: r.porcentaje,
+        part_presentes: 0, part_total: 0, part_pct: 0,
+      };
+    });
+    listaPartidos.forEach(r => {
+      if (!map[r.cedula]) {
+        map[r.cedula] = {
+          cedula: r.cedula, nombre: r.nombre,
+          entren_presentes: 0, entren_total: 0, entren_pct: 0,
+          part_presentes: 0, part_total: 0, part_pct: 0,
+        };
+      }
+      map[r.cedula].part_presentes = r.presentes;
+      map[r.cedula].part_total     = r.total_eventos;
+      map[r.cedula].part_pct       = r.porcentaje;
+    });
+    return Object.values(map)
+      .sort((a, b) => b.entren_pct - a.entren_pct || b.entren_presentes - a.entren_presentes || b.part_pct - a.part_pct);
+  }
+
+  const entrenSeccion  = construirSeccion('ENTRENAMIENTO');
+  const partidoSeccion = construirSeccion('PARTIDO');
+  const equiposUnion = [...new Set([...Object.keys(entrenSeccion.por_equipo), ...Object.keys(partidoSeccion.por_equipo)])];
+
   return {
-    entrenamientos: construirSeccion('ENTRENAMIENTO'),
-    partidos:       construirSeccion('PARTIDO'),
+    general: combinarListas(entrenSeccion.general, partidoSeccion.general),
+    por_equipo: Object.fromEntries(equiposUnion.map(eq =>
+      [eq, combinarListas(entrenSeccion.por_equipo[eq] || [], partidoSeccion.por_equipo[eq] || [])])),
+    total_entrenamientos: entrenSeccion.total,
+    total_partidos:       partidoSeccion.total,
   };
 }
 
