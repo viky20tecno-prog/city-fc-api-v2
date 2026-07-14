@@ -178,7 +178,11 @@ router.get('/estado-cuenta-lista', async (req, res) => {
         nombre:     j.nombre,
         apellidos:  j.apellidos,
         celular:    j.celular,
-        wa_link:    `https://wa.me/${numero}?text=${encodeURIComponent(texto)}`,
+        // Sin ?text= a propósito: WhatsApp Desktop en Windows corrompe los emojis (caracteres
+        // de 4 bytes) al decodificar el parámetro de un link wa.me — el link solo abre el chat
+        // correcto, y el texto se copia al portapapeles aparte para pegarlo con Ctrl+V.
+        wa_link:    `https://wa.me/${numero}`,
+        texto,
         ya_enviado: enviadosSet.has(String(j.cedula)),
       };
     });
