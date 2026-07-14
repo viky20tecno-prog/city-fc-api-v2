@@ -31,18 +31,19 @@ router.get('/stats', async (req, res) => {
   }
 });
 
-// GET /api/asistencia/ranking-entrenamientos?club_id=&anio=&mes=
-// Ranking de asistencia a entrenamientos (nunca partidos) para un mes o año completo,
-// para dar incentivos/premiación. mes es opcional — sin él, se agrega el año completo.
-router.get('/ranking-entrenamientos', async (req, res) => {
+// GET /api/asistencia/ranking?club_id=&anio=&mes=
+// Ranking de asistencia a entrenamientos y partidos (en partidos solo cuentan los
+// convocados) para un mes o año completo, para dar incentivos/premiación. mes es
+// opcional — sin él, se agrega el año completo.
+router.get('/ranking', async (req, res) => {
   try {
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
     const { anio, mes } = req.query;
-    const data = await db.getRankingAsistenciaEntrenamientos(club.id, req.club_id, { anio, mes });
+    const data = await db.getRankingAsistencia(club.id, req.club_id, { anio, mes });
     res.json({ success: true, ...data });
   } catch (err) {
-    console.error('GET /asistencia/ranking-entrenamientos:', err.message);
+    console.error('GET /asistencia/ranking:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });

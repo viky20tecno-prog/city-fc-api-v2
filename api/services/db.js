@@ -1071,14 +1071,17 @@ async function getAsistenciaStatsClub(club_id, club_slug) {
   });
 }
 
-// Ranking de asistencia a ENTRENAMIENTOS (nunca partidos — las convocatorias no son
-// las mismas para todos) para un período dado, para dar incentivos/premiación.
+// Ranking de asistencia a ENTRENAMIENTOS y PARTIDOS para un período dado, para dar
+// incentivos/premiación. En partidos solo cuentan los jugadores que efectivamente
+// fueron convocados (los registros de `asistencia` para un partido ya vienen
+// acotados a los convocados/equipo del evento — ver getAsistencia — así que sumar
+// esos registros tal cual ya respeta esa regla, sin necesidad de recalcularla acá).
 // Agrupa por el campo `equipo` del propio evento (no un equipo fijo del jugador) —
-// así un jugador que entrena con varios equipos queda evaluado por separado en cada
-// uno, y un club de una sola categoría (todo sin equipo o un único valor) simplemente
-// no genera desglose por equipo, solo el general.
+// así un jugador que entrena/juega con varios equipos queda evaluado por separado en
+// cada uno, y un club de una sola categoría (todo sin equipo o un único valor)
+// simplemente no genera desglose por equipo, solo el general.
 // club_slug: slug del club (calendario.club_id guarda el slug, no el uuid)
-async function getRankingAsistenciaEntrenamientos(club_id, club_slug, { anio, mes } = {}) {
+async function getRankingAsistencia(club_id, club_slug, { anio, mes } = {}) {
   const anioNum = parseInt(anio) || new Date().getFullYear();
   let desde, hasta;
   if (mes) {
@@ -1094,12 +1097,12 @@ async function getRankingAsistenciaEntrenamientos(club_id, club_slug, { anio, me
     .from('calendario')
     .select('id, equipo')
     .eq('club_id', club_slug)
-    .eq('tipo', 'ENTRENAMIENTO')
+    .in('tipo', ['ENTRENAMIENTO', 'PARTIDO'])
     .or('suspendido.eq.false,suspendido.is.null')
     .gte('fecha_inicio', desde.toISOString())
     .lt('fecha_inicio', hasta.toISOString());
   if (error) throw error;
-  if (!eventos || eventos.length === 0) return { general: [], por_equipo: {}, total_entrenamientos: 0 };
+  if (!eventos || eventos.length === 0) return { general: [], por_equipo: {}, total_eventos: 0 };
 
   const eventoIds    = eventos.map(e => e.id);
   const eventoEquipo = {};
@@ -1157,7 +1160,7 @@ async function getRankingAsistenciaEntrenamientos(club_id, club_slug, { anio, me
     ? Object.fromEntries(equiposDistintos.map(eq => [eq, buildRanking(acumEquipo[eq])]))
     : {};
 
-  return { general, por_equipo, total_entrenamientos: eventos.length };
+  return { general, por_equipo, total_eventos: eventos.length };
 }
 
 async function upsertAsistencia({ club_id, evento_id, cedula, estado, nota, pago_arbitraje, registrado_por }) {
@@ -1336,7 +1339,7 @@ module.exports = {
   getTotalEventosClub,
   getAsistenciaJugador,
   getAsistenciaStatsClub,
-  getRankingAsistenciaEntrenamientos,
+  getRankingAsistencia,
   upsertAsistencia,
   getAllActiveClubs,
   marcarEmailEnviado,
