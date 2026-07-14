@@ -238,12 +238,8 @@ router.all('/plantillas', async (req, res) => {
 
   const resultados = { enviados: 0, omitidos: 0, errores: [] };
 
-  const MESES_ES  = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
   const DIAS_ES   = ['DOMINGO','LUNES','MARTES','MIÉRCOLES','JUEVES','VIERNES','SÁBADO'];
   const fmtH      = d => `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2,'0')} ${d.getHours() < 12 ? 'am' : 'pm'}`;
-  const fmtCOP    = n => '$' + Math.round(n).toLocaleString('es-CO');
-  const diaCol    = nowCol.getDate();
-  const anio      = nowCol.getFullYear();
 
   const waHeaders = { 'Content-Type': 'application/json' };
   if (apiKey) waHeaders['X-Api-Key'] = apiKey;
@@ -290,105 +286,50 @@ router.all('/plantillas', async (req, res) => {
       const clubNombre  = config.nombre || club.name || club.slug;
       const qrUrl       = config.qr_pago_url || null;
       const llavePago   = config.llave_pago   || '';
-      const tipo        = plantilla.tipo_plantilla || 'evento';
       const clubSession = config.waha_session;
       if (!clubSession) { resultados.omitidos++; continue; } // sin número propio → no enviar
 
+      // Solo queda el tipo 'evento' — 'cobro' (recordatorio masivo de mensualidades) se quitó
+      // por completo, era el mismo patrón de ráfaga por WAHA que causaba baneos del número.
+      // Cualquier plantilla vieja que haya quedado con tipo_plantilla='cobro' en la base se
+      // omite acá y nunca envía nada.
+      if ((plantilla.tipo_plantilla || 'evento') !== 'evento') { resultados.omitidos++; continue; }
+
       try {
-        // ── TIPO EVENTO ──────────────────────────────────────────────────────────
-        if (tipo === 'evento') {
-          const hPlant = (plantilla.hora_envio || '').slice(0, 2);
-          if (hPlant !== horaHH) { resultados.omitidos++; continue; }
+        const hPlant = (plantilla.hora_envio || '').slice(0, 2);
+        if (hPlant !== horaHH) { resultados.omitidos++; continue; }
 
-          let query = sb.from('calendario')
-            .select('id, titulo, tipo, lugar, fecha_inicio, fecha_fin')
-            .eq('club_id', club.slug)
-            .gte('fecha_inicio', inicioUTC)
-            .lte('fecha_inicio', finUTC)
-            .or('suspendido.eq.false,suspendido.is.null');
-          if (plantilla.tipo_evento && plantilla.tipo_evento !== 'todos') {
-            query = query.eq('tipo', plantilla.tipo_evento);
-          }
-          const { data: eventos } = await query.order('fecha_inicio');
-          if (!eventos?.length) { resultados.omitidos++; continue; }
+        let query = sb.from('calendario')
+          .select('id, titulo, tipo, lugar, fecha_inicio, fecha_fin')
+          .eq('club_id', club.slug)
+          .gte('fecha_inicio', inicioUTC)
+          .lte('fecha_inicio', finUTC)
+          .or('suspendido.eq.false,suspendido.is.null');
+        if (plantilla.tipo_evento && plantilla.tipo_evento !== 'todos') {
+          query = query.eq('tipo', plantilla.tipo_evento);
+        }
+        const { data: eventos } = await query.order('fecha_inicio');
+        if (!eventos?.length) { resultados.omitidos++; continue; }
 
-          const { data: jugadores } = await sb
-            .from('players').select('cedula, nombre, apellidos, celular')
-            .eq('club_id', club.id).eq('activo', true);
-          if (!jugadores?.length) { resultados.omitidos++; continue; }
+        const { data: jugadores } = await sb
+          .from('players').select('cedula, nombre, apellidos, celular')
+          .eq('club_id', club.id).eq('activo', true);
+        if (!jugadores?.length) { resultados.omitidos++; continue; }
 
-          for (const evento of eventos) {
-            const d  = new Date(new Date(evento.fecha_inicio).getTime() - 5 * 3600000);
-            const df = evento.fecha_fin ? new Date(new Date(evento.fecha_fin).getTime() - 5 * 3600000) : null;
-            const varsBase = {
-              '{dia}':         DIAS_ES[d.getDay()],
-              '{lugar}':       evento.lugar || '',
-              '{hora_inicio}': fmtH(d),
-              '{hora_fin}':    df ? fmtH(df) : '',
-              '{club_nombre}': clubNombre,
-              '{llave_pago}':  llavePago,
-            };
-            for (const j of jugadores) {
-              if (!j.celular) continue;
-              const texto = render(plantilla.mensaje, { ...varsBase, '{nombre}': j.nombre || '' });
-              try {
-                if (plantilla.incluir_qr && qrUrl) await enviarImagen(j.celular, qrUrl, clubSession);
-                await enviarTexto(j.celular, texto, clubSession);
-                resultados.enviados++;
-              } catch (e) { resultados.errores.push(`${j.celular}: ${e.message}`); }
-              await new Promise(r => setTimeout(r, 4000 + Math.random() * 4000));
-            }
-          }
-
-        // ── TIPO COBRO ───────────────────────────────────────────────────────────
-        } else if (tipo === 'cobro') {
-          if (Number(plantilla.dia_envio) !== diaCol) { resultados.omitidos++; continue; }
-
-          const { data: jugadores } = await sb
-            .from('players').select('cedula, nombre, apellidos, celular')
-            .eq('club_id', club.id).eq('activo', true);
-          if (!jugadores?.length) { resultados.omitidos++; continue; }
-
-          // Traer todas las mensualidades del año de una sola vez
-          const [{ data: todasMens }, suspensionesCron] = await Promise.all([
-            sb.from('mensualidades')
-              .select('cedula, estado, saldo_pendiente, numero_mes')
-              .eq('club_id', club.id)
-              .eq('anio', anio)
-              .in('estado', ['MORA','PENDIENTE','PARCIAL'])
-              .gt('valor_oficial', 0),
-            db.getSuspensiones(club.id),
-          ]);
-
-          // Solo suspensiones activas excusan un mes — si se cancela, la deuda vuelve a contar
-          const isSuspendidoMesCron = (cedula, mesNum) => (suspensionesCron || []).some(s =>
-            s.activa && String(s.cedula) === String(cedula) && parseInt(s.anio) === anio &&
-            s.mes_inicio <= mesNum && mesNum <= s.mes_fin);
-
-          // Agrupar por cédula
-          const porCedula = {};
-          for (const m of (todasMens || [])) {
-            if (isSuspendidoMesCron(m.cedula, parseInt(m.numero_mes))) continue;
-            if (!porCedula[m.cedula]) porCedula[m.cedula] = [];
-            porCedula[m.cedula].push(m);
-          }
-
+        for (const evento of eventos) {
+          const d  = new Date(new Date(evento.fecha_inicio).getTime() - 5 * 3600000);
+          const df = evento.fecha_fin ? new Date(new Date(evento.fecha_fin).getTime() - 5 * 3600000) : null;
+          const varsBase = {
+            '{dia}':         DIAS_ES[d.getDay()],
+            '{lugar}':       evento.lugar || '',
+            '{hora_inicio}': fmtH(d),
+            '{hora_fin}':    df ? fmtH(df) : '',
+            '{club_nombre}': clubNombre,
+            '{llave_pago}':  llavePago,
+          };
           for (const j of jugadores) {
-            const pendientes = porCedula[j.cedula];
-            if (!pendientes?.length) continue; // jugador al día — no se envía
-            const deuda  = pendientes.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
-            const meses  = pendientes
-              .sort((a, b) => a.numero_mes - b.numero_mes)
-              .map(m => MESES_ES[(m.numero_mes || 1) - 1])
-              .join(', ');
-            const vars = {
-              '{nombre}':      j.nombre,
-              '{deuda}':       fmtCOP(deuda),
-              '{meses}':       meses,
-              '{club_nombre}': clubNombre,
-              '{llave_pago}':  llavePago,
-            };
-            const texto = render(plantilla.mensaje, vars);
+            if (!j.celular) continue;
+            const texto = render(plantilla.mensaje, { ...varsBase, '{nombre}': j.nombre || '' });
             try {
               if (plantilla.incluir_qr && qrUrl) await enviarImagen(j.celular, qrUrl, clubSession);
               await enviarTexto(j.celular, texto, clubSession);

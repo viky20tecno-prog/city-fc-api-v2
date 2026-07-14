@@ -1,11 +1,9 @@
 const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
-const db = require('../services/db');
 
 const router = express.Router();
 
 const LIMITE_POR_PLAN = { trial: 0, starter: 0, pro: 8, scale: Infinity };
-const MESES_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 
 function supabaseAdmin() {
   return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -42,10 +40,6 @@ async function sendWAHAImage(to, imageUrl, session) {
   });
 }
 
-function formatCOP(n) {
-  return '$' + Math.round(n).toLocaleString('es-CO');
-}
-
 // Rellena variables del template con datos reales
 function renderMensaje(plantilla, vars) {
   let texto = plantilla;
@@ -73,12 +67,14 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/plantillas
+// Solo tipo 'evento' — el tipo 'cobro' (recordatorio masivo automático de mensualidades) se
+// quitó por completo: era el mismo patrón de ráfaga por WAHA que causaba baneos del número.
+// El recordatorio de cobro ahora es manual, uno a uno, desde la pantalla de Estado de cuenta.
 router.post('/', async (req, res) => {
-  const { nombre, mensaje, incluir_qr, hora_envio, activa, tipo_plantilla, tipo_evento, dia_envio } = req.body;
+  const { nombre, mensaje, incluir_qr, hora_envio, activa, tipo_evento } = req.body;
   if (!nombre || !mensaje) return res.status(400).json({ success: false, error: 'nombre y mensaje son requeridos' });
-  const tipo = tipo_plantilla || 'evento';
-  if (tipo === 'evento' && !hora_envio) return res.status(400).json({ success: false, error: 'hora_envio es requerido para plantillas de evento' });
-  if (tipo === 'cobro'  && !dia_envio)  return res.status(400).json({ success: false, error: 'dia_envio es requerido para plantillas de cobro' });
+  const tipo = 'evento';
+  if (!hora_envio) return res.status(400).json({ success: false, error: 'hora_envio es requerido' });
 
   try {
     const sb = supabaseAdmin();
@@ -99,11 +95,10 @@ router.post('/', async (req, res) => {
       nombre:         nombre.trim(),
       mensaje:        mensaje.trim(),
       incluir_qr:     !!incluir_qr,
-      hora_envio:     tipo === 'evento' ? hora_envio : null,
-      dia_envio:      tipo === 'cobro'  ? Number(dia_envio) : null,
+      hora_envio,
       activa:         activa !== false,
       tipo_plantilla: tipo,
-      tipo_evento:    tipo === 'evento' ? (tipo_evento || 'ENTRENAMIENTO') : null,
+      tipo_evento:    tipo_evento || 'ENTRENAMIENTO',
     }]).select().single();
     if (error) throw error;
     res.json({ success: true, plantilla: data });
@@ -165,29 +160,16 @@ router.post('/:id/probar', async (req, res) => {
     if (!adminTel) return res.status(400).json({ success: false, error: 'El club no tiene celular_admin configurado' });
     const clubSession = config.waha_session || process.env.WAHA_SESSION || 'default';
 
-    const tipo = p.tipo_plantilla || 'evento';
-    let vars = {};
-
-    if (tipo === 'evento') {
-      const DIAS = ['DOMINGO','LUNES','MARTES','MIÉRCOLES','JUEVES','VIERNES','SÁBADO'];
-      const hoy  = new Date(Date.now() - 5 * 3600000);
-      vars = {
-        '{dia}':          DIAS[hoy.getDay()],
-        '{lugar}':        'Campo de Prueba',
-        '{hora_inicio}':  '9:00 pm',
-        '{hora_fin}':     '11:00 pm',
-        '{club_nombre}':  clubNombre,
-        '{llave_pago}':   config.llave_pago || '000000000',
-      };
-    } else {
-      vars = {
-        '{nombre}':        'Jugador Ejemplo',
-        '{deuda}':         formatCOP(150000),
-        '{meses}':         'enero, febrero',
-        '{club_nombre}':   clubNombre,
-        '{llave_pago}':    config.llave_pago || '000000000',
-      };
-    }
+    const DIAS = ['DOMINGO','LUNES','MARTES','MIÉRCOLES','JUEVES','VIERNES','SÁBADO'];
+    const hoy  = new Date(Date.now() - 5 * 3600000);
+    const vars = {
+      '{dia}':          DIAS[hoy.getDay()],
+      '{lugar}':        'Campo de Prueba',
+      '{hora_inicio}':  '9:00 pm',
+      '{hora_fin}':     '11:00 pm',
+      '{club_nombre}':  clubNombre,
+      '{llave_pago}':   config.llave_pago || '000000000',
+    };
 
     const texto = renderMensaje(p.mensaje, vars);
 
@@ -219,11 +201,9 @@ router.post('/:id/enviar', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Conecta tu WhatsApp primero desde la sección de Plantillas.' });
     }
 
-    const wahaUrl    = process.env.WAHA_URL;
     const clubNombre = config.nombre || club.name || club.slug;
     const qrUrl      = config.qr_pago_url || null;
     const llavePago  = config.llave_pago  || '';
-    const tipo       = p.tipo_plantilla || 'evento';
 
     // Responder inmediatamente — el envío ocurre en background
     res.json({ success: true, status: 'processing' });
@@ -232,8 +212,6 @@ router.post('/:id/enviar', async (req, res) => {
       const ahora   = new Date();
       const nowCol  = new Date(ahora.getTime() - 5 * 3600000);
       const hoyCol  = nowCol.toISOString().split('T')[0];
-      const anio    = nowCol.getFullYear();
-      const MESES   = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
       const DIAS_ES = ['DOMINGO','LUNES','MARTES','MIÉRCOLES','JUEVES','VIERNES','SÁBADO'];
       const fmtH    = d => `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2,'0')} ${d.getHours() < 12 ? 'am' : 'pm'}`;
       const delay   = ms => new Promise(r => setTimeout(r, ms));
@@ -250,96 +228,42 @@ router.post('/:id/enviar', async (req, res) => {
           return;
         }
 
-        // ── TIPO EVENTO ────────────────────────────────────────────────────
-        if (tipo === 'evento') {
-          const mananaCol = new Date(nowCol.getTime() + 86400000).toISOString().split('T')[0];
-          const inicioUTC = `${hoyCol}T05:00:00Z`;
-          const finUTC    = `${mananaCol}T04:59:59Z`;
+        const mananaCol = new Date(nowCol.getTime() + 86400000).toISOString().split('T')[0];
+        const inicioUTC = `${hoyCol}T05:00:00Z`;
+        const finUTC    = `${mananaCol}T04:59:59Z`;
 
-          let query = sb.from('calendario')
-            .select('id, titulo, tipo, lugar, fecha_inicio, fecha_fin')
-            .eq('club_id', club.slug)
-            .gte('fecha_inicio', inicioUTC)
-            .lte('fecha_inicio', finUTC)
-            .or('suspendido.eq.false,suspendido.is.null');
+        let query = sb.from('calendario')
+          .select('id, titulo, tipo, lugar, fecha_inicio, fecha_fin')
+          .eq('club_id', club.slug)
+          .gte('fecha_inicio', inicioUTC)
+          .lte('fecha_inicio', finUTC)
+          .or('suspendido.eq.false,suspendido.is.null');
 
-          if (p.tipo_evento && p.tipo_evento !== 'todos') {
-            query = query.eq('tipo', p.tipo_evento);
-          }
-          const { data: eventos } = await query.order('fecha_inicio');
+        if (p.tipo_evento && p.tipo_evento !== 'todos') {
+          query = query.eq('tipo', p.tipo_evento);
+        }
+        const { data: eventos } = await query.order('fecha_inicio');
 
-          if (!eventos?.length) {
-            console.log(`[plantillas/enviar] ${p.id}: sin eventos hoy`);
-            return;
-          }
+        if (!eventos?.length) {
+          console.log(`[plantillas/enviar] ${p.id}: sin eventos hoy`);
+          return;
+        }
 
-          for (const evento of eventos) {
-            const d  = new Date(new Date(evento.fecha_inicio).getTime() - 5 * 3600000);
-            const df = evento.fecha_fin ? new Date(new Date(evento.fecha_fin).getTime() - 5 * 3600000) : null;
-            const varsBase = {
-              '{dia}':         DIAS_ES[d.getDay()],
-              '{lugar}':       evento.lugar || '',
-              '{hora_inicio}': fmtH(d),
-              '{hora_fin}':    df ? fmtH(df) : '',
-              '{club_nombre}': clubNombre,
-              '{llave_pago}':  llavePago,
-            };
-
-            for (const j of jugadores) {
-              if (!j.celular) continue;
-              const texto = renderMensaje(p.mensaje, { ...varsBase, '{nombre}': j.nombre || '' });
-              try {
-                if (p.incluir_qr && qrUrl) await sendWAHAImage(j.celular, qrUrl, clubSession);
-                await sendWAHA(j.celular, texto, clubSession);
-                enviados++;
-              } catch (e) { errores++; console.error(`[plantillas/enviar] ${j.celular}:`, e.message); }
-              await delay(4000 + Math.random() * 4000);
-            }
-          }
-
-        // ── TIPO COBRO ─────────────────────────────────────────────────────
-        } else if (tipo === 'cobro') {
-          const mesActual = nowCol.getMonth() + 1;
-
-          const [{ data: mens }, suspensionesCobro] = await Promise.all([
-            sb.from('mensualidades')
-              .select('cedula, estado, saldo_pendiente, numero_mes')
-              .eq('club_id', club.id).eq('anio', anio)
-              .in('estado', ['MORA', 'PENDIENTE', 'PARCIAL'])
-              .gt('valor_oficial', 0),
-            db.getSuspensiones(club.id),
-          ]);
-
-          // Solo suspensiones activas excusan un mes — si se cancela, la deuda vuelve a contar
-          const isSuspendidoMes = (cedula, mesNum) => (suspensionesCobro || []).some(s =>
-            s.activa && String(s.cedula) === String(cedula) && parseInt(s.anio) === anio &&
-            s.mes_inicio <= mesNum && mesNum <= s.mes_fin);
-
-          const porCedula = {};
-          for (const m of (mens || [])) {
-            if (isSuspendidoMes(m.cedula, parseInt(m.numero_mes))) continue;
-            if (!porCedula[m.cedula]) porCedula[m.cedula] = [];
-            porCedula[m.cedula].push(m);
-          }
+        for (const evento of eventos) {
+          const d  = new Date(new Date(evento.fecha_inicio).getTime() - 5 * 3600000);
+          const df = evento.fecha_fin ? new Date(new Date(evento.fecha_fin).getTime() - 5 * 3600000) : null;
+          const varsBase = {
+            '{dia}':         DIAS_ES[d.getDay()],
+            '{lugar}':       evento.lugar || '',
+            '{hora_inicio}': fmtH(d),
+            '{hora_fin}':    df ? fmtH(df) : '',
+            '{club_nombre}': clubNombre,
+            '{llave_pago}':  llavePago,
+          };
 
           for (const j of jugadores) {
-            const pendientes = porCedula[j.cedula];
-            if (!pendientes?.length || !j.celular) continue;
-
-            const deuda = pendientes.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
-            const meses = pendientes
-              .sort((a, b) => a.numero_mes - b.numero_mes)
-              .map(m => MESES[(m.numero_mes || 1) - 1])
-              .join(', ');
-
-            const texto = renderMensaje(p.mensaje, {
-              '{nombre}':      j.nombre || '',
-              '{deuda}':       formatCOP(deuda),
-              '{meses}':       meses,
-              '{club_nombre}': clubNombre,
-              '{llave_pago}':  llavePago,
-            });
-
+            if (!j.celular) continue;
+            const texto = renderMensaje(p.mensaje, { ...varsBase, '{nombre}': j.nombre || '' });
             try {
               if (p.incluir_qr && qrUrl) await sendWAHAImage(j.celular, qrUrl, clubSession);
               await sendWAHA(j.celular, texto, clubSession);
