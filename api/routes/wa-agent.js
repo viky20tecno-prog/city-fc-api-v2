@@ -1483,7 +1483,12 @@ async function resolverLid(lidId) {
     const res  = await fetch(`${wahaUrl}/api/contacts?contactId=${encodeURIComponent(lidId)}&session=${session}`, { headers });
     if (!res.ok) return null;
     const data = await res.json();
-    if (data?.number) return data.number; // número completo con código de país, ej: 573023903192
+    // OJO: data.number NO es el teléfono real — es el id numérico del propio LID
+    // (ej. "134479737798743"). El número real viene en data.id ("573123310283@c.us").
+    if (data?.id) {
+      const numero = String(data.id).replace(/\D/g, '');
+      if (numero) return numero;
+    }
   } catch { /* ignorar */ }
   return null;
 }
