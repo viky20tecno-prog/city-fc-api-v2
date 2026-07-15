@@ -1359,6 +1359,10 @@ async function sendWAHA(to, text, session) {
   const wahaUrl = process.env.WAHA_URL;
   const sess    = session || process.env.WAHA_SESSION || 'default';
   if (!wahaUrl) { console.error('[wa-agent] WAHA_URL no configurado'); return; }
+  // Espaciado humano antes de responder — una ráfaga de respuestas instantáneas (ej. varias
+  // decenas de mensajes atrasados llegando de golpe al reconectar) es una señal fuerte de
+  // automatización para el antifraude de WhatsApp. 400-1300ms no afecta la experiencia real.
+  await new Promise(r => setTimeout(r, 400 + Math.random() * 900));
   const chatId  = wahaChatId(to);
   const headers = wahaHeaders();
   const res = await fetch(`${wahaUrl}/api/sendText`, {
@@ -1500,6 +1504,17 @@ router.post('/waha', async (req, res) => {
     // de tráfico (cientos/miles por reconexión) que aumentan el riesgo de baneo por WhatsApp.
     if (payload?.from === 'status@broadcast' || String(payload?.from).endsWith('@broadcast')) {
       return res.status(200).json({ status: 'ignored_broadcast' });
+    }
+
+    // Mensajes viejos que WAHA reenvía como si fueran nuevos — típico al reconectar una sesión
+    // (backlog acumulado offline, o sync de historial inicial). Contestarlos todos de golpe es
+    // una ráfaga de respuestas instantáneas a gente que no te escribió "ahora": el patrón que
+    // más dispara el antifraude de WhatsApp contra clientes no oficiales como WAHA.
+    if (payload?.timestamp) {
+      const antiguedadMs = Date.now() - (Number(payload.timestamp) * 1000);
+      if (antiguedadMs > 3 * 60 * 1000) {
+        return res.status(200).json({ status: 'ignored_stale' });
+      }
     }
 
     const msgId   = payload.id;
