@@ -1096,14 +1096,17 @@ async function getAsistenciaStatsClub(club_id, club_slug) {
 // club_slug: slug del club (calendario.club_id guarda el slug, no el uuid)
 async function getRankingAsistencia(club_id, club_slug, { anio, mes } = {}) {
   const anioNum = parseInt(anio) || new Date().getFullYear();
+  // Colombia es UTC-5: medianoche local = 05:00 UTC (mismo criterio que
+  // consultar_asistencia_hoy en wa-agent.js) — sin esto, un entrenamiento de la
+  // noche del último día del mes anterior/actual queda del lado equivocado del corte.
   let desde, hasta;
   if (mes) {
     const mesNum = parseInt(mes);
-    desde = new Date(Date.UTC(anioNum, mesNum - 1, 1));
-    hasta = new Date(Date.UTC(anioNum, mesNum, 1));
+    desde = new Date(Date.UTC(anioNum, mesNum - 1, 1, 5, 0, 0));
+    hasta = new Date(Date.UTC(anioNum, mesNum, 1, 5, 0, 0));
   } else {
-    desde = new Date(Date.UTC(anioNum, 0, 1));
-    hasta = new Date(Date.UTC(anioNum + 1, 0, 1));
+    desde = new Date(Date.UTC(anioNum, 0, 1, 5, 0, 0));
+    hasta = new Date(Date.UTC(anioNum + 1, 0, 1, 5, 0, 0));
   }
 
   const [{ data: eventos, error }, { data: jugadores }] = await Promise.all([
