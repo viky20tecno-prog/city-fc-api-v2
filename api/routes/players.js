@@ -389,9 +389,12 @@ router.patch('/:cedula/exento', async (req, res) => {
 
     // 2. Sincronizar mensualidades del año actual
     if (exento) {
-      // Exento: $0 oficial/pendiente y AL_DIA, pero SIN tocar valor_pagado para no destruir historial de pagos
+      // Exento: $0 oficial/pendiente/pagado y AL_DIA. valor_pagado también se fuerza a 0 —
+      // un exento no debe sumar plata que nunca entró solo porque un mes anterior había
+      // quedado con un valor pagado incorrecto (ej. AL_DIA con $0/$0 corregido a mano
+      // como si fuera la cuota normal, sin revisar que el jugador era exento).
       await db.supabase.from('mensualidades')
-        .update({ valor_oficial: 0, saldo_pendiente: 0, estado: 'AL_DIA' })
+        .update({ valor_oficial: 0, valor_pagado: 0, saldo_pendiente: 0, estado: 'AL_DIA' })
         .eq('club_id', club.id).eq('cedula', String(cedula)).eq('anio', anio);
     } else {
       // Quitar exento: restaurar valor_oficial y recalcular estado según valor_pagado real de cada mes

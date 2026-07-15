@@ -18,14 +18,19 @@ async function recalcularMensualidadesPorDescuento({ supabase, clubId, cedula, v
   for (const mens of (mensualidadesAjustar || [])) {
     const penalidad  = Number(mens.penalidad   ?? 0);
     const pagado     = Number(mens.valor_pagado ?? 0);
-    const nuevoSaldo = Math.max(0, nuevoOficial + penalidad - pagado);
+    // 100% de descuento (exento) = no se le cobra nada — cualquier valor_pagado que haya
+    // quedado (ej. de un mes corregido a mano antes de marcarlo exento) se limpia también,
+    // para que no sume plata que nunca entró en un mes que ahora es $0 oficial.
+    const nuevoPagado = nuevoOficial === 0 ? 0 : pagado;
+    const nuevoSaldo = Math.max(0, nuevoOficial + penalidad - nuevoPagado);
     const nuevoEstado =
-      nuevoOficial === 0 || pagado >= nuevoOficial + penalidad ? 'AL_DIA'
-      : pagado > 0 ? 'PARCIAL'
+      nuevoOficial === 0 || nuevoPagado >= nuevoOficial + penalidad ? 'AL_DIA'
+      : nuevoPagado > 0 ? 'PARCIAL'
       : 'PENDIENTE';
 
     await supabase.from('mensualidades').update({
       valor_oficial:   nuevoOficial,
+      valor_pagado:    nuevoPagado,
       saldo_pendiente: nuevoSaldo,
       estado:          nuevoEstado,
     }).eq('id', mens.id);
