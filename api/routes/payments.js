@@ -197,8 +197,16 @@ router.put('/:id', async (req, res) => {
 
     // ── Aprobar ───────────────────────────────────────────────────────────────
     if (accion === 'aprobar') {
-      if (pago.estado_revision === 'aprobado_manual')
+      // Reclamo atómico ANTES de tocar plata: si dos aprobaciones llegan casi
+      // juntas (dos admins, un reintento, dos pestañas), solo una gana este
+      // UPDATE condicional — la otra recibe null acá y nunca llega a sumar la
+      // plata dos veces. El chequeo en memoria de `pago.estado_revision` de
+      // arriba no alcanza porque ambos requests pueden leerlo "pendiente"
+      // antes de que cualquiera escriba.
+      const reclamado = await db.reclamarPagoParaAprobar(id);
+      if (!reclamado) {
         return res.status(400).json({ success: false, error: 'Este pago ya fue aprobado' });
+      }
 
       const montoFinal    = parseInt(monto ?? pago.monto);
       const conceptoFinal = concepto ?? pago.concepto;

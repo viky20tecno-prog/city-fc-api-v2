@@ -364,6 +364,24 @@ async function updatePago(id, updates) {
   return data;
 }
 
+// Reclama un pago para aprobarlo de forma atómica: el UPDATE solo aplica si
+// estado_revision SIGUE siendo 'pendiente' en el mismo momento de escribir
+// (no en una lectura previa) — evita que dos aprobaciones concurrentes del
+// mismo pago (dos admins, un reintento de red, dos pestañas) pasen ambas el
+// check y apliquen la plata dos veces. Devuelve null si alguien más ya lo
+// reclamó primero (o si no estaba pendiente).
+async function reclamarPagoParaAprobar(id) {
+  const { data, error } = await supabase
+    .from('pagos')
+    .update({ estado_revision: 'aprobado_manual' })
+    .eq('id', id)
+    .eq('estado_revision', 'pendiente')
+    .select()
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
 /**
  * Actualizar campos del perfil de un jugador
  */
@@ -1507,6 +1525,7 @@ module.exports = {
   getHashesDuplicados,
   getPagoById,
   updatePago,
+  reclamarPagoParaAprobar,
   createPlayer,
   bulkInsert,
   getPartidos,
