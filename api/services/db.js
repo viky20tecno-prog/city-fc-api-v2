@@ -664,6 +664,145 @@ async function deletePedidoUniforme(id) {
 }
 
 /**
+ * Prendas de un pedido de uniforme — desglose de precio y abono por prenda.
+ */
+async function getPrendasPedido(pedido_id) {
+  const { data, error } = await supabase
+    .from('pedido_uniforme_prendas')
+    .select('*')
+    .eq('pedido_id', pedido_id)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+async function getPrendasPedidos(pedidoIds) {
+  if (!pedidoIds || pedidoIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from('pedido_uniforme_prendas')
+    .select('*')
+    .in('pedido_id', pedidoIds);
+  if (error) throw error;
+  return data || [];
+}
+
+// Sincroniza las prendas de un pedido con la lista nueva (por nombre): actualiza
+// precio/cantidad de las que siguen, crea las nuevas, y borra las que ya no
+// están — pero si una prenda borrada tenía abono, ese monto NO se pierde: se
+// repliega al abono histórico sin discriminar del pedido (abono_legacy), para
+// que el total pagado del pedido nunca disminuya por una edición de prendas.
+// Devuelve el monto repleg ado (0 si ninguna prenda borrada tenía abono).
+async function syncPrendasPedido(pedido_id, items) {
+  const existentes = await getPrendasPedido(pedido_id);
+  const existentesPorNombre = new Map(existentes.map(it => [it.nombre, it]));
+  const nuevosPorNombre     = new Map((items || []).map(it => [it.nombre, it]));
+
+  const aBorrar = existentes.filter(e => !nuevosPorNombre.has(e.nombre));
+  const abonoLiberado = aBorrar.reduce((s, e) => s + (parseFloat(e.valor_pagado) || 0), 0);
+  if (aBorrar.length > 0) {
+    const { error } = await supabase.from('pedido_uniforme_prendas').delete().in('id', aBorrar.map(e => e.id));
+    if (error) throw error;
+  }
+
+  for (const it of (items || [])) {
+    const ex = existentesPorNombre.get(it.nombre);
+    const cantidad        = Number(it.cantidad) || 1;
+    const precioUnitario  = Number(it.precio_unitario) || 0;
+    const totalItem       = precioUnitario * cantidad;
+    if (ex) {
+      const pagado = Math.min(parseFloat(ex.valor_pagado) || 0, totalItem);
+      const estado = pagado <= 0 ? 'PENDIENTE' : pagado >= totalItem ? 'PAGADO' : 'ABONO';
+      const { error } = await supabase.from('pedido_uniforme_prendas')
+        .update({ cantidad, precio_unitario: precioUnitario, valor_pagado: pagado, estado })
+        .eq('id', ex.id);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.from('pedido_uniforme_prendas')
+        .insert([{ pedido_id, nombre: it.nombre, cantidad, precio_unitario: precioUnitario, valor_pagado: 0, estado: 'PENDIENTE' }]);
+      if (error) throw error;
+    }
+  }
+
+  return abonoLiberado;
+}
+
+// Pone en cero el abono de todas las prendas de un pedido (usado al revertir
+// un pago completo del pedido, ej. "Revertir pago" en el admin).
+async function resetAbonoPrendasPedido(pedido_id) {
+  const { error } = await supabase
+    .from('pedido_uniforme_prendas')
+    .update({ valor_pagado: 0, estado: 'PENDIENTE' })
+    .eq('pedido_id', pedido_id);
+  if (error) throw error;
+}
+
+// Recalcula valor_pagado/estado del pedido a partir de sus prendas + el abono
+// histórico sin discriminar (abono_legacy). El `total` del pedido no se toca
+// acá (sigue siendo el que ya se guarda al crear/editar el pedido).
+async function recalcularPedidoUniformeDesdeItems(pedido_id) {
+  const { data: pedido, error: errPedido } = await supabase
+    .from('pedido_uniformes').select('*').eq('id', pedido_id).single();
+  if (errPedido) throw errPedido;
+
+  const items = await getPrendasPedido(pedido_id);
+  const abonoItems  = items.reduce((s, it) => s + (parseFloat(it.valor_pagado) || 0), 0);
+  const abonoLegacy = parseFloat(pedido.abono_legacy) || 0;
+  const total       = parseFloat(pedido.total) || 0;
+  const valorPagado = Math.min(total, abonoItems + abonoLegacy);
+  const estado = pedido.estado === 'ENTREGADO' ? 'ENTREGADO'
+    : valorPagado <= 0 ? 'PENDIENTE'
+    : valorPagado >= total ? 'PAGADO'
+    : 'ABONO';
+
+  const { data, error } = await supabase
+    .from('pedido_uniformes')
+    .update({ valor_pagado: valorPagado, estado })
+    .eq('id', pedido_id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// Abona uno o varios montos a prendas puntuales de un pedido en un solo paso
+// (ej: reparte un abono de 300.000 en 4 prendas). Valida todo antes de
+// escribir nada, para no dejar el pedido a medio abonar si una fila falla.
+async function abonarPrendasPedido(pedido_id, abonos) {
+  const items = await getPrendasPedido(pedido_id);
+  const porId = new Map(items.map(it => [String(it.id), it]));
+
+  for (const a of abonos) {
+    const item = porId.get(String(a.prenda_id));
+    if (!item) throw Object.assign(new Error('Prenda no encontrada en este pedido'), { status: 404 });
+    const monto = Number(a.monto);
+    if (!monto || monto <= 0) throw Object.assign(new Error(`Monto inválido para "${item.nombre}"`), { status: 400 });
+    const totalItem = (parseFloat(item.precio_unitario) || 0) * (item.cantidad || 1);
+    const saldoItem  = totalItem - (parseFloat(item.valor_pagado) || 0);
+    if (monto > saldoItem) {
+      throw Object.assign(new Error(`El abono a "${item.nombre}" ($${monto}) supera su saldo pendiente ($${saldoItem})`), { status: 400 });
+    }
+  }
+
+  const actualizados = [];
+  for (const a of abonos) {
+    const item  = porId.get(String(a.prenda_id));
+    const monto = Number(a.monto);
+    const totalItem    = (parseFloat(item.precio_unitario) || 0) * (item.cantidad || 1);
+    const nuevoPagado  = (parseFloat(item.valor_pagado) || 0) + monto;
+    const estado = nuevoPagado <= 0 ? 'PENDIENTE' : nuevoPagado >= totalItem ? 'PAGADO' : 'ABONO';
+    const { data, error } = await supabase
+      .from('pedido_uniforme_prendas')
+      .update({ valor_pagado: nuevoPagado, estado })
+      .eq('id', item.id)
+      .select()
+      .single();
+    if (error) throw error;
+    actualizados.push(data);
+  }
+  return actualizados;
+}
+
+/**
  * Suspensiones de mensualidades
  */
 async function getSuspensiones(club_id) {
@@ -1383,6 +1522,12 @@ module.exports = {
   createPedidoUniforme,
   updatePedidoUniforme,
   deletePedidoUniforme,
+  getPrendasPedido,
+  getPrendasPedidos,
+  syncPrendasPedido,
+  resetAbonoPrendasPedido,
+  recalcularPedidoUniformeDesdeItems,
+  abonarPrendasPedido,
   getSuspensiones,
   getSuspensionesJugador,
   createSuspension,

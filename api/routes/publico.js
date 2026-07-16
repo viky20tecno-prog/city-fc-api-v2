@@ -69,6 +69,12 @@ async function construirRespuestaPortal(club, clubSlug, jugador) {
       db.getTorneos(club.id, String(cedula)),
       db.getPedidoUniformesByCedula(club.id, String(cedula)),
     ]);
+    const prendasUniforme = await db.getPrendasPedidos((uniformesJugador || []).map(u => u.id));
+    const prendasPorPedido = {};
+    prendasUniforme.forEach(pr => {
+      if (!prendasPorPedido[pr.pedido_id]) prendasPorPedido[pr.pedido_id] = [];
+      prendasPorPedido[pr.pedido_id].push(pr);
+    });
     // Deduplicar por id
     const mensMap = {};
     [...(byCedula.data || []), ...(byPlayerId.data || [])].forEach(m => { mensMap[m.id] = m; });
@@ -219,6 +225,7 @@ async function construirRespuestaPortal(club, clubSlug, jugador) {
       })),
       uniformes:        (uniformesJugador || []).map(u => ({
         id:              u.id,
+        tipo:            u.tipo || 'Jugador',
         descripcion:     u.prendas || u.descripcion || u.tipo || 'Uniforme',
         estado:          u.estado,
         talla:           u.talla || '',
@@ -229,6 +236,17 @@ async function construirRespuestaPortal(club, clubSlug, jugador) {
         saldo_pendiente: u.estado === 'PAGADO' || u.estado === 'ENTREGADO'
           ? 0
           : (parseFloat(u.total) || 0) - (parseFloat(u.valor_pagado) || 0),
+        abono_legacy:    parseFloat(u.abono_legacy) || 0,
+        prendas_detalle: (prendasPorPedido[u.id] || []).map(pr => ({
+          id:              pr.id,
+          nombre:          pr.nombre,
+          cantidad:        pr.cantidad,
+          precio_unitario: parseFloat(pr.precio_unitario) || 0,
+          valor:           (parseFloat(pr.precio_unitario) || 0) * (pr.cantidad || 1),
+          valor_pagado:    parseFloat(pr.valor_pagado) || 0,
+          saldo:           Math.max(0, (parseFloat(pr.precio_unitario) || 0) * (pr.cantidad || 1) - (parseFloat(pr.valor_pagado) || 0)),
+          estado:          pr.estado,
+        })),
       })),
       saldo_pendiente,
       total_pagado,
