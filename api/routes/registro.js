@@ -121,28 +121,34 @@ router.post('/', async (req, res) => {
             trial_ends_at:     esFree ? null : new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
             deporte:           deportesArray[0],
             deportes:          deportesArray,
+            // Debe coincidir con PLAN_MODULES en admin/lib/plan-modules.ts —
+            // ese archivo es la fuente de verdad de qué trae cada plan
+            // (repos separados, sin import compartido, así que se replica a
+            // mano). 'dashboard'/'jugadores' siempre true: el dashboard los
+            // muestra sin mirar config.modulos. Trial = todos los módulos
+            // (coincide con lo que promete el landing: "Todos los módulos").
             modulos: esFree ? {
               dashboard:    true,
               jugadores:    true,
-              uniformes:    false,
-              arbitraje:    false,
-              cobro:        false,
-              whatsapp:     false,
-              conciliacion: false,
               calendario:   false,
               equipos:      false,
+              uniformes:    false,
               torneos:      false,
+              conciliacion: false,
               finanzas:     false,
               plantillas:   false,
               documentos:   false,
             } : {
               dashboard:    true,
               jugadores:    true,
+              calendario:   true,
+              equipos:      true,
               uniformes:    true,
-              arbitraje:    deportesArray.includes('futbol'),
-              cobro:        true,
-              whatsapp:     true,
+              torneos:      true,
               conciliacion: true,
+              finanzas:     true,
+              plantillas:   true,
+              documentos:   true,
             },
           },
         }).select('id').single(),
