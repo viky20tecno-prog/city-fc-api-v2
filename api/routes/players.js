@@ -3,6 +3,7 @@ const db = require('../services/db');
 const { MESES } = require('../services/meses');
 const { mesesEnMora } = require('../services/mora');
 const { recalcularMensualidadesPorDescuento } = require('../services/descuentos');
+const { limiteDe } = require('../services/plan-limits');
 const router = express.Router();
 
 // GET /api/players?club_id=city-fc
@@ -446,11 +447,14 @@ router.post('/bulk', async (req, res) => {
       .eq('club_id', club.id);
     const existingSet = new Set((existing || []).map(p => String(p.cedula)));
 
-    // Plan gratis: tope de 20 jugadores — el import no puede saltárselo
+    // Tope de jugadores por plan — el import no puede saltárselo. Antes solo
+    // el plan free lo hacía cumplir; ver nota en inscripcion.js.
+    const planActualImport = club.config?.plan || 'trial';
+    const limiteJugadoresImport = limiteDe(planActualImport, 'jugadores');
     let cupoDisponible = Infinity;
-    if (club.config?.plan === 'free') {
+    if (Number.isFinite(limiteJugadoresImport)) {
       const jugadoresActuales = await db.getPlayers(club.id);
-      cupoDisponible = Math.max(0, 20 - jugadoresActuales.length);
+      cupoDisponible = Math.max(0, limiteJugadoresImport - jugadoresActuales.length);
     }
 
     const errores = [];
@@ -466,7 +470,7 @@ router.post('/bulk', async (req, res) => {
       if (!nombre)               return errores.push({ fila, cedula, error: 'Nombre requerido' });
       if (existingSet.has(cedula)) return errores.push({ fila, cedula, nombre: `${nombre} ${apellidos}`.trim(), error: 'Cédula ya registrada' });
       if (filas.length >= cupoDisponible) {
-        return errores.push({ fila, cedula, nombre: `${nombre} ${apellidos}`.trim(), error: 'Tu plan gratis permite hasta 20 jugadores' });
+        return errores.push({ fila, cedula, nombre: `${nombre} ${apellidos}`.trim(), error: `Tu plan (${planActualImport}) permite hasta ${limiteJugadoresImport} jugadores` });
       }
 
       existingSet.add(cedula);

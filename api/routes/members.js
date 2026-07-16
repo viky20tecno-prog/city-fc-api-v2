@@ -1,6 +1,7 @@
 const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
 const db = require('../services/db');
+const { limiteDe } = require('../services/plan-limits');
 
 const router = express.Router();
 
@@ -58,9 +59,7 @@ router.post('/', async (req, res) => {
     }
 
     const club = await db.getClubBySlug(req.club_id);
-    if (club?.config?.plan === 'free') {
-      return res.status(403).json({ success: false, error: 'Tu plan gratis permite solo 1 administrador. Actualiza tu plan para invitar más miembros.' });
-    }
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
     const { email, nombre, role = 'ENTRENADOR', celular } = req.body;
     if (!email || !nombre) {
@@ -68,6 +67,22 @@ router.post('/', async (req, res) => {
     }
     if (!['ENTRENADOR', 'ADMIN'].includes(role)) {
       return res.status(400).json({ success: false, error: 'role debe ser ENTRENADOR o ADMIN' });
+    }
+
+    // Tope de admins/entrenadores por plan — antes solo el plan free lo hacía
+    // cumplir; Starter/Pro/Scale prometían un tope en el landing que nadie
+    // validaba. El owner ya cuenta como ADMIN dentro de club_members (se
+    // inserta así al registrar el club), así que no hace falta sumarlo aparte.
+    const plan = club.config?.plan || 'trial';
+    const campoLimite = role === 'ADMIN' ? 'admins' : 'entrenadores';
+    const limite = limiteDe(plan, campoLimite);
+    if (Number.isFinite(limite)) {
+      const miembrosActuales = await db.getClubMembers(req.club_id);
+      const actuales = miembrosActuales.filter(m => m.role === role && m.activo !== false).length;
+      if (actuales >= limite) {
+        const etiqueta = role === 'ADMIN' ? 'administradores' : 'entrenadores';
+        return res.status(403).json({ success: false, error: `Tu plan (${plan}) permite hasta ${limite} ${etiqueta}. Actualiza tu plan para invitar más.` });
+      }
     }
 
     const password = generatePassword();

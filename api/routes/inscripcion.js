@@ -3,6 +3,7 @@ const rateLimit = require('express-rate-limit');
 const { createClient } = require('@supabase/supabase-js');
 const db = require('../services/db');
 const { MESES } = require('../services/meses');
+const { limiteDe } = require('../services/plan-limits');
 
 const router = express.Router();
 
@@ -65,11 +66,16 @@ router.post('/', inscripcionLimiter, async (req, res) => {
       return res.status(409).json({ success: false, error: 'Ya existe un jugador con esa cédula' });
     }
 
-    // Plan gratis: tope de 20 jugadores
-    if (club.config?.plan === 'free') {
+    // Tope de jugadores por plan — antes solo el plan free lo hacía cumplir;
+    // Starter/Pro/Scale prometían un tope en el landing (120/350/1.000) que
+    // nadie validaba, así que un club pagando Starter podía cargar capacidad
+    // de Scale sin restricción.
+    const planActual = club.config?.plan || 'trial';
+    const limiteJugadores = limiteDe(planActual, 'jugadores');
+    if (Number.isFinite(limiteJugadores)) {
       const jugadoresActuales = await db.getPlayers(club.id);
-      if (jugadoresActuales.length >= 20) {
-        return res.status(403).json({ success: false, error: 'Tu plan gratis permite hasta 20 jugadores. Actualiza tu plan para inscribir más.' });
+      if (jugadoresActuales.length >= limiteJugadores) {
+        return res.status(403).json({ success: false, error: `Tu plan (${planActual}) permite hasta ${limiteJugadores} jugadores. Actualiza tu plan para inscribir más.` });
       }
     }
 
