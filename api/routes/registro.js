@@ -168,6 +168,7 @@ router.post('/', async (req, res) => {
   }
 
   if (clubError) {
+    console.error('[registro] Error insertando club:', JSON.stringify({ code: clubError.code, details: clubError.details, hint: clubError.hint, message: clubError.message }));
     await supabase.auth.admin.deleteUser(userId).catch(() => {});
     return res.status(500).json({ success: false, error: 'Error creando el club: ' + clubError.message });
   }
