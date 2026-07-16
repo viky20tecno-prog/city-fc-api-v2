@@ -28,6 +28,25 @@ function emojiDeporte(config = {}) {
   return DEPORTE_EMOJI[d.toLowerCase().replace(/\s/g,'_')] || '🏅';
 }
 
+// Offset horario (horas respecto a UTC, negativo = detrás) por código telefónico
+// de país — mismo set de países que PAISES_TEL del dashboard. No contempla
+// horario de verano (Chile/México lo tienen en parte del año) — aproximación
+// suficiente para agrupar eventos por día/mes, no para horas exactas.
+// Todos los clubes reales de hoy son Colombia (+57); esto deja el resto de
+// LATAM listo para cuando haya clubes fuera de Colombia.
+const UTC_OFFSET_POR_PAIS = {
+  '57': -5, '51': -5, '593': -5, '507': -5,   // Colombia, Perú, Ecuador, Panamá
+  '52': -6, '506': -6, '502': -6, '503': -6, '504': -6, '505': -6, // México y Centroamérica
+  '54': -3, '598': -3, // Argentina, Uruguay
+  '56': -4, '58': -4, '591': -4, // Chile, Venezuela, Bolivia
+  '595': -4, // Paraguay
+  '1': -5,   // República Dominicana / genérico Caribe
+};
+function offsetHorasClub(club) {
+  const codigo = String(club?.config?.codigo_pais || '57');
+  return UTC_OFFSET_POR_PAIS[codigo] ?? -5;
+}
+
 const router = express.Router();
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -455,21 +474,31 @@ async function runTool(name, input, contexto = {}) {
       const club = await db.getClubBySlug(input.club_slug);
       if (!club) return { texto: 'No hay eventos próximos.' };
 
-      const ahoraCol = new Date(Date.now() - 5 * 3600000);
+      // Límites de fecha en instantes UTC precisos (no strings de fecha), calculados
+      // sobre la medianoche LOCAL del club (según su país) — no la de Colombia a
+      // secas. Un string tipo '2026-07-31' lo interpreta Postgres como medianoche
+      // UTC, que en Colombia (UTC-5) cae 5 horas ANTES de medianoche local: un
+      // evento de las 9pm del día 30 queda guardado como "31 a las 02:00 UTC" y
+      // ese corte ingenuo lo dejaba afuera del mes por error.
+      const offsetH = offsetHorasClub(club); // horas respecto a UTC, negativo = detrás (Colombia = -5)
+      const ahoraLocal = new Date(Date.now() + offsetH * 3600000);
       let hoy, hasta, mesLabel = null;
       if (input.mes) {
-        const anioActual = ahoraCol.getUTCFullYear();
-        const mesActual  = ahoraCol.getUTCMonth() + 1;
+        const anioActual = ahoraLocal.getUTCFullYear();
+        const mesActual  = ahoraLocal.getUTCMonth() + 1;
         const mesPedido  = Math.min(12, Math.max(1, Math.round(input.mes)));
         const esMesActual = mesPedido === mesActual;
         const anio = mesPedido < mesActual ? anioActual + 1 : anioActual;
-        // Si es el mes en curso, arranca desde hoy (no desde el día 1) para no mostrar eventos ya pasados
-        hoy   = esMesActual ? ahoraCol.toISOString().split('T')[0] : new Date(Date.UTC(anio, mesPedido - 1, 1)).toISOString().split('T')[0];
-        hasta = new Date(Date.UTC(anio, mesPedido, 0)).toISOString().split('T')[0];
+        // Si es el mes en curso, arranca desde este instante (no desde el día 1)
+        // para no mostrar eventos ya pasados; si no, desde la medianoche local
+        // del día 1 de ese mes.
+        hoy   = esMesActual ? new Date().toISOString() : new Date(Date.UTC(anio, mesPedido - 1, 1) - offsetH * 3600000).toISOString();
+        // Fin de mes = medianoche local del día 1 del mes SIGUIENTE.
+        hasta = new Date(Date.UTC(anio, mesPedido, 1) - offsetH * 3600000).toISOString();
         mesLabel = MESES_ES[mesPedido - 1];
       } else {
-        hoy   = ahoraCol.toISOString().split('T')[0];
-        hasta = new Date(ahoraCol.getTime() + 30 * 86400000).toISOString().split('T')[0];
+        hoy   = new Date().toISOString();
+        hasta = new Date(Date.now() + 30 * 86400000).toISOString();
       }
 
       const eventos = await db.getCalendario(club.slug, hoy, hasta);
@@ -488,7 +517,7 @@ async function runTool(name, input, contexto = {}) {
       // Agrupar por mes
       const porMes = {};
       for (const e of filtrados) {
-        const d = e.fecha_inicio ? new Date(new Date(e.fecha_inicio).getTime() - 5 * 3600000) : null;
+        const d = e.fecha_inicio ? new Date(new Date(e.fecha_inicio).getTime() + offsetH * 3600000) : null;
         if (!d) continue;
         const mes = MESES_ES[d.getMonth()];
         if (!porMes[mes]) porMes[mes] = [];
