@@ -102,6 +102,20 @@ router.post('/', async (req, res) => {
   // Crear club + sign-in en paralelo (ambos dependen de userId pero no entre sí)
   let clubData, clubError, signInResult;
   try {
+    // Cliente aparte SOLO para el sign-in — nunca reusar `supabase` (service
+    // role) para auth.signInWithPassword(): en supabase-js v2, iniciar sesión
+    // en un cliente muta su estado interno y hace que las consultas SIGUIENTES
+    // de ESE MISMO cliente (incluido `.from()`) usen el token de sesión del
+    // usuario recién logueado en vez de la key de service_role — perdiendo el
+    // bypass de RLS. Como `supabase` es un singleton reusado entre requests
+    // (Vercel reutiliza la lambda en caliente) y esto corría en el mismo
+    // Promise.all que el insert del club, la carrera hacía que el insert
+    // fallara intermitentemente con "row violates row-level security policy"
+    // (42501) — reproducido en producción real, 2 de cada 3 intentos
+    // seguidos. Con un cliente separado, el signIn no puede contaminar al
+    // cliente de service_role usado para el insert.
+    const signInClient = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
+
     [{ data: clubData, error: clubError }, signInResult] = await withTimeout(
       Promise.all([
         supabase.from('clubs').insert({
@@ -152,7 +166,7 @@ router.post('/', async (req, res) => {
             },
           },
         }).select('id').single(),
-        supabase.auth.signInWithPassword({ email: emailNorm, password }),
+        signInClient.auth.signInWithPassword({ email: emailNorm, password }),
       ]),
       20000,
       'crearClub',
