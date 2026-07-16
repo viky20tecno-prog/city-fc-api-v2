@@ -1273,13 +1273,20 @@ async function generateReply(from, text) {
   const toolsUsed   = [];   // tracking de herramientas para métricas
 
   for (let i = 0; i < 5; i++) {
+    // Timeout explícito: sin esto, una degradación de la API de Anthropic (ver
+    // incidente 16 jul 2026) cuelga la llamada hasta que Vercel mata la función
+    // por su propio límite de 60s (vercel.json maxDuration) — eso pasa por
+    // encima de cualquier try/catch nuestro, así que el usuario no recibe ni
+    // siquiera el mensaje de error genérico, silencio total. Con este timeout,
+    // el catch de más abajo sí llega a mandar el mensaje de "intenta en unos
+    // minutos" en vez de dejar al usuario sin ninguna respuesta.
     const response = await anthropic.messages.create({
       model:      'claude-haiku-4-5-20251001',
       max_tokens: 1024,
       system,
       tools:      rolTools,
       messages,
-    });
+    }, { timeout: 25000 });
 
     if (response.stop_reason === 'end_turn') {
       reply = response.content.find(b => b.type === 'text')?.text;
