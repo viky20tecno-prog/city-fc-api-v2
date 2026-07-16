@@ -582,21 +582,13 @@ router.get('/stats', async (req, res) => {
 
 // ── Asistencia pública (link desde WhatsApp) ─────────────────────────────────
 
-// TODO(seguridad): fallback hardcodeado dejado a propósito por ahora — ver
-// PDF_HMAC_SECRET arriba para el criterio (fail-closed) que debería tener
-// esto también. No se aplicó todavía porque ASISTENCIA_HMAC_SECRET NO está
-// configurado en Vercel producción (confirmado 16 jul 2026): pasar esto a
-// fail-closed sin el secreto seteado primero rompe el link público de
-// asistencia para todos los eventos. Una vez que Diego configure
-// ASISTENCIA_HMAC_SECRET en Vercel, sacar el `|| 'zs-asist-2026-k7p'` de la
-// línea de abajo (igual que ya se hizo con PDF_HMAC_SECRET).
-const ASIST_SECRET = process.env.ASISTENCIA_HMAC_SECRET || 'zs-asist-2026-k7p';
-if (!process.env.ASISTENCIA_HMAC_SECRET) {
-  console.warn('[asistencia] 🚨 ASISTENCIA_HMAC_SECRET no configurado — usando fallback hardcodeado (inseguro, ver TODO)');
-}
+// Sin fallback hardcodeado: si ASISTENCIA_HMAC_SECRET no está seteado, todo
+// token de asistencia es inválido (igual criterio que PDF_HMAC_SECRET arriba).
+const ASIST_SECRET = process.env.ASISTENCIA_HMAC_SECRET;
 
 // Ventanas de 3h: el token es válido en la ventana actual y la anterior → máximo ~6h de validez
 function generarTokenAsistencia(slug, eventoId) {
+  if (!ASIST_SECRET) { console.error('[asistencia] ASISTENCIA_HMAC_SECRET no configurado — no se puede generar el link'); return null; }
   const ventana = Math.floor(Date.now() / (3 * 3600000));
   return crypto.createHmac('sha256', ASIST_SECRET)
     .update(`asist:${slug}:${eventoId}:${ventana}`)
@@ -605,6 +597,7 @@ function generarTokenAsistencia(slug, eventoId) {
 }
 
 function validarTokenAsistencia(slug, eventoId, token) {
+  if (!ASIST_SECRET) { console.error('[asistencia] ASISTENCIA_HMAC_SECRET no configurado — rechazando'); return false; }
   const ventana = Math.floor(Date.now() / (3 * 3600000));
   for (let i = 0; i < 2; i++) {
     const expected = crypto.createHmac('sha256', ASIST_SECRET)
