@@ -33,9 +33,8 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // Freno de abuso — hoy TODO el tráfico legítimo (todos los clubes) entra por
 // la misma IP de WAHA, así que el límite tiene que quedar generoso: esto es
-// un circuit-breaker contra una ráfaga anómala (o el fail-open de WAHA
-// explotado, ver verificarSecretoWaha), no un límite por club ni por mensaje
-// normal. Cada mensaje real dispara como mínimo una llamada a Claude.
+// un circuit-breaker contra una ráfaga anómala, no un límite por club ni por
+// mensaje normal. Cada mensaje real dispara como mínimo una llamada a Claude.
 const webhookLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 120,
@@ -71,21 +70,11 @@ function generarTokenMorosos(clubId) {
 // El rol (admin/entrenador/jugador) se deriva del número `from` del payload —
 // sin verificar que el request vino realmente de Meta/WAHA/Twilio, cualquiera
 // en internet puede suplantar a un admin real solo mandando su celular en el
-// body. Las tres funciones fallan CERRADO por defecto (rechazan si el secreto
-// no está configurado) — Meta y Twilio ya son seguras así hoy (Meta nunca se
-// activó, Twilio sí tiene TWILIO_AUTH_TOKEN configurado en Vercel).
-//
-// WAHA es la EXCEPCIÓN deliberada: es el canal real y activo del bot, y
-// WAHA_WEBHOOK_SECRET NO está configurado en Vercel (confirmado 16 jul 2026).
-// Pasarla a fail-closed hoy tumbaría el bot para todos los clubes. Queda
-// fail-open a propósito hasta que se complete esta coordinación de 2 pasos:
-//   1. Generar un secreto fuerte y configurarlo en Vercel como
-//      WAHA_WEBHOOK_SECRET (production + preview).
-//   2. Configurar ese MISMO secreto en la sesión de WAHA (panel de WAHA en
-//      Railway, o `PUT /api/sessions/{session}` con
-//      `config.webhooks[].hmac.key`) para que WAHA lo mande en el header
-//      `x-webhook-secret` de cada callback.
-// Recién ahí cambiar el `if (!secret)` de abajo a `return false`.
+// body. Las tres funciones fallan CERRADO (rechazan si el secreto no está
+// configurado). WAHA_WEBHOOK_SECRET quedó configurado en Vercel el 16 jul 2026
+// con el mismo valor que WAHA ya venía mandando como customHeader
+// `X-Webhook-Secret` en la sesión "default" — no fue necesario tocar la config
+// de WAHA, ya lo estaba mandando desde antes.
 function verificarFirmaMeta(req) {
   const secret = process.env.META_APP_SECRET;
   if (!secret) { console.warn('[wa-agent] ⚠️ META_APP_SECRET no configurado — webhook Meta rechazado (fail-closed)'); return false; }
@@ -97,12 +86,9 @@ function verificarFirmaMeta(req) {
   } catch { return false; }
 }
 
-// TODO(seguridad): fail-open intencional — ver nota arriba. Pendiente que
-// Diego configure WAHA_WEBHOOK_SECRET en Vercel Y en la sesión de WAHA antes
-// de poder pasar esto a fail-closed sin cortar el bot en producción.
 function verificarSecretoWaha(req) {
   const secret = process.env.WAHA_WEBHOOK_SECRET;
-  if (!secret) { console.warn('[wa-agent] 🚨 WAHA_WEBHOOK_SECRET no configurado — webhook WAHA SIN verificar origen (fail-open intencional, ver TODO de seguridad)'); return true; }
+  if (!secret) { console.warn('[wa-agent] ⚠️ WAHA_WEBHOOK_SECRET no configurado — webhook WAHA rechazado (fail-closed)'); return false; }
   const recibido = req.headers['x-webhook-secret'];
   if (!recibido) return false;
   try {
