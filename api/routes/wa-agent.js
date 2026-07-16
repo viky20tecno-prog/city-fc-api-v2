@@ -239,17 +239,6 @@ const TOOLS_BASE = [
     },
   },
   {
-    name: 'consultar_partidos',
-    description: 'Obtiene los próximos partidos del club.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        club_id: { type: 'string', description: 'UUID del club' },
-      },
-      required: ['club_id'],
-    },
-  },
-  {
     name: 'consultar_asistencia',
     description: 'Consulta el historial de asistencia del jugador a entrenamientos y partidos en el club actual.',
     input_schema: {
@@ -547,21 +536,6 @@ async function runTool(name, input, contexto = {}) {
       ].filter(Boolean).join(' ');
 
       return { creado: true, id: evento.id, resumen };
-    }
-
-    if (name === 'consultar_partidos') {
-      // Siempre usar el club_id del contexto autenticado, nunca el que pasa el LLM
-      if (!contexto.club_id) return { error: 'No se encontró el club en el contexto' };
-      const partidos = await db.getPartidos(contexto.club_id);
-      const proximos = partidos
-        .filter(p => new Date(p.fecha) >= new Date())
-        .sort((a, b) => new Date(a.fecha) - new Date(b.fecha))
-        .slice(0, 5);
-      return { partidos: proximos.map(p => ({
-        rival: p.rival, fecha: p.fecha?.split('T')[0],
-        hora:  p.fecha?.split('T')[1]?.slice(0,5),
-        lugar: p.lugar, categoria: p.categoria,
-      })) };
     }
 
     if (name === 'consultar_asistencia') {
@@ -897,8 +871,8 @@ Escribe el número o cuéntame directamente 😊
 
 FLUJO:
 - Para pagos / estado de cuenta / opción 1 → NO uses ninguna herramienta. Responde directamente usando el formato de abajo con datos del CONTEXTO.
-- Para calendario / entrenamientos / opción 2 → usa consultar_calendario con club_slug del contexto y tipo="ENTRENAMIENTO"; envía el campo "texto" TAL CUAL sin modificarlo
-- Para partidos / opción 3 → usa consultar_calendario con club_slug del contexto y tipo="PARTIDO"; envía el campo "texto" TAL CUAL sin modificarlo
+- Para calendario / entrenamientos / opción 2 → usa consultar_calendario con club_slug del contexto y tipo="ENTRENAMIENTO" (el parámetro tipo es OBLIGATORIO acá, nunca lo omitas ni mezcles con partidos); envía el campo "texto" TAL CUAL sin modificarlo
+- Para partidos / opción 3 → usa consultar_calendario con club_slug del contexto y tipo="PARTIDO" (el parámetro tipo es OBLIGATORIO acá, nunca lo omitas ni mezcles con entrenamientos); envía el campo "texto" TAL CUAL sin modificarlo
 - Para asistencia / opción 4 → usa consultar_asistencia con club_id y cedula del contexto
 - Para carnet / opción 5 → usa obtener_carnet, luego envía exactamente:
   "🪪 *Tu carnet digital — válido hoy:*\n{url}\n\n📌 Muéstralo en tiendas aliadas y patrocinadores. La fecha verde al pie confirma que es de hoy — un carnet de otro día no es válido."
