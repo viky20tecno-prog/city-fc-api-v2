@@ -227,13 +227,14 @@ const TOOLS_BASE = [
   },
   {
     name: 'consultar_calendario',
-    description: 'Obtiene los próximos eventos del club. Pasa tipo="ENTRENAMIENTO" para ver solo entrenamientos, tipo="PARTIDO" para ver solo partidos.',
+    description: 'Obtiene los eventos del club. Pasa tipo="ENTRENAMIENTO" para ver solo entrenamientos, tipo="PARTIDO" para ver solo partidos. Pasa mes para acotar a un mes calendario específico (por defecto, si no se pasa mes, muestra los próximos 30 días desde hoy).',
     input_schema: {
       type: 'object',
       properties: {
         club_slug: { type: 'string' },
         equipo:    { type: 'string', description: 'Nombre del equipo para filtrar (opcional)' },
         tipo:      { type: 'string', enum: ['PARTIDO', 'ENTRENAMIENTO', 'EVENTO'], description: 'Filtrar por tipo de evento (opcional)' },
+        mes:       { type: 'number', description: 'Mes calendario a consultar, 1=Enero...12=Diciembre (opcional). Si se omite, se listan los próximos 30 días. Si el mes pedido ya pasó este año, se asume del año siguiente.' },
       },
       required: ['club_slug'],
     },
@@ -453,8 +454,24 @@ async function runTool(name, input, contexto = {}) {
     if (name === 'consultar_calendario') {
       const club = await db.getClubBySlug(input.club_slug);
       if (!club) return { texto: 'No hay eventos próximos.' };
-      const hoy   = new Date(Date.now() - 5 * 3600000).toISOString().split('T')[0];
-      const hasta = new Date(Date.now() - 5 * 3600000 + 30 * 86400000).toISOString().split('T')[0];
+
+      const ahoraCol = new Date(Date.now() - 5 * 3600000);
+      let hoy, hasta, mesLabel = null;
+      if (input.mes) {
+        const anioActual = ahoraCol.getUTCFullYear();
+        const mesActual  = ahoraCol.getUTCMonth() + 1;
+        const mesPedido  = Math.min(12, Math.max(1, Math.round(input.mes)));
+        const esMesActual = mesPedido === mesActual;
+        const anio = mesPedido < mesActual ? anioActual + 1 : anioActual;
+        // Si es el mes en curso, arranca desde hoy (no desde el día 1) para no mostrar eventos ya pasados
+        hoy   = esMesActual ? ahoraCol.toISOString().split('T')[0] : new Date(Date.UTC(anio, mesPedido - 1, 1)).toISOString().split('T')[0];
+        hasta = new Date(Date.UTC(anio, mesPedido, 0)).toISOString().split('T')[0];
+        mesLabel = MESES_ES[mesPedido - 1];
+      } else {
+        hoy   = ahoraCol.toISOString().split('T')[0];
+        hasta = new Date(ahoraCol.getTime() + 30 * 86400000).toISOString().split('T')[0];
+      }
+
       const eventos = await db.getCalendario(club.slug, hoy, hasta);
       const filtrados = (input.equipo
         ? eventos.filter(e => !e.equipo || e.equipo.toUpperCase().includes(input.equipo.toUpperCase()))
@@ -462,7 +479,8 @@ async function runTool(name, input, contexto = {}) {
         .filter(e => !input.tipo || e.tipo === input.tipo)
         .slice(0, 10);
       const tipoLabel = input.tipo === 'PARTIDO' ? 'partidos' : input.tipo === 'ENTRENAMIENTO' ? 'entrenamientos' : 'eventos';
-      if (!filtrados.length) return { texto: `No hay ${tipoLabel} próximos en los próximos 30 días.` };
+      const rangoLabel = mesLabel ? `en ${mesLabel}` : 'en los próximos 30 días';
+      if (!filtrados.length) return { texto: `No hay ${tipoLabel} próximos ${rangoLabel}.` };
 
       const clubNombre = contexto.club_nombre || club.config?.nombre || club.name;
       const emoji = emojiDeporte(contexto.config || club.config || {});
@@ -871,8 +889,9 @@ Escribe el número o cuéntame directamente 😊
 
 FLUJO:
 - Para pagos / estado de cuenta / opción 1 → NO uses ninguna herramienta. Responde directamente usando el formato de abajo con datos del CONTEXTO.
-- Para calendario / entrenamientos / opción 2 → usa consultar_calendario con club_slug del contexto y tipo="ENTRENAMIENTO" (el parámetro tipo es OBLIGATORIO acá, nunca lo omitas ni mezcles con partidos); envía el campo "texto" TAL CUAL sin modificarlo
-- Para partidos / opción 3 → usa consultar_calendario con club_slug del contexto y tipo="PARTIDO" (el parámetro tipo es OBLIGATORIO acá, nunca lo omitas ni mezcles con entrenamientos); envía el campo "texto" TAL CUAL sin modificarlo
+- Para calendario / entrenamientos / opción 2 → usa consultar_calendario con club_slug del contexto, tipo="ENTRENAMIENTO" (OBLIGATORIO, nunca lo omitas ni mezcles con partidos) y mes=mes_actual del contexto (por defecto solo el mes en curso); envía el campo "texto" TAL CUAL sin modificarlo
+- Para partidos / opción 3 → usa consultar_calendario con club_slug del contexto, tipo="PARTIDO" (OBLIGATORIO, nunca lo omitas ni mezcles con entrenamientos) y mes=mes_actual del contexto (por defecto solo el mes en curso); envía el campo "texto" TAL CUAL sin modificarlo
+- Si después de ver el mes actual el usuario pide "el próximo mes" o nombra otro mes (ej. "y en agosto?"), repite la misma llamada cambiando SOLO el parámetro mes al número de mes correspondiente (Enero=1...Diciembre=12), manteniendo el mismo tipo
 - Para asistencia / opción 4 → usa consultar_asistencia con club_id y cedula del contexto
 - Para carnet / opción 5 → usa obtener_carnet, luego envía exactamente:
   "🪪 *Tu carnet digital — válido hoy:*\n{url}\n\n📌 Muéstralo en tiendas aliadas y patrocinadores. La fecha verde al pie confirma que es de hoy — un carnet de otro día no es válido."
@@ -1213,7 +1232,10 @@ async function generateReply(from, text) {
   const systemMap  = { admin: SYSTEM_ADMIN, entrenador: SYSTEM_ENTRENADOR, jugador: SYSTEM_JUGADOR, visitante: SYSTEM_VISITANTE };
   const toolsMap   = { admin: TOOLS_ADMIN,  entrenador: TOOLS_ENTRENADOR, jugador: TOOLS_JUGADOR,  visitante: TOOLS_VISITANTE };
   const staleNote  = STALE ? '\n\n[SISTEMA: La sesión anterior cerró por inactividad. Abre con un saludo corto y cálido tipo "¡Hola de nuevo! 👋 Nuestra sesión anterior ya cerró, pero aquí estoy para lo que necesites." Luego atiende su mensaje de inmediato. Al final de tu respuesta, si no hay más preguntas pendientes, despídete con algo como "¡Hasta la próxima! Recuerda que puedo ayudarte cuando lo necesites 🙌"]' : '';
-  const system     = `${systemMap[rol]}${staleNote}\n\nCONTEXTO DEL USUARIO:\n${JSON.stringify({ rol, ...contexto })}`;
+  const hoyCol = new Date(Date.now() - 5 * 3600000);
+  const fecha_hoy = hoyCol.toISOString().split('T')[0];
+  const mes_actual = hoyCol.getUTCMonth() + 1;
+  const system     = `${systemMap[rol]}${staleNote}\n\nCONTEXTO DEL USUARIO:\n${JSON.stringify({ rol, fecha_hoy, mes_actual, ...contexto })}`;
   const rolTools   = toolsMap[rol] || TOOLS_JUGADOR;
 
   const messages = [...history, { role: 'user', content: text }];
