@@ -117,8 +117,21 @@ router.get('/player/:cedula', async (req, res) => {
       invoicesByYear[year].sort((a, b) => a.numero_mes - b.numero_mes);
     });
 
-    const totalOficial   = invoices.reduce((sum, inv) => sum + (parseFloat(inv.valor_oficial) || 0), 0);
-    const totalPagado    = invoices.reduce((sum, inv) => sum + (parseFloat(inv.valor_pagado) || 0), 0);
+    // Un mes suspendido queda con valor_oficial=0 pero valor_pagado se
+    // preserva a propósito (restaurarMensualidades lo necesita para volver a
+    // calcular el estado real si se cancela la suspensión). Por eso el
+    // resumen agregado tiene que excluirlo de los tres totales — si no,
+    // totalPagado sumaba plata de un mes que la fila individual ya muestra
+    // como "$0/$0" (FinancieroContent.jsx la fuerza así), desalineando el
+    // agregado de lo que se ve fila por fila.
+    const totalOficial   = invoices.reduce((sum, inv) => {
+      if (isSuspendido(parseInt(inv.numero_mes), inv.anio)) return sum;
+      return sum + (parseFloat(inv.valor_oficial) || 0);
+    }, 0);
+    const totalPagado    = invoices.reduce((sum, inv) => {
+      if (isSuspendido(parseInt(inv.numero_mes), inv.anio)) return sum;
+      return sum + (parseFloat(inv.valor_pagado) || 0);
+    }, 0);
     const totalPendiente = invoices.reduce((sum, inv) => {
       if (isSuspendido(parseInt(inv.numero_mes), inv.anio)) return sum;
       return sum + (parseFloat(inv.saldo_pendiente) || 0);
@@ -152,6 +165,14 @@ router.patch('/mensualidad/:id', async (req, res) => {
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
+    // Verificar que la mensualidad pertenece a ESTE club antes de leer/tocar nada —
+    // sin esto, cualquier usuario autenticado de cualquier club podía leer y editar
+    // mensualidades de otro club con solo cambiar el :id en la URL (IDOR).
+    const { data: actual } = await db.supabase
+      .from('mensualidades').select('valor_oficial,valor_pagado,penalidad,club_id').eq('id', req.params.id).single();
+    if (!actual || actual.club_id !== club.id)
+      return res.status(404).json({ success: false, error: 'Mensualidad no encontrada' });
+
     const { valor_oficial, valor_pagado, estado, penalidad } = req.body;
     const ESTADOS = ['AL_DIA', 'PENDIENTE', 'PARCIAL', 'MORA'];
     if (estado && !ESTADOS.includes(estado))
@@ -166,8 +187,6 @@ router.patch('/mensualidad/:id', async (req, res) => {
     if (pagado  !== undefined) updates.valor_pagado  = pagado;
     if (penal   !== undefined) updates.penalidad     = penal;
     if (oficial !== undefined || pagado !== undefined || penal !== undefined) {
-      const { data: actual } = await db.supabase
-        .from('mensualidades').select('valor_oficial,valor_pagado,penalidad').eq('id', req.params.id).single();
       const vOficial = oficial ?? parseFloat(actual?.valor_oficial) ?? 0;
       const vPagado  = pagado  ?? parseFloat(actual?.valor_pagado)  ?? 0;
       updates.saldo_pendiente = Math.max(0, vOficial - vPagado);
