@@ -1,5 +1,6 @@
 const express = require('express');
 const crypto = require('crypto');
+const rateLimit = require('express-rate-limit');
 const Anthropic = require('@anthropic-ai/sdk');
 const db = require('../services/db');
 const { mesesEnMora } = require('../services/mora');
@@ -30,6 +31,19 @@ function emojiDeporte(config = {}) {
 const router = express.Router();
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// Freno de abuso — hoy TODO el tráfico legítimo (todos los clubes) entra por
+// la misma IP de WAHA, así que el límite tiene que quedar generoso: esto es
+// un circuit-breaker contra una ráfaga anómala (o el fail-open de WAHA
+// explotado, ver verificarSecretoWaha), no un límite por club ni por mensaje
+// normal. Cada mensaje real dispara como mínimo una llamada a Claude.
+const webhookLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Demasiadas solicitudes' },
+});
+
 // Deduplicación: evita procesar el mismo mensaje dos veces (WAHA CORE dispara doble)
 const processedIds = new Set();
 function isDuplicate(id) {
@@ -43,9 +57,12 @@ function isDuplicate(id) {
   return false;
 }
 
-const PDF_HMAC_SECRET = process.env.PDF_HMAC_SECRET || 'zs-pdf-2026-x9k';
+// Debe ser el mismo secreto (y el mismo criterio de fail-closed) que en
+// publico.js validarTokenMorosos — sin fallback hardcodeado.
+const PDF_HMAC_SECRET = process.env.PDF_HMAC_SECRET;
 
 function generarTokenMorosos(clubId) {
+  if (!PDF_HMAC_SECRET) { console.error('[wa-agent] PDF_HMAC_SECRET no configurado — no se puede generar el link de morosos'); return null; }
   const dia = Math.floor(Date.now() / 86400000);
   return crypto.createHmac('sha256', PDF_HMAC_SECRET).update(`pdf:${clubId}:${dia}`).digest('hex');
 }
@@ -54,12 +71,24 @@ function generarTokenMorosos(clubId) {
 // El rol (admin/entrenador/jugador) se deriva del número `from` del payload —
 // sin verificar que el request vino realmente de Meta/WAHA/Twilio, cualquiera
 // en internet puede suplantar a un admin real solo mandando su celular en el
-// body. Mientras el secreto correspondiente no esté configurado en el entorno
-// se deja pasar (para no tumbar el bot en producción sin coordinación), pero
-// queda logueado en cada request para que sea imposible no darse cuenta.
+// body. Las tres funciones fallan CERRADO por defecto (rechazan si el secreto
+// no está configurado) — Meta y Twilio ya son seguras así hoy (Meta nunca se
+// activó, Twilio sí tiene TWILIO_AUTH_TOKEN configurado en Vercel).
+//
+// WAHA es la EXCEPCIÓN deliberada: es el canal real y activo del bot, y
+// WAHA_WEBHOOK_SECRET NO está configurado en Vercel (confirmado 16 jul 2026).
+// Pasarla a fail-closed hoy tumbaría el bot para todos los clubes. Queda
+// fail-open a propósito hasta que se complete esta coordinación de 2 pasos:
+//   1. Generar un secreto fuerte y configurarlo en Vercel como
+//      WAHA_WEBHOOK_SECRET (production + preview).
+//   2. Configurar ese MISMO secreto en la sesión de WAHA (panel de WAHA en
+//      Railway, o `PUT /api/sessions/{session}` con
+//      `config.webhooks[].hmac.key`) para que WAHA lo mande en el header
+//      `x-webhook-secret` de cada callback.
+// Recién ahí cambiar el `if (!secret)` de abajo a `return false`.
 function verificarFirmaMeta(req) {
   const secret = process.env.META_APP_SECRET;
-  if (!secret) { console.warn('[wa-agent] ⚠️ META_APP_SECRET no configurado — webhook Meta sin verificar firma'); return true; }
+  if (!secret) { console.warn('[wa-agent] ⚠️ META_APP_SECRET no configurado — webhook Meta rechazado (fail-closed)'); return false; }
   const signature = req.headers['x-hub-signature-256'];
   if (!signature || !req.rawBody) return false;
   const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(req.rawBody).digest('hex');
@@ -68,9 +97,12 @@ function verificarFirmaMeta(req) {
   } catch { return false; }
 }
 
+// TODO(seguridad): fail-open intencional — ver nota arriba. Pendiente que
+// Diego configure WAHA_WEBHOOK_SECRET en Vercel Y en la sesión de WAHA antes
+// de poder pasar esto a fail-closed sin cortar el bot en producción.
 function verificarSecretoWaha(req) {
   const secret = process.env.WAHA_WEBHOOK_SECRET;
-  if (!secret) { console.warn('[wa-agent] ⚠️ WAHA_WEBHOOK_SECRET no configurado — webhook WAHA sin verificar origen'); return true; }
+  if (!secret) { console.warn('[wa-agent] 🚨 WAHA_WEBHOOK_SECRET no configurado — webhook WAHA SIN verificar origen (fail-open intencional, ver TODO de seguridad)'); return true; }
   const recibido = req.headers['x-webhook-secret'];
   if (!recibido) return false;
   try {
@@ -81,7 +113,7 @@ function verificarSecretoWaha(req) {
 
 function verificarFirmaTwilio(req) {
   const token = process.env.TWILIO_AUTH_TOKEN;
-  if (!token) { console.warn('[wa-agent] ⚠️ TWILIO_AUTH_TOKEN no configurado — webhook Twilio sin verificar firma'); return true; }
+  if (!token) { console.warn('[wa-agent] ⚠️ TWILIO_AUTH_TOKEN no configurado — webhook Twilio rechazado (fail-closed)'); return false; }
   const signature = req.headers['x-twilio-signature'];
   if (!signature) return false;
   const url = `${API_BASE}/api/wa-agent/twilio`;
@@ -1287,13 +1319,6 @@ async function generateReply(from, text) {
   return { reply, pdfUrl };
 }
 
-// ── Versión del código desplegado (debug) ────────────────────────────────────
-router.get('/version', (req, res) => {
-  const clubId = '2b728ed9-6ee2-4faf-a7f5-b001762c9cba';
-  const token = generarTokenMorosos(clubId);
-  res.json({ token_prefix: token.slice(0, 8), secret_source: process.env.PDF_HMAC_SECRET ? 'env' : 'fallback', code_version: 'v2-portal-only-20260629' });
-});
-
 // ── Webhook verification (GET) ───────────────────────────────────────────────
 router.get('/webhook', (req, res) => {
   const mode      = req.query['hub.mode'];
@@ -1307,7 +1332,7 @@ router.get('/webhook', (req, res) => {
 });
 
 // ── Webhook Meta (POST) ──────────────────────────────────────────────────────
-router.post('/webhook', async (req, res) => {
+router.post('/webhook', webhookLimiter, async (req, res) => {
   if (!verificarFirmaMeta(req)) {
     console.warn('[wa-agent] Firma Meta inválida — request rechazado');
     return res.status(401).json({ status: 'unauthorized' });
@@ -1494,7 +1519,7 @@ async function resolverLid(lidId) {
 }
 
 // ── Webhook WAHA (POST) ──────────────────────────────────────────────────────
-router.post('/waha', async (req, res) => {
+router.post('/waha', webhookLimiter, async (req, res) => {
   if (!verificarSecretoWaha(req)) {
     console.warn('[wa-agent] Secreto WAHA inválido — request rechazado');
     return res.status(401).json({ status: 'unauthorized' });
@@ -1685,7 +1710,7 @@ router.post('/waha', async (req, res) => {
 });
 
 // ── Webhook Twilio sandbox (POST) ────────────────────────────────────────────
-router.post('/twilio', express.urlencoded({ extended: false }), async (req, res) => {
+router.post('/twilio', webhookLimiter, express.urlencoded({ extended: false }), async (req, res) => {
   if (!verificarFirmaTwilio(req)) {
     console.warn('[wa-agent] Firma Twilio inválida — request rechazado');
     res.set('Content-Type', 'text/xml');

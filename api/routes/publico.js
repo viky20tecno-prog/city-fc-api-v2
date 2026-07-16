@@ -294,9 +294,15 @@ router.post('/atleta-por-celular', portalLimiter, async (req, res) => {
 });
 
 // ── PDF de morosos vía WhatsApp ──────────────────────────────────────────────
-const PDF_HMAC_SECRET = process.env.PDF_HMAC_SECRET || 'zs-pdf-2026-x9k';
+// Sin fallback hardcodeado: si PDF_HMAC_SECRET no está seteado, todo token
+// se rechaza (fail-closed) — un secreto fijo en el código fuente equivale a
+// no tener secreto. Hoy está configurado en Vercel producción, así que esto
+// no cambia el comportamiento actual, solo cierra el hueco para cualquier
+// entorno donde falte.
+const PDF_HMAC_SECRET = process.env.PDF_HMAC_SECRET;
 
 function validarTokenMorosos(clubId, token) {
+  if (!PDF_HMAC_SECRET) { console.error('[morosos-pdf] PDF_HMAC_SECRET no configurado — rechazando'); return false; }
   const dia = Math.floor(Date.now() / 86400000);
   const ok = (d) => crypto.createHmac('sha256', PDF_HMAC_SECRET).update(`pdf:${clubId}:${d}`).digest('hex');
   for (let i = 0; i < 7; i++) {
@@ -576,7 +582,18 @@ router.get('/stats', async (req, res) => {
 
 // ── Asistencia pública (link desde WhatsApp) ─────────────────────────────────
 
+// TODO(seguridad): fallback hardcodeado dejado a propósito por ahora — ver
+// PDF_HMAC_SECRET arriba para el criterio (fail-closed) que debería tener
+// esto también. No se aplicó todavía porque ASISTENCIA_HMAC_SECRET NO está
+// configurado en Vercel producción (confirmado 16 jul 2026): pasar esto a
+// fail-closed sin el secreto seteado primero rompe el link público de
+// asistencia para todos los eventos. Una vez que Diego configure
+// ASISTENCIA_HMAC_SECRET en Vercel, sacar el `|| 'zs-asist-2026-k7p'` de la
+// línea de abajo (igual que ya se hizo con PDF_HMAC_SECRET).
 const ASIST_SECRET = process.env.ASISTENCIA_HMAC_SECRET || 'zs-asist-2026-k7p';
+if (!process.env.ASISTENCIA_HMAC_SECRET) {
+  console.warn('[asistencia] 🚨 ASISTENCIA_HMAC_SECRET no configurado — usando fallback hardcodeado (inseguro, ver TODO)');
+}
 
 // Ventanas de 3h: el token es válido en la ventana actual y la anterior → máximo ~6h de validez
 function generarTokenAsistencia(slug, eventoId) {
@@ -692,17 +709,6 @@ router.post('/asistencia/:slug/:eventoId', async (req, res) => {
     console.error('[publico/asistencia POST]', err.message);
     res.status(500).json({ success: false, error: 'Error interno' });
   }
-});
-
-// GET /api/publico/asistencia-token/:slug/:eventoId
-// Genera el token para el link de asistencia (solo para uso interno del wa-agent)
-router.get('/asistencia-token/:slug/:eventoId', async (req, res) => {
-  const { slug, eventoId } = req.params;
-  const secret = req.headers['x-internal-secret'];
-  if (secret !== (process.env.INTERNAL_SECRET || 'zs-internal-2026')) {
-    return res.status(403).json({ success: false });
-  }
-  res.json({ success: true, token: generarTokenAsistencia(slug, eventoId) });
 });
 
 module.exports = router;
