@@ -746,12 +746,16 @@ async function runTool(name, input, contexto = {}) {
     }
 
     if (name === 'obtener_carnet') {
-      const { cedula, club_slug, club_nombre, nombre, foto_url } = contexto;
+      const { cedula, club_slug } = contexto;
       if (!cedula || !club_slug) return { error: 'No se encontraron tus datos completos para generar el carnet.' };
       const fecha = new Date().toISOString().split('T')[0];
       const url = `https://zensports.zenpra.ai/verificar/${club_slug}/${cedula}?fecha=${fecha}`;
-      return { url, foto_url: foto_url || null, nombre, club_nombre, fecha,
-               instruccion: 'El carnet muestra la fecha de hoy en verde — solo es válido el día que se solicita.' };
+      // Mensaje ya armado (mismo criterio que consultar_calendario): si le pasáramos
+      // solo la URL cruda y le pidiéramos al LLM que arme el mensaje con una plantilla,
+      // puede terminar rellenando el link con uno que "recuerda" de otra parte de la
+      // conversación (pasó con el link de estado de cuenta) en vez de usar este.
+      const texto = `🪪 *Tu carnet digital — válido hoy:*\n\n${url}\n\n📌 Muéstralo en tiendas aliadas y patrocinadores. La fecha verde al pie confirma que es de hoy — un carnet de otro día no es válido.`;
+      return { texto };
     }
 
     if (name === 'listar_eventos_hoy') {
@@ -922,8 +926,7 @@ FLUJO:
 - Para partidos / opción 3 → usa consultar_calendario con club_slug del contexto, tipo="PARTIDO" (OBLIGATORIO, nunca lo omitas ni mezcles con entrenamientos) y mes=mes_actual del contexto (por defecto solo el mes en curso); envía el campo "texto" TAL CUAL sin modificarlo
 - Si después de ver el mes actual el usuario pide "el próximo mes" o nombra otro mes (ej. "y en agosto?"), repite la misma llamada cambiando SOLO el parámetro mes al número de mes correspondiente (Enero=1...Diciembre=12), manteniendo el mismo tipo
 - Para asistencia / opción 4 → usa consultar_asistencia con club_id y cedula del contexto
-- Para carnet / opción 5 → usa obtener_carnet, luego envía exactamente:
-  "🪪 *Tu carnet digital — válido hoy:*\n{url}\n\n📌 Muéstralo en tiendas aliadas y patrocinadores. La fecha verde al pie confirma que es de hoy — un carnet de otro día no es válido."
+- Para carnet / opción 5 → usa obtener_carnet; el resultado tiene un campo "texto" con el mensaje ya formateado y el link correcto — envíalo TAL CUAL sin modificarlo ni reconstruirlo. NUNCA arme el link vos, ni reutilices ningún link que hayas visto antes en la conversación (el del carnet es distinto al del estado de cuenta).
 - "Hablar con el admin" / opción 6 → da el número contacto_admin del contexto
 
 FORMATO DE RESPUESTA — ESTADO DE CUENTA (opción 1):
