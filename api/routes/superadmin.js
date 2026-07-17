@@ -52,11 +52,13 @@ router.get('/lookup-phone', requireSuperAdmin, async (req, res) => {
     // Buscar sesión en caché (wa_sessions) — búsqueda LIKE para encontrar cualquier formato
     const { data: sessionRows } = await sb
       .from('wa_sessions')
-      .select('phone, rol, updated_at, contexto')
+      .select('phone, rol, updated_at, last_interaction, contexto')
       .like('phone', `%${all10}%`);
     const session = sessionRows?.[0] || null;
-    const SESSION_TIMEOUT_MIN = 10;
-    const sessionActiva = session && (Date.now() - new Date(session.updated_at).getTime()) < SESSION_TIMEOUT_MIN * 60 * 1000;
+    // Mismo criterio que generateReply en wa-agent.js: comparar contra last_interaction,
+    // no updated_at (el dedup del webhook toca updated_at en cada mensaje entrante).
+    const SESSION_TIMEOUT_MIN = 5;
+    const sessionActiva = session?.last_interaction && (Date.now() - new Date(session.last_interaction).getTime()) < SESSION_TIMEOUT_MIN * 60 * 1000;
 
     // Lookup real en DB (igual que identificarRol del bot)
     let rol = 'visitante';

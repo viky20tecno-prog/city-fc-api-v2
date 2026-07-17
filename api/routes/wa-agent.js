@@ -1230,7 +1230,7 @@ function agenteActivoParaClub(contexto) {
 }
 
 // ── Generar respuesta del agente (compartida entre todos los canales) ─────────
-const SESSION_TIMEOUT_MIN = 10;
+const SESSION_TIMEOUT_MIN = 5;
 
 async function generateReply(from, text) {
   const session = await db.getWaSession(from);
