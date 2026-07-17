@@ -1235,9 +1235,17 @@ const SESSION_TIMEOUT_MIN = 10;
 async function generateReply(from, text) {
   const session = await db.getWaSession(from);
 
-  // Timeout de sesión: si hubo inactividad > 45 min, limpiar historial
-  const STALE = session?.updated_at &&
-    (Date.now() - new Date(session.updated_at).getTime()) > SESSION_TIMEOUT_MIN * 60 * 1000;
+  // Timeout de sesión: si hubo inactividad > SESSION_TIMEOUT_MIN, limpiar historial.
+  // OJO: se compara contra last_interaction (solo lo toca generateReply al cerrar un
+  // turno real), NO contra updated_at — el dedup atómico del webhook (más abajo en este
+  // archivo) actualiza updated_at en CADA mensaje entrante para su propio control de
+  // duplicados, así que usar updated_at aquí dejaba el timeout inerte: cualquier mensaje
+  // nuevo "revivía" el reloj antes de que este chequeo corriera, y una conversación de
+  // hace horas seguía completa en el historial (bug real: encontrado el 17 jul cuando el
+  // bot repitió el link viejo del carnet ya corregido, porque el LLM lo vio en su propio
+  // historial de ayer en vez de llamar la herramienta de nuevo).
+  const STALE = session?.last_interaction &&
+    (Date.now() - new Date(session.last_interaction).getTime()) > SESSION_TIMEOUT_MIN * 60 * 1000;
   const history = STALE ? [] : (session?.messages || []);
 
   // Si la sesión está vencida, borrarla para forzar identificación limpia
