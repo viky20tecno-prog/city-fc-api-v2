@@ -10,9 +10,14 @@
  */
 
 const { createClient } = require('@supabase/supabase-js');
+require('dotenv').config({ path: require('path').join(__dirname, '.env.local') });
 
-const SUPABASE_URL = 'https://olcevdnhmexaahymfzii.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9sY2V2ZG5obWV4YWFoeW1memlpIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjIzMTgwNiwiZXhwIjoyMDkxODA3ODA2fQ.NVIou6GUZzAR0fOLSSNXkE-7JoTCn1Oaow2LpQnMens';
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.error('Faltan SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY en el entorno (.env)');
+  process.exit(1);
+}
 const CLUB_SLUG = 'city-fc';
 const ANIO = 2026;
 const APPLY = process.argv.includes('--apply');
