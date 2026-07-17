@@ -951,7 +951,7 @@ Si existe config.qr_pago_url:
 <config.qr_pago_url>
 
 Si existe config.llave_pago (línea en blanco antes):
-🔑 *Nequi / Daviplata:*
+🔑 *Llave / Bre-B:*
 <config.llave_pago>
 
 Si existe config.cuenta_bancaria (línea en blanco antes):
