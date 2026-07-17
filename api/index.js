@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
@@ -98,6 +99,20 @@ app.use((req, res, next) => {
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   next();
 });
+
+// Límite general por IP — capa base contra saturación, complementa (no reemplaza)
+// los límites más estrictos ya puestos en rutas sensibles (registro, inscripción,
+// leads, portal público, webhooks). Excluye /health para no interferir con checks
+// de uptime automatizados.
+const generalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.path === '/api/health',
+  message: { success: false, error: 'Demasiadas solicitudes. Intenta de nuevo en un minuto.' },
+});
+app.use(generalLimiter);
 
 // Health check
 app.get('/api/health', (req, res) => {
