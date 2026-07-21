@@ -100,11 +100,51 @@ router.post('/', async (req, res) => {
   }
 });
 
+// PUT /api/uniforms/asignar-ronda — arma un lote: asigna la misma
+// ronda_fecha (fecha del pedido real al fabricante) a varios pedidos de una
+// sola vez. Definida antes de '/:id' para que Express no la confunda con un id.
+router.put('/asignar-ronda', async (req, res) => {
+  try {
+    const { ids, fecha } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ success: false, error: 'ids requerido: lista de pedidos a agrupar' });
+    }
+    if (!fecha) {
+      return res.status(400).json({ success: false, error: 'fecha requerida' });
+    }
+
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const pedidos = await db.getPedidoUniformes(club.id);
+    const idsDelClub = new Set(pedidos.map(p => String(p.id)));
+    const idsValidos = ids.map(String).filter(id => idsDelClub.has(id));
+    if (idsValidos.length === 0) {
+      return res.status(404).json({ success: false, error: 'Ninguno de los pedidos pertenece a este club' });
+    }
+
+    await db.asignarRondaPedidosUniforme(idsValidos, fecha);
+
+    db.logClubActivity({
+      club_id: club.id, club_slug: req.club_id,
+      user_id: req.user?.id, user_email: req.user?.email, user_role: req.userRole, user_name: req.memberName,
+      action: 'UNIFORME_RONDA_ASIGNADA', entity_type: 'uniforme', entity_id: idsValidos[0],
+      entity_label: `Lote ${fecha} (${idsValidos.length} pedidos)`,
+      details: { fecha, pedido_ids: idsValidos },
+    });
+
+    res.json({ success: true, message: `${idsValidos.length} pedido(s) asignados a la ronda ${fecha}` });
+  } catch (error) {
+    console.error('Error in PUT /uniforms/asignar-ronda:', error);
+    res.status(500).json({ success: false, error: 'Error asignando ronda', message: error.message });
+  }
+});
+
 // PUT /api/uniforms/:id
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { prendas, talla, numero, nombre_estampar, total, estado, valor_pagado, items } = req.body;
+    const { prendas, talla, numero, nombre_estampar, total, estado, valor_pagado, items, ronda_fecha } = req.body;
 
     const ESTADOS_VALIDOS = ['PENDIENTE', 'ABONO', 'PAGADO', 'ENTREGADO'];
     if (estado !== undefined && !ESTADOS_VALIDOS.includes(estado)) {
@@ -135,6 +175,7 @@ router.put('/:id', async (req, res) => {
       ...(total           !== undefined && { total: Number(total) }),
       ...(valor_pagado    !== undefined && { valor_pagado: Number(valor_pagado) }),
       ...(estado          !== undefined && { estado }),
+      ...(ronda_fecha     !== undefined && { ronda_fecha }),
       ...(esReversion     && { abono_legacy: 0 }),
     };
 

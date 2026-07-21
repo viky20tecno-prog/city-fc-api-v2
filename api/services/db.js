@@ -681,6 +681,16 @@ async function deletePedidoUniforme(id) {
   if (error) throw error;
 }
 
+// Arma un lote: asigna la misma ronda_fecha (fecha del pedido real al
+// fabricante) a varios pedidos de una sola vez.
+async function asignarRondaPedidosUniforme(ids, fecha) {
+  const { error } = await supabase
+    .from('pedido_uniformes')
+    .update({ ronda_fecha: fecha })
+    .in('id', ids);
+  if (error) throw error;
+}
+
 /**
  * Prendas de un pedido de uniforme — desglose de precio y abono por prenda.
  */
@@ -1541,6 +1551,7 @@ module.exports = {
   createPedidoUniforme,
   updatePedidoUniforme,
   deletePedidoUniforme,
+  asignarRondaPedidosUniforme,
   getPrendasPedido,
   getPrendasPedidos,
   syncPrendasPedido,
