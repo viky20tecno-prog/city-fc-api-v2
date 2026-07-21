@@ -36,6 +36,21 @@ function calcSaldo(m) {
   return oficial;
 }
 
+// Filtra inscripciones de torneo a solo las que ya iniciaron (fecha <= hoy en
+// Colombia) — un torneo futuro no debería aparecer como deuda en el estado de
+// cuenta del atleta todavía. Si no se puede determinar la fecha (inscripción
+// vieja sin torneo_id, o torneo sin fecha configurada), se muestra igual para
+// no ocultar una deuda real.
+function torneosYaIniciados(club, torneosJugador) {
+  const hoyStr     = new Date(Date.now() - 5 * 3600000).toISOString().slice(0, 10);
+  const torneosDef = club.config?.torneos_iniciales || [];
+  const fechaTorneo = (torneoId) => torneosDef.find(td => String(td.id) === String(torneoId))?.fecha || null;
+  return (torneosJugador || []).filter(t => {
+    const f = fechaTorneo(t.torneo_id);
+    return !f || f <= hoyStr;
+  });
+}
+
 // Busca un jugador por celular con múltiples variantes de formato (con/sin
 // indicativo de país, con/sin +). Usado por el acceso al portal por celular.
 async function buscarJugadorPorCelular(club_id, phone) {
@@ -215,7 +230,7 @@ async function construirRespuestaPortal(club, clubSlug, jugador) {
         activo:    jugador.activo,
       },
       mensualidades:    resumen,
-      torneos:          (torneosJugador || []).map(t => ({
+      torneos:          torneosYaIniciados(club, torneosJugador).map(t => ({
         id:              t.id,
         nombre_torneo:   t.nombre_torneo,
         estado:          t.estado,

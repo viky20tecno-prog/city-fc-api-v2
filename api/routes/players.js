@@ -65,8 +65,16 @@ function construirTextoEstadoCuenta(club, jugador, datos) {
     lineaMens = `${enMora ? '🔴 En mora' : '⏳ Pendiente'}\nMeses: ${pendMens.length} | Saldo: ${fmtCOP(saldoMens)}`;
   }
 
-  // — Torneos —
-  const torneos = (torneosByCedula[String(cedula)] || []);
+  // — Torneos — solo los que ya iniciaron (fecha de inicio <= hoy). Si no se
+  // puede determinar la fecha (inscripción vieja sin torneo_id, o torneo sin
+  // fecha configurada), se muestra igual para no ocultar una deuda real.
+  const hoyStr      = nowCol.toISOString().slice(0, 10);
+  const torneosDef  = club.config?.torneos_iniciales || [];
+  const fechaTorneo = (torneoId) => torneosDef.find(td => String(td.id) === String(torneoId))?.fecha || null;
+  const torneos = (torneosByCedula[String(cedula)] || []).filter(t => {
+    const f = fechaTorneo(t.torneo_id);
+    return !f || f <= hoyStr;
+  });
   let lineaTorneos;
   if (torneos.length === 0) {
     lineaTorneos = 'Sin inscripciones activas';
