@@ -55,19 +55,11 @@ router.post('/', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Jugador no encontrado' });
     }
 
-    // Verificar pedido duplicado: solo bloquear si hay un pedido activo (PENDIENTE o PAGADO)
-    // Un pedido ENTREGADO ya está cerrado — se permite registrar uno nuevo
-    const pedidos = await db.getPedidoUniformes(club.id);
-    const tipoNormalizado = (tipo || 'Jugador').trim();
-    if (tipoNormalizado === 'Jugador') {
-      const pedidoActivo = pedidos.find(
-        p => p.cedula === String(cedula) && p.tipo === 'Jugador' && p.estado !== 'ENTREGADO'
-      );
-      if (pedidoActivo) {
-        return res.status(409).json({ success: false, error: 'Este jugador ya tiene un pedido de uniforme activo (pendiente o pagado)' });
-      }
-    }
-
+    // Un jugador puede tener varios pedidos activos a la vez (ej. pide uniforme
+    // en marzo y otro en julio) — cada uno queda como un pedido independiente,
+    // con su propia fecha (created_at) y su propio saldo. Ya no se bloquea por
+    // duplicado; para sumarle prendas a un pedido YA existente el admin usa
+    // "Editar" desde la pestaña Pedidos, esto es solo para uno nuevo.
     const pedido = await db.createPedidoUniforme({
       club_id:         club.id,
       player_id:       player.id,
