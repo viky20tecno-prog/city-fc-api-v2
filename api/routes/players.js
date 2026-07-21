@@ -236,6 +236,29 @@ router.post('/estado-cuenta-marcar', async (req, res) => {
   }
 });
 
+// POST /api/players/estado-cuenta-limpiar?club_id=city-fc — quita TODAS las marcas de
+// "enviado" del estado de cuenta del mes actual, para reiniciar el ciclo de cobro.
+router.post('/estado-cuenta-limpiar', async (req, res) => {
+  try {
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const anioAct      = new Date().getFullYear();
+    const mesActualNum = new Date().getMonth() + 1;
+
+    const { error } = await db.supabase.from('wa_log_envios')
+      .delete()
+      .eq('club_id', club.id).eq('tipo_mensaje', 'estado_cuenta')
+      .eq('mes', mesActualNum).eq('anio', anioAct);
+    if (error) throw error;
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('POST /players/estado-cuenta-limpiar:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // GET /api/players/:cedula?club_id=city-fc
 router.get('/:cedula', async (req, res) => {
   try {
