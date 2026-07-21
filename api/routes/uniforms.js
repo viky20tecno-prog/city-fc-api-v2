@@ -41,7 +41,7 @@ router.get('/numeros', async (req, res) => {
 // POST /api/uniforms
 router.post('/', async (req, res) => {
   try {
-    const { cedula, nombre, tipo, campeon, nombre_estampar, talla, numero, prendas, total, items } = req.body;
+    const { cedula, nombre, tipo, campeon, nombre_estampar, talla, numero, prendas, total, items, cedula_libre, a_precio_proveedor } = req.body;
 
     if (!cedula || !nombre || !talla) {
       return res.status(400).json({ success: false, error: 'Faltan campos obligatorios' });
@@ -50,9 +50,15 @@ router.post('/', async (req, res) => {
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
-    const player = await db.getPlayerByCedula(club.id, cedula);
-    if (!player) {
-      return res.status(404).json({ success: false, error: 'Jugador no encontrado' });
+    // Pedidos de personal/staff (cedula_libre) no corresponden a ningún
+    // jugador del roster — la cédula la escribe el admin a mano, sin buscar
+    // ni validar contra `players`. player_id queda null en ese caso.
+    let player = null;
+    if (!cedula_libre) {
+      player = await db.getPlayerByCedula(club.id, cedula);
+      if (!player) {
+        return res.status(404).json({ success: false, error: 'Jugador no encontrado' });
+      }
     }
 
     // Un jugador puede tener varios pedidos activos a la vez (ej. pide uniforme
@@ -62,7 +68,7 @@ router.post('/', async (req, res) => {
     // "Editar" desde la pestaña Pedidos, esto es solo para uno nuevo.
     const pedido = await db.createPedidoUniforme({
       club_id:         club.id,
-      player_id:       player.id,
+      player_id:       player ? player.id : null,
       cedula:          String(cedula),
       nombre,
       tipo:            tipo || 'Jugador',
@@ -73,6 +79,7 @@ router.post('/', async (req, res) => {
       prendas:         prendas || '',
       total:           total ? Number(total) : 0,
       estado:          'PENDIENTE',
+      a_precio_proveedor: !!a_precio_proveedor,
     });
 
     let prendasDetalle = [];
@@ -144,7 +151,7 @@ router.put('/asignar-ronda', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { prendas, talla, numero, nombre_estampar, total, estado, valor_pagado, items, ronda_fecha } = req.body;
+    const { prendas, talla, numero, nombre_estampar, total, estado, valor_pagado, items, ronda_fecha, a_precio_proveedor } = req.body;
 
     const ESTADOS_VALIDOS = ['PENDIENTE', 'ABONO', 'PAGADO', 'ENTREGADO'];
     if (estado !== undefined && !ESTADOS_VALIDOS.includes(estado)) {
@@ -176,6 +183,7 @@ router.put('/:id', async (req, res) => {
       ...(valor_pagado    !== undefined && { valor_pagado: Number(valor_pagado) }),
       ...(estado          !== undefined && { estado }),
       ...(ronda_fecha     !== undefined && { ronda_fecha }),
+      ...(a_precio_proveedor !== undefined && { a_precio_proveedor: !!a_precio_proveedor }),
       ...(esReversion     && { abono_legacy: 0 }),
     };
 
