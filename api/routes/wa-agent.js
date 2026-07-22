@@ -1325,6 +1325,17 @@ async function generateReply(from, text) {
     break;
   }
 
+  // Red de seguridad: si el LLM no cerró con texto (se quedó sin vueltas de
+  // herramientas, cortó por max_tokens, o terminó sin bloque de texto) reply
+  // sigue null acá y el usuario se queda sin ninguna respuesta — sin ninguna
+  // excepción que lo delate en los logs. Mismo patrón de "silencio sin rastro"
+  // que el bug de last_msg_id: nunca dejar reply vacío al salir de esta función.
+  if (!reply) {
+    console.warn('[wa-agent] generateReply sin texto final para', from, '— usando fallback');
+    reply = 'Disculpa, tuve un problema para terminar de procesar tu mensaje 🙏 ¿Podrías intentar de nuevo o contarme un poco más?';
+    messages.push({ role: 'assistant', content: reply });
+  }
+
   const historialTexto = messages
     .filter(m => typeof m.content === 'string')
     .slice(-MAX_HISTORY);
