@@ -1555,13 +1555,16 @@ router.post('/waha', webhookLimiter, async (req, res) => {
   }
   try {
     const { event, payload } = req.body;
+    console.log('[wa-agent:diag] entrada', JSON.stringify({ event, id: payload?.id, from: payload?.from, type: payload?.type, fromMe: payload?.fromMe, timestamp: payload?.timestamp, hasBody: !!payload?.body }));
     if (event !== 'message' || payload?.fromMe) {
+      console.log('[wa-agent:diag] salida: ignored (event/fromMe)');
       return res.status(200).json({ status: 'ignored' });
     }
     // Actualizaciones de Estado de WhatsApp (Stories) de los contactos del número vinculado —
     // no son mensajes reales, no aportan nada al agente, y procesarlas genera ráfagas enormes
     // de tráfico (cientos/miles por reconexión) que aumentan el riesgo de baneo por WhatsApp.
     if (payload?.from === 'status@broadcast' || String(payload?.from).endsWith('@broadcast')) {
+      console.log('[wa-agent:diag] salida: ignored_broadcast');
       return res.status(200).json({ status: 'ignored_broadcast' });
     }
 
@@ -1572,6 +1575,7 @@ router.post('/waha', webhookLimiter, async (req, res) => {
     if (payload?.timestamp) {
       const antiguedadMs = Date.now() - (Number(payload.timestamp) * 1000);
       if (antiguedadMs > 3 * 60 * 1000) {
+        console.log('[wa-agent:diag] salida: ignored_stale, antiguedadMs=', antiguedadMs);
         return res.status(200).json({ status: 'ignored_stale' });
       }
     }
@@ -1583,6 +1587,7 @@ router.post('/waha', webhookLimiter, async (req, res) => {
 
     // Capa 1: in-memory dedup (misma instancia Vercel, sincrónico)
     if (isDuplicate(msgId)) {
+      console.log('[wa-agent:diag] salida: duplicate (capa1 in-memory), msgId=', msgId);
       return res.status(200).json({ status: 'duplicate' });
     }
 
@@ -1591,6 +1596,7 @@ router.post('/waha', webhookLimiter, async (req, res) => {
 
     if (rawFrom.includes('@lid') || rawFrom.includes('@s.whatsapp.net')) {
       const resolved = await resolverLid(rawFrom);
+      console.log('[wa-agent:diag] resolverLid', JSON.stringify({ rawFrom, resolved }));
       if (resolved) from = resolved;
     }
 
@@ -1603,8 +1609,11 @@ router.post('/waha', webhookLimiter, async (req, res) => {
           .eq('phone', from)
           .maybeSingle();
 
+        console.log('[wa-agent:diag] capa2', JSON.stringify({ from, msgId, last_msg_id: sesion?.last_msg_id ?? null }));
+
         if (sesion?.last_msg_id === msgId) {
           // Ya procesado por esta u otra instancia
+          console.log('[wa-agent:diag] salida: duplicate (capa2 last_msg_id===msgId)');
           return res.status(200).json({ status: 'duplicate' });
         }
 
@@ -1617,6 +1626,7 @@ router.post('/waha', webhookLimiter, async (req, res) => {
             .neq('last_msg_id', msgId)
             .select('phone');
           if (updated !== null && updated.length === 0) {
+            console.log('[wa-agent:diag] salida: duplicate (capa2 update 0 filas)');
             return res.status(200).json({ status: 'duplicate' });
           }
         } else {
@@ -1625,6 +1635,7 @@ router.post('/waha', webhookLimiter, async (req, res) => {
             .from('wa_sessions')
             .insert({ phone: from, last_msg_id: msgId, messages: [], updated_at: new Date().toISOString() });
           if (insErr?.code === '23505') {
+            console.log('[wa-agent:diag] salida: duplicate (capa2 insert 23505)');
             return res.status(200).json({ status: 'duplicate' });
           }
         }
@@ -1632,6 +1643,7 @@ router.post('/waha', webhookLimiter, async (req, res) => {
         console.warn('[wa-agent] dedup error (ignorado):', dedupErr.message);
       }
     }
+    console.log('[wa-agent:diag] paso capa2, isText=', isText);
 
     // ── Mensajes no-texto (imagen, audio, video, documento) ──────────────────
     if (!isText) {
