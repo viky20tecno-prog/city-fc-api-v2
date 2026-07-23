@@ -8,10 +8,16 @@ router.get('/', async (req, res) => {
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
-    const data = await db.getFinanzas(club.id, {
-      desde: req.query.desde,
-      hasta: req.query.hasta,
-    });
+    const [manuales, automaticos] = await Promise.all([
+      db.getFinanzas(club.id, { desde: req.query.desde, hasta: req.query.hasta }),
+      db.getIngresosAutomaticos(club.id),
+    ]);
+
+    let data = [...manuales, ...automaticos];
+    if (req.query.desde) data = data.filter(m => m.fecha >= req.query.desde);
+    if (req.query.hasta) data = data.filter(m => m.fecha <= req.query.hasta);
+    data.sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
+
     res.json({ success: true, total: data.length, data });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -52,6 +58,10 @@ router.post('/', async (req, res) => {
 // DELETE /api/finanzas/:id
 router.delete('/:id', async (req, res) => {
   try {
+    if (String(req.params.id).startsWith('auto-')) {
+      return res.status(400).json({ success: false, error: 'Este movimiento se calcula automáticamente y no se puede borrar — se actualiza solo cuando cambian los cobros de origen.' });
+    }
+
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 

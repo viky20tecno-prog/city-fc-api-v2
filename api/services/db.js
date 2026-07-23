@@ -208,16 +208,24 @@ async function getUniformes(club_id, cedula = null) {
  * Obtener torneos de un club
  */
 async function getTorneos(club_id, cedula = null) {
-  let query = supabase
-    .from('torneos')
-    .select('*')
-    .eq('club_id', club_id);
-
-  if (cedula) query = query.eq('cedula', String(cedula));
-
-  const { data, error } = await query;
-  if (error) throw error;
-  return data;
+  const PAGE = 1000;
+  let all = [];
+  let from = 0;
+  while (true) {
+    let query = supabase
+      .from('torneos')
+      .select('*')
+      .eq('club_id', club_id)
+      .range(from, from + PAGE - 1);
+    if (cedula) query = query.eq('cedula', String(cedula));
+    const { data, error } = await query;
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    all = all.concat(data);
+    if (data.length < PAGE) break;
+    from += PAGE;
+  }
+  return all;
 }
 
 /**
@@ -634,12 +642,22 @@ async function createTorneosInscripcion(rows) {
  * Pedidos de uniformes
  */
 async function getPedidoUniformes(club_id) {
-  const { data, error } = await supabase
-    .from('pedido_uniformes')
-    .select('*')
-    .eq('club_id', club_id);
-  if (error) throw error;
-  return data;
+  const PAGE = 1000;
+  let all = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from('pedido_uniformes')
+      .select('*')
+      .eq('club_id', club_id)
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    all = all.concat(data);
+    if (data.length < PAGE) break;
+    from += PAGE;
+  }
+  return all;
 }
 
 async function getPedidoUniformesByCedula(club_id, cedula) {
@@ -734,19 +752,20 @@ async function syncPrendasPedido(pedido_id, items) {
 
   for (const it of (items || [])) {
     const ex = existentesPorNombre.get(it.nombre);
-    const cantidad        = Number(it.cantidad) || 1;
-    const precioUnitario  = Number(it.precio_unitario) || 0;
-    const totalItem       = precioUnitario * cantidad;
+    const cantidad         = Number(it.cantidad) || 1;
+    const precioUnitario   = Number(it.precio_unitario) || 0;
+    const precioProveedor  = Number(it.precio_proveedor) || 0;
+    const totalItem        = precioUnitario * cantidad;
     if (ex) {
       const pagado = Math.min(parseFloat(ex.valor_pagado) || 0, totalItem);
       const estado = pagado <= 0 ? 'PENDIENTE' : pagado >= totalItem ? 'PAGADO' : 'ABONO';
       const { error } = await supabase.from('pedido_uniforme_prendas')
-        .update({ cantidad, precio_unitario: precioUnitario, valor_pagado: pagado, estado })
+        .update({ cantidad, precio_unitario: precioUnitario, precio_proveedor: precioProveedor, valor_pagado: pagado, estado })
         .eq('id', ex.id);
       if (error) throw error;
     } else {
       const { error } = await supabase.from('pedido_uniforme_prendas')
-        .insert([{ pedido_id, nombre: it.nombre, cantidad, precio_unitario: precioUnitario, valor_pagado: 0, estado: 'PENDIENTE' }]);
+        .insert([{ pedido_id, nombre: it.nombre, cantidad, precio_unitario: precioUnitario, precio_proveedor: precioProveedor, valor_pagado: 0, estado: 'PENDIENTE' }]);
       if (error) throw error;
     }
   }
@@ -951,6 +970,106 @@ async function createFinanza(record) {
   const { data, error } = await supabase.from('finanzas').insert([record]).select().single();
   if (error) throw error;
   return data;
+}
+
+// Ingresos automáticos que no se cargan a mano en Finanzas — se calculan a
+// partir de lo que ya se cobra en el resto de la plataforma (mensualidades,
+// uniformes, torneos) y se agregan por mes como movimientos sintéticos
+// (no existen como filas en la tabla `finanzas`, `id` no es un UUID real).
+// Todo es en base caja: solo cuenta la plata que ya entró (valor_pagado),
+// nunca lo facturado/pendiente.
+async function getIngresosAutomaticos(club_id) {
+  const porMes = {}; // 'YYYY-MM' -> { mensualidades, uniformes, torneos }
+  const sumar = (key, campo, monto) => {
+    if (!porMes[key]) porMes[key] = { mensualidades: 0, uniformes: 0, torneos: 0 };
+    porMes[key][campo] += monto;
+  };
+
+  // Mensualidades: 100% ingreso, sin costo asociado.
+  const mensualidades = await getMensualidades(club_id);
+  for (const m of mensualidades) {
+    const pagado = Number(m.valor_pagado) || 0;
+    if (pagado <= 0) continue;
+    const key = `${m.anio}-${String(m.numero_mes).padStart(2, '0')}`;
+    sumar(key, 'mensualidades', pagado);
+  }
+
+  // Uniformes: solo la ganancia (venta − costo de proveedor), reconocida en
+  // proporción a lo efectivamente cobrado de cada línea — si una prenda de
+  // $65.000 con costo $45.000 (30,7% margen) lleva $30.000 abonados, la
+  // ganancia reconocida es $30.000 × 30,7%, no la ganancia total del pedido.
+  const pedidos = await getPedidoUniformes(club_id);
+  const pedidoPorId = new Map(pedidos.map(p => [p.id, p]));
+  const prendas = await getPrendasPedidos(pedidos.map(p => p.id));
+  for (const pr of prendas) {
+    const pedido = pedidoPorId.get(pr.pedido_id);
+    if (!pedido) continue;
+    const precioUnit  = Number(pr.precio_unitario) || 0;
+    const precioProv  = Number(pr.precio_proveedor) || 0;
+    const pagado      = Number(pr.valor_pagado) || 0;
+    if (precioUnit <= 0 || pagado <= 0) continue;
+    const margenRatio = Math.max(0, (precioUnit - precioProv) / precioUnit);
+    const ganancia    = pagado * margenRatio;
+    if (ganancia <= 0) continue;
+    const fecha = new Date(pedido.created_at);
+    const key   = `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}`;
+    sumar(key, 'uniformes', ganancia);
+  }
+
+  // Torneos: mismo criterio — ganancia = valor_inscrito − valor_oficial,
+  // reconocida en proporción a lo efectivamente cobrado. Muchas inscripciones
+  // históricas tienen valor_inscrito en 0 (nunca se discriminó aparte del
+  // valor_oficial fila por fila) — en ese caso se usa como respaldo el
+  // valor_inscrito/valor_oficial del torneo en `clubs.config.torneos_iniciales`
+  // (vinculado por torneo_id), que sí suele tener el margen real cargado.
+  const { data: clubRow } = await supabase.from('clubs').select('config').eq('id', club_id).single();
+  const torneosDef = clubRow?.config?.torneos_iniciales || [];
+  const torneoDefPorId = new Map(torneosDef.map(td => [String(td.id), td]));
+
+  const torneos = await getTorneos(club_id);
+  for (const t of torneos) {
+    let inscrito = Number(t.valor_inscrito) || 0;
+    let oficial  = Number(t.valor_oficial) || 0;
+    if (inscrito <= 0 && t.torneo_id) {
+      const def = torneoDefPorId.get(String(t.torneo_id));
+      if (def) { inscrito = Number(def.valor_inscrito) || 0; oficial = Number(def.valor_oficial) || 0; }
+    }
+    const pagado = Number(t.valor_pagado) || 0;
+    if (inscrito <= 0 || pagado <= 0) continue;
+    const margenRatio = Math.max(0, (inscrito - oficial) / inscrito);
+    const ganancia     = pagado * margenRatio;
+    if (ganancia <= 0) continue;
+    const fecha = new Date(t.fecha_ultima_actualizacion || Date.now());
+    const key   = `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}`;
+    sumar(key, 'torneos', ganancia);
+  }
+
+  const FUENTE_LABEL = {
+    mensualidades: 'Mensualidades cobradas',
+    uniformes:     'Uniformes — ganancia',
+    torneos:       'Torneos — ganancia',
+  };
+
+  const sintetico = [];
+  for (const [key, montos] of Object.entries(porMes)) {
+    const [anio, mes] = key.split('-');
+    const ultimoDia = new Date(Number(anio), Number(mes), 0).getDate();
+    const fecha = `${key}-${String(ultimoDia).padStart(2, '0')}`;
+    for (const [fuente, monto] of Object.entries(montos)) {
+      if (monto <= 0) continue;
+      sintetico.push({
+        id:          `auto-${fuente}-${key}`,
+        club_id,
+        tipo:        'ingreso',
+        categoria:   FUENTE_LABEL[fuente],
+        descripcion: `${FUENTE_LABEL[fuente]} — ${key}`,
+        monto:       Math.round(monto),
+        fecha,
+        automatico:  true,
+      });
+    }
+  }
+  return sintetico;
 }
 
 async function deleteFinanza(id, club_id) {
@@ -1566,6 +1685,7 @@ module.exports = {
   getFinanzas,
   createFinanza,
   deleteFinanza,
+  getIngresosAutomaticos,
   getNominaEmpleados,
   createNominaEmpleado,
   updateNominaEmpleado,
