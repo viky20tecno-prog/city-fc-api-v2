@@ -34,6 +34,7 @@ router.get('/', async (req, res) => {
       color:             club.config?.color             || '#00AAFF',
       subtitulo:         club.config?.subtitulo         || '',
       logo_url:          club.config?.logo_url          || null,
+      carnet_fondo:      club.config?.carnet_fondo      || 'oscuro',
       codigo_pais:       club.config?.codigo_pais       || '57',
       plan:              club.config?.plan              || 'trial',
       trial_ends_at:     club.config?.trial_ends_at     || null,
