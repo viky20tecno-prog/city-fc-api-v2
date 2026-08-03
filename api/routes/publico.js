@@ -225,7 +225,7 @@ async function construirRespuestaPortal(club, clubSlug, jugador) {
         categoria: jugador.categoria || '',
         equipo:    jugador.equipo || '',
         posicion:  jugador.posicion || '',
-        numero:    jugador.numero || '',
+        numero:    jugador.numero_camiseta || jugador.numero || '',
         foto_url:  jugador.foto_url || null,
         activo:    jugador.activo,
       },
