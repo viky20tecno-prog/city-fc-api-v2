@@ -86,9 +86,9 @@ function construirTextoEstadoCuenta(club, jugador, datos) {
     }).join('\n');
   }
 
-  // — Uniformes (pedidos PENDIENTE) —
-  const pedPend  = (pedidosByCedula[String(cedula)] || []).filter(p => p.estado === 'PENDIENTE');
-  const saldoUnif = pedPend.reduce((s, p) => s + (parseFloat(p.total) || 0), 0);
+  // — Uniformes (pedidos con saldo: PENDIENTE o ABONO parcial) —
+  const pedPend  = (pedidosByCedula[String(cedula)] || []).filter(p => p.estado === 'PENDIENTE' || p.estado === 'ABONO');
+  const saldoUnif = pedPend.reduce((s, p) => s + Math.max(0, (parseFloat(p.total) || 0) - (parseFloat(p.valor_pagado) || 0)), 0);
   const lineaUnif = saldoUnif > 0 ? `🔴 Saldo: ${fmtCOP(saldoUnif)}` : '✅ Sin saldo pendiente';
 
   // — Mensaje —
