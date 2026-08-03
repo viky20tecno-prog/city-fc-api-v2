@@ -9,7 +9,7 @@ async function recalcularMensualidadesPorDescuento({ supabase, clubId, cedula, v
 
   const { data: mensualidadesAjustar } = await supabase
     .from('mensualidades')
-    .select('id, valor_pagado, penalidad')
+    .select('id, valor_pagado, penalidad, estado')
     .eq('club_id', clubId)
     .eq('cedula', cedula)
     .eq('anio', anioActual)
@@ -23,9 +23,13 @@ async function recalcularMensualidadesPorDescuento({ supabase, clubId, cedula, v
     // para que no sume plata que nunca entró en un mes que ahora es $0 oficial.
     const nuevoPagado = nuevoOficial === 0 ? 0 : pagado;
     const nuevoSaldo = Math.max(0, nuevoOficial + penalidad - nuevoPagado);
+    // Si el mes ya estaba en MORA, aplicar/quitar un descuento no debe "perdonarle" la
+    // mora — sin esto, un mes en mora con penalidad quedaba en PENDIENTE (más suave) en
+    // vez de MORA apenas se tocaba el % de descuento, aunque el saldo siguiera sin pagar.
     const nuevoEstado =
       nuevoOficial === 0 || nuevoPagado >= nuevoOficial + penalidad ? 'AL_DIA'
       : nuevoPagado > 0 ? 'PARCIAL'
+      : mens.estado === 'MORA' ? 'MORA'
       : 'PENDIENTE';
 
     await supabase.from('mensualidades').update({
