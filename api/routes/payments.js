@@ -332,37 +332,27 @@ async function actualizarMensualidad(club_id, cedula, monto) {
 }
 
 async function actualizarUniforme(club_id, cedula, monto) {
-  const pendientes = await db.getUniformesPendientes(club_id, cedula);
+  // Los pedidos de uniforme viven en `pedido_uniformes` (prendas/talla/número +
+  // abono), no en la tabla legacy `uniformes` — esa quedó sin filas desde que
+  // se migró a pedidos individuales, así que aplicar el pago ahí nunca hacía
+  // nada (todo el monto se perdía como "excedente" sin tocar el pedido real).
+  const pedidos     = await db.getPedidoUniformesByCedula(club_id, cedula);
+  const pendientes   = pedidos.filter(p => p.estado === 'PENDIENTE' || p.estado === 'ABONO');
   if (pendientes.length === 0) return { excedente: monto };
 
   const target      = pendientes[0];
   const yaPageado   = parseFloat(target.valor_pagado) || 0;
-  const oficial     = parseFloat(target.valor_oficial) || 0;
-  const porPagar    = Math.max(0, oficial - yaPageado);
+  const total       = parseFloat(target.total) || 0;
+  const porPagar    = Math.max(0, total - yaPageado);
   const pagoAplicar = Math.min(monto, porPagar);
   const excedente   = monto - pagoAplicar;
   const nuevoPagado = yaPageado + pagoAplicar;
-  const nuevoSaldo  = oficial - nuevoPagado;
-  const nuevoEstado = nuevoPagado >= oficial ? 'AL_DIA' : 'PARCIAL';
+  const nuevoEstado = nuevoPagado <= 0 ? 'PENDIENTE' : nuevoPagado >= total ? 'PAGADO' : 'ABONO';
 
-  await db.updateUniforme(target.id, {
-    valor_pagado:    nuevoPagado,
-    saldo_pendiente: nuevoSaldo,
-    estado:          nuevoEstado,
+  await db.updatePedidoUniforme(target.id, {
+    valor_pagado: nuevoPagado,
+    estado:       nuevoEstado,
   });
-
-  // El pedido de uniforme (prendas/talla/número) es una tabla aparte del cobro —
-  // si ya quedó pagado, reflejarlo también ahí para que no siga apareciendo
-  // como PENDIENTE en la pantalla de Uniformes.
-  if (nuevoEstado === 'AL_DIA') {
-    try {
-      const pedidos = await db.getPedidoUniformesByCedula(club_id, cedula);
-      const pedidoPendiente = pedidos.find(p => p.estado === 'PENDIENTE');
-      if (pedidoPendiente) await db.updatePedidoUniforme(pedidoPendiente.id, { estado: 'PAGADO' });
-    } catch (e) {
-      console.error('[actualizarUniforme] no se pudo marcar el pedido como pagado:', e.message);
-    }
-  }
 
   return { excedente };
 }
