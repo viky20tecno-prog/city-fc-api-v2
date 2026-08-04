@@ -1576,6 +1576,17 @@ router.post('/waha', webhookLimiter, async (req, res) => {
       return res.status(200).json({ status: 'ignored_broadcast' });
     }
 
+    // Notificaciones de sistema de WhatsApp (cambio de username, cifrado, grupos, llamadas) —
+    // WAHA las reenvía con event:'message' igual que un mensaje real, pero nadie las escribió
+    // ni las envió. Sin este filtro el bot le contestaba "solo puedo procesar texto" a gente
+    // que nunca escribió nada (confirmado: notification_template/change_username, 4 ago 2026).
+    const SYSTEM_NOTIFICATION_TYPES = new Set([
+      'notification_template', 'e2e_notification', 'gp2', 'call_log', 'revoked', 'protocol',
+    ]);
+    if (SYSTEM_NOTIFICATION_TYPES.has(payload?._data?.type)) {
+      return res.status(200).json({ status: 'ignored_system_notification' });
+    }
+
     // Mensajes viejos que WAHA reenvía como si fueran nuevos — típico al reconectar una sesión
     // (backlog acumulado offline, o sync de historial inicial). Contestarlos todos de golpe es
     // una ráfaga de respuestas instantáneas a gente que no te escribió "ahora": el patrón que
