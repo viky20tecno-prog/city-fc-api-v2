@@ -915,7 +915,8 @@ PERSONALIZACIÓN OBLIGATORIA: usa el campo "nombre" del CONTEXTO para saludar po
 3️⃣ Ver próximos partidos
 4️⃣ Ver mi asistencia
 5️⃣ Mi carnet digital
-6️⃣ Hablar con el administrador del club
+6️⃣ Enviar comprobante de pago
+7️⃣ Hablar con el administrador del club
 
 Escribe el número o cuéntame directamente 😊
 ---
@@ -927,7 +928,8 @@ FLUJO:
 - Si después de ver el mes actual el usuario pide "el próximo mes" o nombra otro mes (ej. "y en agosto?"), repite la misma llamada cambiando SOLO el parámetro mes al número de mes correspondiente (Enero=1...Diciembre=12), manteniendo el mismo tipo
 - Para asistencia / opción 4 → usa consultar_asistencia con club_id y cedula del contexto
 - Para carnet / opción 5 → usa obtener_carnet; el resultado tiene un campo "texto" con el mensaje ya formateado y el link correcto — envíalo TAL CUAL sin modificarlo ni reconstruirlo. NUNCA arme el link vos, ni reutilices ningún link que hayas visto antes en la conversación (el del carnet es distinto al del estado de cuenta).
-- "Hablar con el admin" / opción 6 → da el número contacto_admin del contexto
+- "Enviar comprobante" / opción 6 → NO uses ninguna herramienta. Respondé exactamente: "📸 Perfecto, mandame la foto del comprobante. Si es para *torneo* o *uniformes* escribilo junto con la foto (como descripción); si no aclarás nada, lo tomamos como *mensualidad*." El comprobante en sí lo procesa el sistema automáticamente en cuanto llega la imagen — vos no hacés nada más acá.
+- "Hablar con el admin" / opción 7 → da el número contacto_admin del contexto
 
 FORMATO DE RESPUESTA — ESTADO DE CUENTA (opción 1):
 No consultes la base de datos. Usa SOLO los datos del CONTEXTO y construye esta respuesta:
@@ -1451,11 +1453,23 @@ function mensajeImagenNoComprobante(contexto) {
   return `🧐 No pude leer esa imagen como un comprobante de pago.${link}`;
 }
 
+// ── Respuesta cuando llega una imagen real de alguien que NO es jugador ─────
+// El análisis de comprobantes va atado a la cédula de un jugador registrado,
+// así que no aplica para admin/entrenador/visitante — pero la imagen SÍ se
+// recibió, así que decirle "solo proceso texto" sería mentira.
+function mensajeImagenRolNoJugador(contexto) {
+  const contacto = contexto?.contacto_admin ? String(contexto.contacto_admin).replace(/\D/g, '') : null;
+  const link = contacto ? `\n\nPara registrar pagos usá el panel de Conciliación del club.` : '';
+  return `📸 Recibí tu imagen, pero los comprobantes de pago los proceso solo para jugadores registrados.${link}`;
+}
+
 // ── Procesar comprobante de pago detectado por Vision ───────────────────────
 // Solo registra el pago como pendiente — NO toca mensualidades. El valor se
 // aplica únicamente cuando el administrador lo aprueba desde Conciliación.
-async function procesarPagoComprobante(from, contexto, analisis, mediaUrl, buffer, mediaType) {
+async function procesarPagoComprobante(from, contexto, analisis, mediaUrl, buffer, mediaType, concepto = 'mensualidad_wa') {
   const { monto, banco, referencia } = analisis;
+  const CONCEPTO_LABEL = { mensualidad_wa: 'mensualidad', torneo_wa: 'torneo', uniformes_wa: 'uniformes' };
+  const conceptoLabel = CONCEPTO_LABEL[concepto] || 'mensualidad';
   const montoFmt = (n) => '$' + Math.round(n).toLocaleString('es-CO');
   const primerNombre = (contexto.nombre || '').trim().split(' ')[0] || contexto.nombre;
 
@@ -1478,7 +1492,7 @@ async function procesarPagoComprobante(from, contexto, analisis, mediaUrl, buffe
       monto:           monto,
       banco:           banco || 'No detectado',
       referencia:      referencia || null,
-      concepto:        'mensualidad_wa',
+      concepto:        concepto,
       url_comprobante: urlPermanente,
       estado_revision: 'pendiente',
       tipo_origen:     'WA_COMPROBANTE',
@@ -1506,12 +1520,13 @@ async function procesarPagoComprobante(from, contexto, analisis, mediaUrl, buffe
     }
   }
 
-  // Si el pago es mayor a una mensualidad, preguntar en qué se aplica el resto
-  // — la respuesta se adjunta a Conciliación para que el admin la use al aprobar.
+  // Si el pago es de mensualidad y además es mayor a una cuota, preguntar en qué
+  // se aplica el resto — no aplica si ya vino etiquetado como torneo/uniformes,
+  // ahí no hay "excedente de mensualidad" del cual preguntar.
   const cuotaMensual = parseFloat(contexto.config?.valor_mensualidad ?? 0);
-  const preguntaExcedente = pagoCreado && monto > cuotaMensual;
+  const preguntaExcedente = pagoCreado && concepto === 'mensualidad_wa' && monto > cuotaMensual;
 
-  let mensajeJugador = `🎉 *¡Recibido, ${primerNombre}!*\n\nTu comprobante de *${montoFmt(monto)}* ya está en revisión.\n\nEn cuanto el administrador lo confirme, quedará aplicado a tu mensualidad — ¡gracias por estar al día! 💙`;
+  let mensajeJugador = `🎉 *¡Recibido, ${primerNombre}!*\n\nTu comprobante de *${montoFmt(monto)}* (${conceptoLabel}) ya está en revisión.\n\nEn cuanto el administrador lo confirme, quedará aplicado — ¡gracias! 💙`;
   if (preguntaExcedente) {
     mensajeJugador += `\n\n🤔 Vimos que el pago es mayor a una mensualidad (*${montoFmt(cuotaMensual)}*). ¿En qué se debe aplicar el resto? (uniforme, torneo, otra mensualidad, etc.)`;
   }
@@ -1681,30 +1696,48 @@ router.post('/waha', webhookLimiter, async (req, res) => {
         } catch { /* URL malformada: dejar tal cual */ }
       }
 
-      // Jugador envía imagen → intentar analizar como comprobante de pago
-      if (rol === 'jugador' && mediaUrl && mediaType === 'image') {
-        let esComprobante = false;
-        try {
-          const { buffer, mediaType: tipoReal } = await descargarMediaWaha(mediaUrl);
-          const analisis = await analizarComprobanteConClaude(buffer, tipoReal);
-          if (analisis.es_comprobante && analisis.monto > 0) {
-            esComprobante = true;
-            await procesarPagoComprobante(from, contexto, analisis, mediaUrl, buffer, tipoReal);
-          }
-        } catch (visionErr) {
-          console.error('[wa-agent] Vision error:', visionErr.message);
-        }
+      // Concepto del pago según lo que venga escrito junto con la imagen
+      // (WhatsApp manda esa descripción en payload.body, igual que un mensaje
+      // de texto normal) — si no dice nada, se asume mensualidad, el
+      // comportamiento de siempre.
+      const caption = String(payload?.body || payload?._data?.caption || '').toLowerCase();
+      const concepto =
+        caption.includes('torneo')  ? 'torneo_wa' :
+        caption.includes('uniform') ? 'uniformes_wa' :
+                                       'mensualidad_wa';
 
-        // Ya no se le reenvía nada al admin por su cuenta — el bot solo responde a quien le
-        // escribe. Si la imagen no es un comprobante válido, le damos al jugador el contacto
-        // directo del admin para que sea él quien decida escribirle.
-        if (!esComprobante) {
-          await sendWAHA(from, mensajeImagenNoComprobante(contexto));
+      if (mediaType === 'image' && mediaUrl) {
+        if (rol === 'jugador') {
+          // Jugador envía imagen → intentar analizar como comprobante de pago
+          let esComprobante = false;
+          try {
+            const { buffer, mediaType: tipoReal } = await descargarMediaWaha(mediaUrl);
+            const analisis = await analizarComprobanteConClaude(buffer, tipoReal);
+            if (analisis.es_comprobante && analisis.monto > 0) {
+              esComprobante = true;
+              await procesarPagoComprobante(from, contexto, analisis, mediaUrl, buffer, tipoReal, concepto);
+            }
+          } catch (visionErr) {
+            console.error('[wa-agent] Vision error:', visionErr.message);
+          }
+
+          // Ya no se le reenvía nada al admin por su cuenta — el bot solo responde a quien le
+          // escribe. Si la imagen no es un comprobante válido, le damos al jugador el contacto
+          // directo del admin para que sea él quien decida escribirle.
+          if (!esComprobante) {
+            await sendWAHA(from, mensajeImagenNoComprobante(contexto));
+          }
+        } else {
+          // Imagen real de alguien que no es jugador — se recibió, solo no
+          // corresponde procesarla como comprobante acá (ver función).
+          await sendWAHA(from, mensajeImagenRolNoJugador(contexto));
         }
-      } else if (rol === 'jugador' && mediaUrl) {
-        await sendWAHA(from, mensajeImagenNoComprobante(contexto));
+      } else if (mediaUrl) {
+        // Audio, video, documento, nota de voz — esta sí es una limitación real
+        // (no leemos ese tipo de archivo), a diferencia de las imágenes.
+        await sendWAHA(from, 'Por ahora solo puedo leer fotos y mensajes de texto — ¿me lo escribís o me lo mandás como foto? 😊');
       } else {
-        await sendWAHA(from, 'Solo puedo procesar mensajes de texto por ahora. Escríbeme lo que necesitas 😊');
+        await sendWAHA(from, 'No pude leer ese mensaje. ¿Podés escribirme lo que necesitás? 😊');
       }
       return res.status(200).json({ status: 'ok' });
     }
