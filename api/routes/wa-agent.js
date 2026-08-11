@@ -176,11 +176,24 @@ async function analizarComprobanteConClaude(buffer, mediaType) {
   const msg = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 300,
+    temperature: 0,
     messages: [{
       role: 'user',
       content: [
         { type: 'image', source: { type: 'base64', media_type: mediaType, data: b64 } },
-        { type: 'text', text: 'Analiza esta imagen. ¿Es un comprobante de pago o transferencia bancaria? Responde SOLO en JSON sin markdown:\n{"es_comprobante":true/false,"monto":numero_o_null,"banco":"texto_o_null","referencia":"texto_o_null","fecha":"texto_o_null"}\nSi es comprobante extrae los datos; si no, retorna es_comprobante:false y el resto null.' },
+        { type: 'text', text: [
+          'Analiza esta imagen de un comprobante de pago o transferencia bancaria colombiano.',
+          'Responde SOLO en JSON sin markdown, con esta forma exacta:',
+          '{"es_comprobante":true/false,"monto":numero_o_null,"banco":"texto_o_null","referencia":"texto_o_null","fecha":"texto_o_null"}',
+          '',
+          'Si NO es un comprobante de pago/transferencia, retorna es_comprobante:false y el resto en null.',
+          '',
+          'Si SÍ es un comprobante:',
+          '- "monto": el valor numérico transferido (sin símbolos ni puntos de miles).',
+          '- "banco": el banco o billetera digital emisor/receptor tal como aparece impreso o mostrado en el comprobante (ej: Bancolombia, Nequi, Daviplata, Davivienda, BBVA, Banco de Bogotá, Banco Popular, AV Villas, Scotiabank/Colpatria). NUNCA pongas ahí el nombre de una persona (ni quien envía ni quien recibe el dinero) — un nombre propio NO es un banco. Si no podés identificar el banco/billetera con certeza, respondé null en ese campo. No adivines ni completes con la mejor opción disponible.',
+          '- "referencia": el número de comprobante/transacción/referencia, si aparece.',
+          '- "fecha": la fecha de la transacción tal como aparece, si aparece.',
+        ].join('\n') },
       ],
     }],
   });
