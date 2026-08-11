@@ -291,6 +291,53 @@ router.put('/:id/abono-prendas', async (req, res) => {
   }
 });
 
+// PUT /api/uniforms/:id/prendas/:prendaId — corrige el valor pagado de UNA
+// prenda puntual (a diferencia de abono-prendas, que solo suma). Sirve para
+// cuando un abono quedó mal distribuido entre prendas y hay que reasignarlo
+// sin revertir el pedido completo (que resetearía TODAS las prendas a $0).
+router.put('/:id/prendas/:prendaId', async (req, res) => {
+  try {
+    const { id, prendaId } = req.params;
+    const { valor_pagado } = req.body;
+    if (valor_pagado === undefined || isNaN(Number(valor_pagado)) || Number(valor_pagado) < 0) {
+      return res.status(400).json({ success: false, error: 'valor_pagado requerido y debe ser un número mayor o igual a 0' });
+    }
+
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const pedidos = await db.getPedidoUniformes(club.id);
+    const pedido = pedidos.find(p => String(p.id) === String(id));
+    if (!pedido) return res.status(404).json({ success: false, error: 'Pedido no encontrado' });
+    if (pedido.estado === 'ENTREGADO') {
+      return res.status(400).json({ success: false, error: 'Este pedido ya fue entregado, no se puede editar el pago' });
+    }
+
+    let prendaActualizada;
+    try {
+      prendaActualizada = await db.editarPagoPrenda(id, prendaId, valor_pagado);
+    } catch (e) {
+      return res.status(e.status || 400).json({ success: false, error: e.message });
+    }
+
+    const pedidoActualizado = await db.recalcularPedidoUniformeDesdeItems(id);
+
+    db.logClubActivity({
+      club_id: club.id, club_slug: req.club_id,
+      user_id: req.user?.id, user_email: req.user?.email, user_role: req.userRole, user_name: req.memberName,
+      action: 'UNIFORME_PAGO_PRENDA_EDITADO', entity_type: 'uniforme', entity_id: id,
+      entity_label: `${pedido.nombre} #${pedido.numero_estampar}`,
+      details: { prenda: prendaActualizada.nombre, valor_pagado: prendaActualizada.valor_pagado },
+    });
+
+    const prendasDetalle = await db.getPrendasPedido(id);
+    res.json({ success: true, message: 'Pago de la prenda actualizado', data: { ...pedidoActualizado, prendas_detalle: prendasDetalle } });
+  } catch (error) {
+    console.error('Error in PUT /uniforms/:id/prendas/:prendaId:', error);
+    res.status(500).json({ success: false, error: 'Error actualizando pago de la prenda', message: error.message });
+  }
+});
+
 // DELETE /api/uniforms/:id
 router.delete('/:id', async (req, res) => {
   try {

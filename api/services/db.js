@@ -849,6 +849,35 @@ async function abonarPrendasPedido(pedido_id, abonos) {
   return actualizados;
 }
 
+// Fija (no suma) el valor pagado de una prenda puntual de un pedido — corrige
+// una mala distribución de abono sin tener que revertir el pedido completo
+// (que resetea TODAS las prendas). El tope es el precio de esa prenda; el
+// total pagado del pedido se recalcula aparte con recalcularPedidoUniformeDesdeItems.
+async function editarPagoPrenda(pedido_id, prenda_id, valor_pagado) {
+  const items = await getPrendasPedido(pedido_id);
+  const item = items.find(it => String(it.id) === String(prenda_id));
+  if (!item) throw Object.assign(new Error('Prenda no encontrada en este pedido'), { status: 404 });
+
+  const monto = Number(valor_pagado);
+  if (isNaN(monto) || monto < 0) {
+    throw Object.assign(new Error('El valor pagado debe ser un número mayor o igual a 0'), { status: 400 });
+  }
+  const totalItem = (parseFloat(item.precio_unitario) || 0) * (item.cantidad || 1);
+  if (monto > totalItem) {
+    throw Object.assign(new Error(`El valor pagado ($${monto}) no puede superar el precio de "${item.nombre}" ($${totalItem})`), { status: 400 });
+  }
+
+  const estado = monto <= 0 ? 'PENDIENTE' : monto >= totalItem ? 'PAGADO' : 'ABONO';
+  const { data, error } = await supabase
+    .from('pedido_uniforme_prendas')
+    .update({ valor_pagado: monto, estado })
+    .eq('id', item.id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 /**
  * Suspensiones de mensualidades
  */
@@ -1677,6 +1706,7 @@ module.exports = {
   resetAbonoPrendasPedido,
   recalcularPedidoUniformeDesdeItems,
   abonarPrendasPedido,
+  editarPagoPrenda,
   getSuspensiones,
   getSuspensionesJugador,
   createSuspension,
