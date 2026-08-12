@@ -692,12 +692,17 @@ router.get('/morosos-pdf/:clubId', handleMorososPdf);
 router.get('/morosos-pdf/:clubId/:mes', handleMorososPdf);
 
 // GET /api/publico/stats — métricas públicas para la landing
+// Nombres de tabla/columna reales: 'players' (no 'jugadores') y clubs.is_active
+// boolean (no clubs.estado). La versión anterior apuntaba a una tabla y una
+// columna que no existen — PostgREST devuelve count:null sin lanzar error
+// (o 400 silenciado por el try/catch), así que esto llevaba tiempo mostrando
+// siempre {jugadores:0, clubs:0} en la landing pública sin que nadie lo notara.
 router.get('/stats', async (req, res) => {
   try {
     const { supabase } = require('../services/db');
     const [{ count: totalJugadores }, { count: totalClubs }] = await Promise.all([
-      supabase.from('jugadores').select('*', { count: 'exact', head: true }),
-      supabase.from('clubs').select('*', { count: 'exact', head: true }).neq('estado', 'expired'),
+      supabase.from('players').select('*', { count: 'exact', head: true }).eq('activo', true),
+      supabase.from('clubs').select('*', { count: 'exact', head: true }).eq('is_active', true),
     ]);
     res.json({
       jugadores: totalJugadores || 0,
