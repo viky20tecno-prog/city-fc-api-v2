@@ -4,7 +4,8 @@ const rateLimit = require('express-rate-limit');
 const Anthropic = require('@anthropic-ai/sdk');
 const db = require('../services/db');
 const { mesesEnMora } = require('../services/mora');
-const { generarTokenAsistencia } = require('./publico');
+const { generarTokenAsistencia, generarTokenPortal } = require('./publico');
+const { sendWAHA } = require('../services/waha');
 
 const DIAS_ES  = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
 const MESES_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -475,8 +476,8 @@ async function runTool(name, input, contexto = {}) {
       const qr_pago_url    = clubData?.config?.qr_pago_url    || null;
       const llave_pago     = clubData?.config?.llave_pago     || null;
       const cuenta_bancaria = clubData?.config?.cuenta_bancaria || null;
-      const portal_url = (contexto.club_slug && contexto.cedula)
-        ? `https://zensports.zenpra.ai/p/${contexto.club_slug}/${contexto.cedula}`
+      const portal_url = (contexto.club_slug && contexto.portal_token)
+        ? `https://zensports.zenpra.ai/p/${contexto.club_slug}/${contexto.portal_token}`
         : null;
       return { anio, al_dia: al_dia.length, pendientes: pendientes.length, total_deuda,
                qr_pago_url, llave_pago, cuenta_bancaria, portal_url,
@@ -951,7 +952,7 @@ No consultes la base de datos. Usa SOLO los datos del CONTEXTO y construye esta 
 
 Para ver tu detalle completo de pagos, saldo y meses al día entra a tu portal:
 
-🔗 https://zensports.zenpra.ai/p/[club_slug del CONTEXTO]/[cedula del CONTEXTO]
+🔗 https://zensports.zenpra.ai/p/[club_slug del CONTEXTO]/[portal_token del CONTEXTO]
 
 Para ponerte al día tienes estas opciones 👇
 
@@ -978,7 +979,7 @@ Cuenta: <numero>
 
 Si no hay ningún medio configurado: "Para pagar comunícate con el administrador del club 🙏"
 
-Reemplaza [club_slug del CONTEXTO] y [cedula del CONTEXTO] con los valores reales. No uses texto literal "CLUB_SLUG" ni "CEDULA".`;
+Reemplaza [club_slug del CONTEXTO] y [portal_token del CONTEXTO] con los valores reales. No uses texto literal "CLUB_SLUG" ni "TOKEN". Si portal_token no viene en el CONTEXTO, omite la línea del link por completo (no inventes ni reutilices una cédula para armarlo).`;
 
 const SYSTEM_ADMIN = `${SYSTEM_BASE}
 
@@ -1218,6 +1219,7 @@ async function identificarRol(celular, sessionData) {
         player_id:     jugador.id,
         nombre:        `${jugador.nombre} ${jugador.apellidos}`.trim(),
         cedula:        jugador.cedula,
+        portal_token:  jugador.clubs?.slug ? generarTokenPortal(jugador.clubs.slug, jugador.cedula) : null,
         club_id:       jugador.club_id,
         club_slug:     jugador.clubs?.slug,
         club_nombre:   jugador.clubs?.config?.nombre || jugador.clubs?.name,
@@ -1424,37 +1426,9 @@ router.post('/webhook', webhookLimiter, async (req, res) => {
 });
 
 // ── Enviar mensaje vía WAHA ──────────────────────────────────────────────────
-function wahaHeaders() {
-  const apiKey = process.env.WAHA_API_KEY;
-  const h = { 'Content-Type': 'application/json' };
-  if (apiKey) h['X-Api-Key'] = apiKey;
-  return h;
-}
-function wahaChatId(to) {
-  const numOnly = to.replace(/\D/g, '');
-  return to.includes('@') ? to : `${numOnly.startsWith('57') ? numOnly : '57' + numOnly}@c.us`;
-}
-
-async function sendWAHA(to, text, session) {
-  const wahaUrl = process.env.WAHA_URL;
-  const sess    = session || process.env.WAHA_SESSION || 'default';
-  if (!wahaUrl) { console.error('[wa-agent] WAHA_URL no configurado'); return; }
-  // Espaciado humano antes de responder — una ráfaga de respuestas instantáneas (ej. varias
-  // decenas de mensajes atrasados llegando de golpe al reconectar) es una señal fuerte de
-  // automatización para el antifraude de WhatsApp. 400-1300ms no afecta la experiencia real.
-  await new Promise(r => setTimeout(r, 400 + Math.random() * 900));
-  const chatId  = wahaChatId(to);
-  const headers = wahaHeaders();
-  const res = await fetch(`${wahaUrl}/api/sendText`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ chatId, text, session: sess }),
-  });
-  const data = await res.json();
-  if (!res.ok) console.error('[wa-agent] sendWAHA error:', res.status, JSON.stringify(data));
-  else console.log('[wa-agent] sendWAHA ok:', data.id || 'sent');
-  return data;
-}
+// sendWAHA/wahaChatId/wahaHeaders viven ahora en ../services/waha.js (compartido
+// con publico.js — ver comentario en ese archivo sobre por qué no se puede
+// resolver esto con un require circular a este mismo archivo).
 
 // ── Respuesta cuando un jugador manda una imagen que no es un comprobante válido ─────────
 // El bot ya no le escribe al admin por su cuenta (eso fue lo que ayudó a que baneen el
