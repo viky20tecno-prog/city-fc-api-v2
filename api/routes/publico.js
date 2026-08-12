@@ -2,7 +2,6 @@ const express   = require('express');
 const crypto    = require('crypto');
 const rateLimit = require('express-rate-limit');
 const db        = require('../services/db');
-const { sendWAHA } = require('../services/waha');
 const router    = express.Router();
 
 const portalLimiter = rateLimit({
@@ -50,22 +49,6 @@ function torneosYaIniciados(club, torneosJugador) {
     const f = fechaTorneo(t.torneo_id);
     return !f || f <= hoyStr;
   });
-}
-
-// Busca un jugador por celular con múltiples variantes de formato (con/sin
-// indicativo de país, con/sin +). Usado por el acceso al portal por celular.
-async function buscarJugadorPorCelular(club_id, phone) {
-  const digits = String(phone).replace(/\D/g, '');
-  const local  = digits.slice(-10); // últimos 10 dígitos
-  const { data, error } = await db.supabase
-    .from('players')
-    .select('*')
-    .eq('club_id', club_id)
-    .or(`celular.eq.${digits},celular.eq.${local},celular.eq.57${local},celular.eq.+57${local}`)
-    .limit(1)
-    .single();
-  if (error && error.code !== 'PGRST116') throw error;
-  return data || null;
 }
 
 // ── Token opaco del Portal del Atleta ────────────────────────────────────────
@@ -337,40 +320,17 @@ router.get('/atleta/:clubSlug/:token', async (req, res) => {
   }
 });
 
-// POST /api/publico/atleta-por-celular — ya NO devuelve el estado de cuenta directo (era
-// el otro hueco real: cualquiera que supiera el celular de un jugador podía ver su estado
-// de cuenta completo sin verificar que fuera el dueño). Ahora solo dispara el link del
-// Portal por WhatsApp AL NÚMERO que se escribió — si ese número es realmente el dueño, lo
-// recibe ahí. Responde siempre lo mismo exista o no el celular en el club, para no permitir
-// enumeración de qué números están registrados.
-router.post('/atleta-por-celular', portalLimiter, async (req, res) => {
-  try {
-    const { club_slug, celular } = req.body;
-    if (!club_slug || !celular) return res.status(400).json({ success: false, error: 'Faltan campos' });
-
-    const club = await db.getClubBySlug(club_slug);
-    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
-
-    const jugador = await buscarJugadorPorCelular(club.id, celular);
-    if (jugador) {
-      const token = generarTokenPortal(club_slug, jugador.cedula);
-      if (token) {
-        const link = `https://zensports.zenpra.ai/p/${club_slug}/${token}`;
-        const nombre = (jugador.nombre || '').trim();
-        // Fire-and-forget: no bloquear la respuesta HTTP con la latencia de WAHA
-        // (sendWAHA ya espera 400-1300ms antes de mandar, a propósito).
-        sendWAHA(jugador.celular, `Hola${nombre ? ' ' + nombre : ''} 👋\n\nAquí está tu link para ver tu estado de cuenta en *${club.config?.nombre || club_slug}*:\n${link}\n\nGuárdalo, no cambia — puedes volver a entrar cuando quieras con el mismo link.`)
-          .catch(err => console.error('[portal] error enviando link por WA:', err.message));
-      }
-    }
-    // Misma respuesta exista o no el celular — evita que alguien pueda probar
-    // números al azar para descubrir cuáles están registrados en el club.
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Error en POST /publico/atleta-por-celular:', error);
-    res.status(500).json({ success: false, error: 'Error al procesar la solicitud' });
-  }
-});
+// POST /api/publico/atleta-por-celular — ELIMINADO (12 ago 2026). Ese endpoint hacía que el
+// SISTEMA le escribiera primero por WhatsApp a cualquier número tecleado en un formulario
+// público sin autenticar — un mensaje "iniciado por el negocio", no una respuesta a algo que
+// esa persona le escribió al bot. Con el formulario público y sin control real de quién lo usa,
+// alguien podía disparar mensajes no solicitados a números al azar en ráfaga: exactamente el
+// patrón que ya causó un baneo real de WhatsApp una vez (ver incidente 11 jul, memoria del
+// proyecto). Reemplazado por un flujo que nunca envía nada no solicitado: quien no tiene su link
+// le escribe primero al bot por WhatsApp (wa.me), y el bot —que ya resuelve la identidad por el
+// número real de quien escribe, ver identificarRol en wa-agent.js— responde con el link del
+// Portal. Ese patrón de "solo responder, nunca iniciar" es el mismo que usa el resto del bot
+// desde siempre y no ha tenido problemas.
 
 // POST /api/publico/uniforme/:clubSlug/:cedula — el atleta arma su propio
 // pedido de uniforme desde el Portal del Atleta. El precio SIEMPRE se calcula
