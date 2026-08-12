@@ -1,5 +1,6 @@
 const express = require('express');
 const db = require('../services/db');
+const { generarTokenPortal } = require('./publico');
 const router = express.Router();
 
 // GET /api/payments?club_id=city-fc&estado=pendiente
@@ -277,7 +278,8 @@ router.put('/:id', async (req, res) => {
           const conceptoLabel = conceptosAplicados.length > 1
             ? conceptosAplicados.map(c => CONCEPTO_LABELS[c.concepto] || c.concepto).join(' + ')
             : (CONCEPTO_LABELS[conceptoFinal] || 'Mensualidad');
-          const portalUrl = `https://zensports.zenpra.ai/p/${club.slug}/${cedulaFinal}`;
+          const portalToken = generarTokenPortal(club.slug, cedulaFinal);
+          const portalUrl   = portalToken ? `https://zensports.zenpra.ai/p/${club.slug}/${portalToken}` : `https://zensports.zenpra.ai/p/${club.slug}`;
 
           const mensaje = excedente > 0
             ? `✅ *¡Transacción exitosa!*\n\n` +

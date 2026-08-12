@@ -51,25 +51,40 @@ function torneosYaIniciados(club, torneosJugador) {
   });
 }
 
-// Busca un jugador por celular con múltiples variantes de formato (con/sin
-// indicativo de país, con/sin +). Usado por el acceso al portal por celular.
-async function buscarJugadorPorCelular(club_id, phone) {
-  const digits = String(phone).replace(/\D/g, '');
-  const local  = digits.slice(-10); // últimos 10 dígitos
-  const { data, error } = await db.supabase
+// ── Token opaco del Portal del Atleta ────────────────────────────────────────
+// Mismo patrón que ASISTENCIA_HMAC_SECRET/generarTokenAsistencia más abajo en
+// este archivo, pero SIN ventana de tiempo: el link de asistencia es para un
+// evento puntual y tiene sentido que expire; el Portal se consulta indefinidamente,
+// así que este token es estable — no cambia salvo rotación manual de
+// PORTAL_HMAC_SECRET. Reemplaza la cédula cruda en la URL del Portal (era el
+// hueco real: cualquiera que supiera la cédula o el celular de un jugador podía
+// ver su estado de cuenta completo sin ninguna verificación de identidad).
+const PORTAL_SECRET = process.env.PORTAL_HMAC_SECRET;
+
+function generarTokenPortal(clubSlug, cedula) {
+  if (!PORTAL_SECRET) { console.error('[portal] PORTAL_HMAC_SECRET no configurado — no se puede generar el link'); return null; }
+  return crypto.createHmac('sha256', PORTAL_SECRET).update(`portal:${clubSlug}:${cedula}`).digest('hex').slice(0, 24);
+}
+
+// El token no es reversible (es un HMAC, no un cifrado) — para "leerlo" hay que
+// escanear las cédulas del club y comparar el HMAC de cada una. Con clubes de
+// hasta ~1000 jugadores (plan Scale) esto es una sola query + cómputo en memoria,
+// nada costoso.
+async function resolverTokenPortal(club, clubSlug, token) {
+  if (!PORTAL_SECRET || !token) return null;
+  const { data: candidatos, error } = await db.supabase
     .from('players')
-    .select('*')
-    .eq('club_id', club_id)
-    .or(`celular.eq.${digits},celular.eq.${local},celular.eq.57${local},celular.eq.+57${local}`)
-    .limit(1)
-    .single();
-  if (error && error.code !== 'PGRST116') throw error;
-  return data || null;
+    .select('cedula')
+    .eq('club_id', club.id);
+  if (error || !candidatos) return null;
+  const match = candidatos.find(c => generarTokenPortal(clubSlug, c.cedula) === token);
+  if (!match) return null;
+  return db.getPlayerByCedula(club.id, match.cedula);
 }
 
 // Arma la respuesta completa del portal del atleta (estado de cuenta, torneos,
 // uniformes) dado un jugador ya resuelto. Compartido entre el acceso directo
-// por cédula (link de Estado de cuenta) y el acceso por celular (portal sin
+// por token (link de Estado de cuenta) y el acceso por celular (portal sin
 // link directo) — antes esto estaba duplicado entre /atleta/:cedula y el ya
 // eliminado /otp/verificar.
 async function construirRespuestaPortal(club, clubSlug, jugador) {
@@ -210,6 +225,10 @@ async function construirRespuestaPortal(club, clubSlug, jugador) {
 
     return {
       success: true,
+      // El frontend guarda esto (localStorage + estado local) y lo reusa para
+      // re-consultar el portal (refrescar tras un pedido de uniforme, restaurar
+      // sesión) — nunca vuelve a usar la cédula cruda para eso.
+      portal_token: generarTokenPortal(clubSlug, jugador.cedula),
       esExento,
       club: {
         nombre:    club.config?.nombre || clubSlug,
@@ -279,15 +298,19 @@ async function construirRespuestaPortal(club, clubSlug, jugador) {
     };
 }
 
-// GET /api/publico/atleta/:clubSlug/:cedula — acceso directo (link de Estado de cuenta)
-router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
+// GET /api/publico/atleta/:clubSlug/:token — acceso directo (link de Estado de cuenta).
+// El segmento :token es un HMAC opaco (ver generarTokenPortal arriba), NUNCA la cédula
+// cruda — corte limpio, sin backward-compat: un link viejo con cédula en texto plano
+// simplemente no matchea ningún token y cae al mismo 404 de "atleta no encontrado" que
+// el frontend ya maneja (ver PortalAtleta.jsx, cae a pedir el celular).
+router.get('/atleta/:clubSlug/:token', async (req, res) => {
   try {
-    const { clubSlug, cedula } = req.params;
+    const { clubSlug, token } = req.params;
 
     const club = await db.getClubBySlug(clubSlug);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
-    const jugador = await db.getPlayerByCedula(club.id, cedula);
+    const jugador = await resolverTokenPortal(club, clubSlug, token);
     if (!jugador) return res.status(404).json({ success: false, error: 'Atleta no encontrado' });
 
     res.json(await construirRespuestaPortal(club, clubSlug, jugador));
@@ -297,26 +320,17 @@ router.get('/atleta/:clubSlug/:cedula', async (req, res) => {
   }
 });
 
-// POST /api/publico/atleta-por-celular — acceso al portal escribiendo el celular, sin
-// código de confirmación por WhatsApp (se quitó: WAHA no es confiable ahora mismo, y el
-// código no agregaba una barrera real ya que este mismo endpoint solo pide club+celular).
-router.post('/atleta-por-celular', portalLimiter, async (req, res) => {
-  try {
-    const { club_slug, celular } = req.body;
-    if (!club_slug || !celular) return res.status(400).json({ success: false, error: 'Faltan campos' });
-
-    const club = await db.getClubBySlug(club_slug);
-    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
-
-    const jugador = await buscarJugadorPorCelular(club.id, celular);
-    if (!jugador) return res.status(404).json({ success: false, error: 'No encontramos ese celular en el club. Contacta al administrador.' });
-
-    res.json(await construirRespuestaPortal(club, club_slug, jugador));
-  } catch (error) {
-    console.error('Error en POST /publico/atleta-por-celular:', error);
-    res.status(500).json({ success: false, error: 'Error al consultar datos del atleta' });
-  }
-});
+// POST /api/publico/atleta-por-celular — ELIMINADO (12 ago 2026). Ese endpoint hacía que el
+// SISTEMA le escribiera primero por WhatsApp a cualquier número tecleado en un formulario
+// público sin autenticar — un mensaje "iniciado por el negocio", no una respuesta a algo que
+// esa persona le escribió al bot. Con el formulario público y sin control real de quién lo usa,
+// alguien podía disparar mensajes no solicitados a números al azar en ráfaga: exactamente el
+// patrón que ya causó un baneo real de WhatsApp una vez (ver incidente 11 jul, memoria del
+// proyecto). Reemplazado por un flujo que nunca envía nada no solicitado: quien no tiene su link
+// le escribe primero al bot por WhatsApp (wa.me), y el bot —que ya resuelve la identidad por el
+// número real de quien escribe, ver identificarRol en wa-agent.js— responde con el link del
+// Portal. Ese patrón de "solo responder, nunca iniciar" es el mismo que usa el resto del bot
+// desde siempre y no ha tenido problemas.
 
 // POST /api/publico/uniforme/:clubSlug/:cedula — el atleta arma su propio
 // pedido de uniforme desde el Portal del Atleta. El precio SIEMPRE se calcula
@@ -831,3 +845,4 @@ router.post('/asistencia/:slug/:eventoId', async (req, res) => {
 
 module.exports = router;
 module.exports.generarTokenAsistencia = generarTokenAsistencia;
+module.exports.generarTokenPortal = generarTokenPortal;

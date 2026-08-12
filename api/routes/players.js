@@ -4,6 +4,7 @@ const { MESES } = require('../services/meses');
 const { mesesEnMora } = require('../services/mora');
 const { recalcularMensualidadesPorDescuento } = require('../services/descuentos');
 const { limiteDe } = require('../services/plan-limits');
+const { generarTokenPortal } = require('./publico');
 const router = express.Router();
 
 // GET /api/players?club_id=city-fc
@@ -113,7 +114,8 @@ function construirTextoEstadoCuenta(club, jugador, datos) {
   }
   if (medios) msg += `💳 MEDIOS DE PAGO 💳\n\n${medios}`;
 
-  const portalLink = `https://zensports.zenpra.ai/p/${clubSlug}/${cedula}`;
+  const portalToken = generarTokenPortal(clubSlug, cedula);
+  const portalLink  = portalToken ? `https://zensports.zenpra.ai/p/${clubSlug}/${portalToken}` : `https://zensports.zenpra.ai/p/${clubSlug}`;
   msg += `\nVer tu cuenta completa:\n${portalLink}`;
   if (adminWaLink) {
     msg += `\n\n_Si crees que hay alguna inconsistencia, escríbele directamente al administrador del club:_\n${adminWaLink}`;
