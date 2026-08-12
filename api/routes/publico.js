@@ -230,6 +230,16 @@ async function construirRespuestaPortal(club, clubSlug, jugador) {
         activo:    jugador.activo,
       },
       mensualidades:    resumen,
+      // Catálogo de prendas para que el atleta arme su propio pedido — sin
+      // `precio_proveedor` (costo interno del club, nunca debe salir a un
+      // endpoint público).
+      catalogo_uniformes: (club.config?.prendas_uniforme || []).map(p => ({
+        nombre:          String(p.nombre || ''),
+        precio:          Number(p.precio) || 0,
+        imagen_url:      p.imagen_url || '',
+        descripcion:     p.descripcion || '',
+        requiere_numero: p.requiere_numero !== false,
+      })),
       torneos:          torneosYaIniciados(club, torneosJugador).map(t => ({
         id:              t.id,
         nombre_torneo:   t.nombre_torneo,
@@ -305,6 +315,84 @@ router.post('/atleta-por-celular', portalLimiter, async (req, res) => {
   } catch (error) {
     console.error('Error en POST /publico/atleta-por-celular:', error);
     res.status(500).json({ success: false, error: 'Error al consultar datos del atleta' });
+  }
+});
+
+// POST /api/publico/uniforme/:clubSlug/:cedula — el atleta arma su propio
+// pedido de uniforme desde el Portal del Atleta. El precio SIEMPRE se calcula
+// server-side contra el catálogo del club (club.config.prendas_uniforme) —
+// nunca se confía en un precio que mande el cliente, para que nadie pueda
+// forjar un pedido barato desde este endpoint público.
+router.post('/uniforme/:clubSlug/:cedula', portalLimiter, async (req, res) => {
+  try {
+    const { clubSlug, cedula } = req.params;
+    const { talla, numero, nombre_estampar, items } = req.body;
+
+    if (!talla || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ success: false, error: 'Faltan campos: talla y al menos una prenda' });
+    }
+
+    const club = await db.getClubBySlug(clubSlug);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const jugador = await db.getPlayerByCedula(club.id, cedula);
+    if (!jugador) return res.status(404).json({ success: false, error: 'Atleta no encontrado' });
+
+    const catalogo = club.config?.prendas_uniforme || [];
+    const itemsValidados = [];
+    let requiereNumero = false;
+    for (const it of items) {
+      const prenda = catalogo.find(p => p.nombre === it?.nombre);
+      if (!prenda) {
+        return res.status(400).json({ success: false, error: `Prenda no disponible en el catálogo: ${it?.nombre || ''}` });
+      }
+      const cantidad = Math.max(1, parseInt(it.cantidad, 10) || 1);
+      if (prenda.requiere_numero !== false) requiereNumero = true;
+      itemsValidados.push({
+        nombre:           prenda.nombre,
+        cantidad,
+        precio_unitario:  Number(prenda.precio) || 0,
+        precio_proveedor: Number(prenda.precio_proveedor) || 0,
+      });
+    }
+
+    if (requiereNumero && !numero) {
+      return res.status(400).json({ success: false, error: 'Ingresá el número para estampar' });
+    }
+
+    const total      = itemsValidados.reduce((s, it) => s + it.precio_unitario * it.cantidad, 0);
+    const prendasStr = itemsValidados.map(it => it.cantidad > 1 ? `${it.nombre} x${it.cantidad}` : it.nombre).join(', ');
+
+    const pedido = await db.createPedidoUniforme({
+      club_id:            club.id,
+      player_id:          jugador.id,
+      cedula:             String(jugador.cedula),
+      nombre:             `${jugador.nombre} ${jugador.apellidos || ''}`.trim(),
+      tipo:               'Jugador',
+      campeon:            false,
+      talla:              String(talla),
+      nombre_estampar:    nombre_estampar ? String(nombre_estampar).slice(0, 60) : '',
+      numero_estampar:    numero ? String(numero) : '',
+      prendas:            prendasStr,
+      total,
+      estado:             'PENDIENTE',
+      a_precio_proveedor: false,
+    });
+
+    await db.syncPrendasPedido(pedido.id, itemsValidados);
+    const prendasDetalle = await db.getPrendasPedido(pedido.id);
+
+    db.logClubActivity({
+      club_id: club.id, club_slug: clubSlug,
+      action: 'UNIFORME_PEDIDO', entity_type: 'uniforme', entity_id: pedido.id,
+      entity_label: `${pedido.nombre} · Portal Atleta`,
+      details: { cedula: jugador.cedula, talla, numero, prendas: prendasStr, total, origen: 'PORTAL_ATLETA' },
+    });
+
+    res.json({ success: true, message: 'Pedido de uniforme registrado', data: { ...pedido, prendas_detalle: prendasDetalle } });
+  } catch (error) {
+    console.error('Error en POST /publico/uniforme:', error);
+    res.status(500).json({ success: false, error: 'Error registrando el pedido' });
   }
 });
 
