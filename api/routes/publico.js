@@ -374,6 +374,17 @@ router.post('/uniforme/:clubSlug/:cedula', portalLimiter, async (req, res) => {
       return res.status(400).json({ success: false, error: 'Ingresá el número para estampar' });
     }
 
+    // Este endpoint es siempre tipo 'Jugador' (el atleta pidiendo para sí
+    // mismo) — en un torneo dos jugadores del mismo club no pueden compartir
+    // número, así que se valida acá. Los pedidos de familiares (otro tipo,
+    // no compiten) no tienen esta restricción.
+    if (requiereNumero && numero) {
+      const ocupado = await db.numeroJugadorOcupado(club.id, numero, jugador);
+      if (ocupado) {
+        return res.status(409).json({ success: false, error: `El número ${numero} ya lo tiene otro jugador del club (${ocupado.nombre}). Elegí otro.` });
+      }
+    }
+
     const total      = itemsValidados.reduce((s, it) => s + it.precio_unitario * it.cantidad, 0);
     const prendasStr = itemsValidados.map(it => it.cantidad > 1 ? `${it.nombre} x${it.cantidad}` : it.nombre).join(', ');
 

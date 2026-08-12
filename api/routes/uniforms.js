@@ -66,6 +66,19 @@ router.post('/', async (req, res) => {
     // con su propia fecha (created_at) y su propio saldo. Ya no se bloquea por
     // duplicado; para sumarle prendas a un pedido YA existente el admin usa
     // "Editar" desde la pestaña Pedidos, esto es solo para uno nuevo.
+
+    // En un torneo dos jugadores del mismo equipo/categoría no pueden
+    // compartir número — solo aplica a tipo 'Jugador' con un registro real
+    // en `players` (familiares/personal sí pueden repetir; un cedula_libre
+    // no tiene equipo/categoría que comparar, así que tampoco aplica).
+    const tipoFinal = tipo || 'Jugador';
+    if (tipoFinal === 'Jugador' && numero && player) {
+      const ocupado = await db.numeroJugadorOcupado(club.id, numero, player);
+      if (ocupado) {
+        return res.status(409).json({ success: false, error: `El número ${numero} ya lo tiene otro jugador del club (${ocupado.nombre}). Elegí otro.` });
+      }
+    }
+
     const pedido = await db.createPedidoUniforme({
       club_id:         club.id,
       player_id:       player ? player.id : null,
@@ -173,6 +186,20 @@ router.put('/:id', async (req, res) => {
     // limpiar el agregado del pedido, hay que limpiar el desglose por prenda
     // y el abono histórico sin discriminar — si no, quedarían desincronizados.
     const esReversion = valor_pagado !== undefined && Number(valor_pagado) === 0;
+
+    // Igual restricción que al crear: si se está cambiando el número de un
+    // pedido tipo 'Jugador', validar que no choque con otro jugador del
+    // mismo equipo/categoría. Necesita el registro completo del jugador
+    // (no solo la cédula) para poder comparar equipo/categoría.
+    if (pedido.tipo === 'Jugador' && numero !== undefined && String(numero) !== String(pedido.numero_estampar)) {
+      const jugadorPedido = await db.getPlayerByCedula(club.id, pedido.cedula);
+      if (jugadorPedido) {
+        const ocupado = await db.numeroJugadorOcupado(club.id, numero, jugadorPedido);
+        if (ocupado) {
+          return res.status(409).json({ success: false, error: `El número ${numero} ya lo tiene otro jugador del club (${ocupado.nombre}). Elegí otro.` });
+        }
+      }
+    }
 
     const fields = {
       ...(prendas         !== undefined && { prendas }),

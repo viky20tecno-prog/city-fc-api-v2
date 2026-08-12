@@ -670,6 +670,53 @@ async function getPedidoUniformesByCedula(club_id, cedula) {
   return data || [];
 }
 
+// Equipos/categorías de un jugador, como set de strings — soporta el campo
+// legacy simple (categoria/equipo) y el nuevo multi-equipo (categorias[]:
+// [{categoria, equipo}]). Se prefiere 'equipo' sobre 'categoria' cuando
+// ambos existen para un mismo registro (equipo es la agrupación más
+// específica); si un jugador no tiene ninguno de los dos configurados,
+// devuelve un set vacío.
+function equiposDeJugador(j) {
+  const set = new Set();
+  if (Array.isArray(j?.categorias)) {
+    j.categorias.forEach(c => { if (c?.equipo) set.add(c.equipo); else if (c?.categoria) set.add(c.categoria); });
+  }
+  if (j?.equipo) set.add(j.equipo);
+  else if (j?.categoria) set.add(j.categoria);
+  return set;
+}
+
+// En un torneo dos jugadores del mismo EQUIPO/CATEGORÍA no pueden compartir
+// número de camiseta (jugadores de equipos distintos sí pueden, nunca se
+// cruzan en cancha) — restricción solo para pedidos tipo 'Jugador' (los de
+// familiares/personal, tipo distinto, sí pueden repetir número libremente).
+// Y solo contra jugadores ACTIVOS: si el jugador que ya tenía ese número fue
+// archivado/dado de baja, su número queda libre. Si NINGUNO de los dos
+// jugadores tiene equipo/categoría configurado, cae de vuelta a comparar por
+// club completo (mismo comportamiento que antes de tener equipos armados).
+// Excluye los pedidos de la propia cédula: un jugador puede repetir SU PROPIO
+// número entre varios pedidos suyos (ej. uno en marzo y otro en julio).
+async function numeroJugadorOcupado(club_id, numero, jugadorPropio) {
+  const [pedidos, activos] = await Promise.all([
+    getPedidoUniformes(club_id),
+    getPlayers(club_id), // solo activos por defecto (incluirArchivados=false)
+  ]);
+  const activosPorCedula = new Map(activos.map(j => [String(j.cedula), j]));
+  const equiposPropios = equiposDeJugador(jugadorPropio);
+
+  return pedidos.find(p => {
+    if (p.tipo !== 'Jugador') return false;
+    if (String(p.numero_estampar) !== String(numero)) return false;
+    if (String(p.cedula) === String(jugadorPropio?.cedula)) return false;
+    const otro = activosPorCedula.get(String(p.cedula));
+    if (!otro) return false; // ya no está activo, no bloquea
+    const equiposOtro = equiposDeJugador(otro);
+    if (equiposPropios.size === 0 && equiposOtro.size === 0) return true; // sin equipos configurados: por club completo
+    for (const e of equiposOtro) if (equiposPropios.has(e)) return true; // comparten al menos un equipo/categoría
+    return false;
+  }) || null;
+}
+
 async function createPedidoUniforme(pedidoData) {
   const { data, error } = await supabase
     .from('pedido_uniformes')
@@ -1696,6 +1743,7 @@ module.exports = {
   updateArbitrajePago,
   getPedidoUniformes,
   getPedidoUniformesByCedula,
+  numeroJugadorOcupado,
   createPedidoUniforme,
   updatePedidoUniforme,
   deletePedidoUniforme,
