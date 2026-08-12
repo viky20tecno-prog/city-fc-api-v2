@@ -683,6 +683,28 @@ router.get('/stats', async (req, res) => {
   }
 });
 
+// GET /api/publico/afiliados — directorio público de afiliados/patrocinadores
+// (comercios que pagan una membresía por aparecer en el Portal del Atleta y
+// la Landing — no son clubes). Este es el único backend que sirve datos
+// públicos al dashboard/portal (mismo criterio que /publico/stats arriba),
+// por eso el endpoint vive acá y no en el admin de Next.js. Solo afiliados
+// 'activo' y solo campos seguros para mostrar: nunca precio_mensual, notas,
+// ni nada de facturación (eso vive en afiliados_billing, ni se toca acá).
+router.get('/afiliados', async (req, res) => {
+  try {
+    const { data, error } = await db.supabase
+      .from('afiliados')
+      .select('id, nombre, categoria, descripcion, logo_url, link_web, ciudad, tier')
+      .eq('estado', 'activo')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ success: true, afiliados: data || [] });
+  } catch (err) {
+    console.error('Error en GET /publico/afiliados:', err.message);
+    res.status(500).json({ success: false, error: 'Error al consultar afiliados' });
+  }
+});
+
 // ── Asistencia pública (link desde WhatsApp) ─────────────────────────────────
 
 // Sin fallback hardcodeado: si ASISTENCIA_HMAC_SECRET no está seteado, todo
