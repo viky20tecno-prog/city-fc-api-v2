@@ -599,7 +599,7 @@ router.post('/bulk', async (req, res) => {
             valor_oficial:   esPasado ? 0 : CUOTA,
             valor_pagado:    0,
             saldo_pendiente: esPasado ? 0 : CUOTA,
-            estado:          esPasado ? 'AL_DIA' : 'PENDIENTE',
+            estado:          esPasado ? 'NO_APLICA' : 'PENDIENTE',
           });
         }
       }

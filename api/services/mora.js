@@ -8,7 +8,7 @@ function mesesEnMora(mensualidades, cedula, anio, mesActual, pastGracePeriod, su
 
   return (mensualidades || []).filter(m => {
     if (String(m.anio) !== String(anio)) return false;
-    if (m.estado === 'AL_DIA' || m.estado === 'EXENTO' || m.estado === 'SUSPENDIDO') return false;
+    if (m.estado === 'AL_DIA' || m.estado === 'EXENTO' || m.estado === 'SUSPENDIDO' || m.estado === 'NO_APLICA') return false;
     const mesNum = parseInt(m.numero_mes);
     if (isSuspendido(mesNum)) return false;
     if (m.estado === 'PARCIAL' && mesNum === mesActual) return false;

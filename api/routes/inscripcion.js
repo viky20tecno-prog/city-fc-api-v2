@@ -127,7 +127,7 @@ router.post('/', inscripcionLimiter, async (req, res) => {
         valor_oficial:   valor,
         valor_pagado:    0,
         saldo_pendiente: valor,
-        estado:          esPasado ? 'AL_DIA' : 'PENDIENTE',
+        estado:          esPasado ? 'NO_APLICA' : 'PENDIENTE',
       });
     }
     try {

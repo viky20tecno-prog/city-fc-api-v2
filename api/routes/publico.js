@@ -20,6 +20,7 @@ function mapEstado(estado) {
   switch (estado) {
     case 'AL_DIA':      return 'pagado';
     case 'EXENTO':      return 'exento';
+    case 'NO_APLICA':   return 'no_aplica';
     case 'MORA':        return 'vencido';
     case 'PARCIAL':     return 'parcial';
     case 'POR_VALIDAR': return 'por_validar';
@@ -31,7 +32,7 @@ function mapEstado(estado) {
 function calcSaldo(m) {
   const oficial  = parseFloat(m.valor_oficial) || 0;
   const pagado   = parseFloat(m.valor_pagado)  || 0;
-  if (m.estado === 'AL_DIA' || m.estado === 'EXENTO') return 0;
+  if (m.estado === 'AL_DIA' || m.estado === 'EXENTO' || m.estado === 'NO_APLICA') return 0;
   if (m.estado === 'PARCIAL' || m.estado === 'POR_VALIDAR') return Math.max(0, oficial - pagado);
   return oficial;
 }
@@ -505,7 +506,7 @@ async function handleMorososPdf(req, res) {
     const defaultersMap = {};
     (allInvoices || []).forEach(inv => {
       if (String(inv.anio) !== String(anio)) return;
-      if (inv.estado === 'AL_DIA') return;
+      if (inv.estado === 'AL_DIA' || inv.estado === 'NO_APLICA') return;
       const mesNum = parseInt(inv.numero_mes);
       if (isSuspendido(inv.cedula, mesNum)) return;
 

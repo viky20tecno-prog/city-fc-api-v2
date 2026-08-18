@@ -469,8 +469,8 @@ async function runTool(name, input, contexto = {}) {
         .filter(m => String(m.anio) === String(anio))
         .sort((a, b) => (a.numero_mes || 0) - (b.numero_mes || 0));
       const causados   = del_anio.filter(m => (m.numero_mes || 0) <= mesActual);
-      const pendientes = causados.filter(m => m.estado !== 'AL_DIA' && m.estado !== 'EXENTO' && !esSuspendido(m.numero_mes));
-      const al_dia     = causados.filter(m => m.estado === 'AL_DIA' || m.estado === 'EXENTO');
+      const pendientes = causados.filter(m => m.estado !== 'AL_DIA' && m.estado !== 'EXENTO' && m.estado !== 'NO_APLICA' && !esSuspendido(m.numero_mes));
+      const al_dia     = causados.filter(m => m.estado === 'AL_DIA' || m.estado === 'EXENTO' || m.estado === 'NO_APLICA');
       const total_deuda = pendientes.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);
       const { data: clubData } = await db.supabase.from('clubs').select('config').eq('id', clubId).single();
       const qr_pago_url    = clubData?.config?.qr_pago_url    || null;
@@ -674,7 +674,7 @@ async function runTool(name, input, contexto = {}) {
         // Con "mes" explícito: el admin pidió ese mes puntual, se respeta tal cual.
         const pend = mesNum !== null
           ? mens.filter(m => String(m.anio) === String(anio) && parseInt(m.numero_mes) === mesNum &&
-              m.estado !== 'AL_DIA' && m.estado !== 'EXENTO' && m.estado !== 'SUSPENDIDO')
+              m.estado !== 'AL_DIA' && m.estado !== 'EXENTO' && m.estado !== 'SUSPENDIDO' && m.estado !== 'NO_APLICA')
           : mesesEnMora(mens, p.cedula, anio, mesActual, pastGracePeriod, suspensiones);
         if (pend.length > 0) {
           const deuda = pend.reduce((s, m) => s + (parseFloat(m.saldo_pendiente) || 0), 0);

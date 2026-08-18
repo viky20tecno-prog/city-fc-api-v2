@@ -1,4 +1,4 @@
-// Recalcula las mensualidades no cerradas (!= AL_DIA) del año en curso de un jugador
+// Recalcula las mensualidades no cerradas (!= AL_DIA, != NO_APLICA) del año en curso de un jugador
 // según un nuevo % de descuento. Única fuente de verdad — usado por PATCH /players/:cedula
 // (edición individual desde Hoja de vida) y por POST /config/aplicar-descuentos-masivo
 // (ajuste en bloque cuando cambia el valor base del club).
@@ -13,7 +13,8 @@ async function recalcularMensualidadesPorDescuento({ supabase, clubId, cedula, v
     .eq('club_id', clubId)
     .eq('cedula', cedula)
     .eq('anio', anioActual)
-    .neq('estado', 'AL_DIA');
+    .neq('estado', 'AL_DIA')
+    .neq('estado', 'NO_APLICA');
 
   for (const mens of (mensualidadesAjustar || [])) {
     const penalidad  = Number(mens.penalidad   ?? 0);

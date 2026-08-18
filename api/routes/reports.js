@@ -181,7 +181,7 @@ router.get('/defaulters', async (req, res) => {
 
     const invoices = allInvoices.filter(inv => {
       if (String(inv.anio) !== String(anio)) return false;
-      if (inv.estado === 'AL_DIA') return false;
+      if (inv.estado === 'AL_DIA' || inv.estado === 'NO_APLICA') return false;
       const mesNum = parseInt(inv.numero_mes);
       if (isSuspendido(inv.cedula, mesNum)) return false;
       // Abono parcial en el mes actual no cuenta como mora
