@@ -90,7 +90,11 @@ router.post('/', async (req, res) => {
 
   if (authError) {
     const msg = authError.message?.toLowerCase() || '';
-    if (msg.includes('already registered') || msg.includes('already exists')) {
+    // Supabase varía el texto exacto ("already registered" vs "already been
+    // registered") — matchear solo por "registered" es más robusto que una
+    // frase exacta. Encontrado el 20 ago: la frase real dejaba pasar el
+    // mensaje crudo en inglés al usuario porque no calzaba con el check viejo.
+    if (msg.includes('registered') || msg.includes('already exists')) {
       return res.status(400).json({ success: false, error: 'Ya existe una cuenta con ese email.' });
     }
     return res.status(500).json({ success: false, error: 'Error creando la cuenta: ' + authError.message });

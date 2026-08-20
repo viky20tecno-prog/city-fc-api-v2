@@ -96,7 +96,10 @@ router.post('/', async (req, res) => {
     });
 
     if (authError) {
-      if (authError.message?.includes('already registered')) {
+      // Mismo fix que registro.js: Supabase a veces dice "already been
+      // registered" en vez de "already registered" — matchear por
+      // "registered" a secas evita que el mensaje crudo en inglés se cuele.
+      if (authError.message?.toLowerCase().includes('registered')) {
         return res.status(409).json({ success: false, error: 'Este email ya tiene una cuenta' });
       }
       throw authError;
