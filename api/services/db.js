@@ -36,9 +36,11 @@ async function getPlayerByCelular(club_id, celular) {
 }
 
 /**
- * Buscar jugador por celular en TODOS los clubs (para el agente WA)
+ * Buscar TODOS los jugadores activos con ese celular, en TODOS los clubs
+ * (un mismo celular puede estar registrado como jugador en más de un club —
+ * el agente WA usa esto para detectar el caso y pedirle al usuario que elija).
  */
-async function getPlayerByCelularGlobal(celular) {
+async function getPlayersByCelularGlobal(celular) {
   const digits = String(celular).replace(/\D/g, '');
   const local  = digits.slice(-10); // últimos 10 dígitos (número local sin código de país)
   // Intentar todas las variantes: completo, con/sin +, sin código de país, con prefijo Colombia
@@ -46,11 +48,19 @@ async function getPlayerByCelularGlobal(celular) {
     .from('players')
     .select('*, clubs(slug, name, celular_admin, config)')
     .or(`celular.eq.${digits},celular.eq.+${digits},celular.eq.${local},celular.eq.57${local},celular.eq.+57${local}`)
-    .eq('activo', true)
-    .limit(1)
-    .single();
-  if (error && error.code !== 'PGRST116') throw error;
-  return data || null;
+    .eq('activo', true);
+  if (error) throw error;
+  return data || [];
+}
+
+/**
+ * Buscar jugador por celular en TODOS los clubs (para el agente WA).
+ * Si el celular está en más de un club devuelve uno cualquiera de ellos —
+ * usar getPlayersByCelularGlobal cuando importe distinguir ese caso.
+ */
+async function getPlayerByCelularGlobal(celular) {
+  const jugadores = await getPlayersByCelularGlobal(celular);
+  return jugadores[0] || null;
 }
 
 /**
@@ -1707,6 +1717,7 @@ module.exports = {
   getPlayerByCedula,
   getPlayerByCelular,
   getPlayerByCelularGlobal,
+  getPlayersByCelularGlobal,
   getClubByCelularAdmin,
   getClubByCelularStaff,
   searchPlayersByQuery,

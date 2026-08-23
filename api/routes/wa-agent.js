@@ -1179,6 +1179,91 @@ async function sendTwilio(to, text) {
 }
 
 // ── Identificar rol del usuario ──────────────────────────────────────────────
+// Contexto de agente para un jugador ya resuelto a un club puntual — se usa
+// tanto para el caso normal (1 solo match) como al resolver la desambiguación
+// multi-club (ver más abajo).
+function construirContextoJugador(j) {
+  return {
+    player_id:      j.id,
+    nombre:         `${j.nombre} ${j.apellidos}`.trim(),
+    cedula:         j.cedula,
+    portal_token:   j.clubs?.slug ? generarTokenPortal(j.clubs.slug, j.cedula) : null,
+    club_id:        j.club_id,
+    club_slug:      j.clubs?.slug,
+    club_nombre:    j.clubs?.config?.nombre || j.clubs?.name,
+    celular_admin:  j.clubs?.celular_admin,
+    contacto_admin: j.clubs?.config?.whatsapp || j.clubs?.celular_admin,
+    categoria:      j.categoria,
+    equipo:         j.equipo,
+    foto_url:       j.foto_url || null,
+    config:         j.clubs?.config || {},
+  };
+}
+
+// Versión liviana de un jugador candidato, para guardar en wa_sessions mientras
+// se espera que el usuario elija club — evita persistir toda la fila de players
+// (dirección, EPS, tipo de sangre, etc.) que no hace falta para este flujo.
+function candidatoDesdeJugador(j) {
+  return {
+    id: j.id, nombre: j.nombre, apellidos: j.apellidos, cedula: j.cedula,
+    club_id: j.club_id, categoria: j.categoria, equipo: j.equipo, foto_url: j.foto_url || null,
+    clubs: { slug: j.clubs?.slug, name: j.clubs?.name, celular_admin: j.clubs?.celular_admin, config: j.clubs?.config || {} },
+  };
+}
+
+function menuMulticlub(jugadores) {
+  return jugadores.map((j, i) => `${i + 1}) ${j.clubs?.config?.nombre || j.clubs?.name}`).join('\n');
+}
+
+// Interpreta la respuesta del usuario ("1", "cancheroapp", "city fc"...) como
+// la elección de uno de los clubes candidatos.
+function resolverSeleccionClub(text, jugadores) {
+  const t   = String(text || '').trim();
+  const idx = parseInt(t, 10);
+  if (!isNaN(idx) && jugadores[idx - 1]) return jugadores[idx - 1];
+
+  const norm = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const tNorm = norm(t);
+  if (!tNorm) return null;
+
+  return jugadores.find(j => {
+    const nombreClub = norm(j.clubs?.config?.nombre || j.clubs?.name || '');
+    const slugClub    = norm(j.clubs?.slug || '');
+    return (nombreClub && (nombreClub.includes(tNorm) || tNorm.includes(nombreClub))) ||
+           (slugClub && (slugClub.includes(tNorm) || tNorm.includes(slugClub)));
+  }) || null;
+}
+
+// Resuelve el flujo de un jugador registrado en más de un club: si el mensaje
+// actual identifica cuál eligió, devuelve el contexto ya armado para ese club
+// (y la pregunta original que quedó pendiente); si no, devuelve el mensaje de
+// desambiguación y guarda el estado para interpretar la próxima respuesta.
+async function resolverMulticlub(from, text, contexto, history) {
+  const jugadores = contexto.jugadores || [];
+  const elegido = resolverSeleccionClub(text, jugadores);
+
+  if (elegido) {
+    return {
+      contexto: construirContextoJugador(elegido),
+      text:     contexto.pregunta_pendiente || text,
+    };
+  }
+
+  const preguntaPendiente = contexto.pregunta_pendiente || text;
+  await db.upsertWaSession(from, {
+    rol:      'jugador_multiclub',
+    contexto: { jugadores, pregunta_pendiente: preguntaPendiente },
+    messages: history || [],
+    last_interaction: new Date().toISOString(),
+  });
+
+  const intro = contexto.pregunta_pendiente
+    ? 'No entendí cuál club elegiste 🤔 Respondé con el número:'
+    : 'Veo que estás registrado como jugador en más de un club. ¿De cuál querés la información?';
+
+  return { reply: `${intro}\n\n${menuMulticlub(jugadores)}` };
+}
+
 async function identificarRol(celular, sessionData) {
   // 1. Si ya lo teníamos en sesión, usar eso
   if (sessionData?.rol && sessionData?.contexto) {
@@ -1216,27 +1301,13 @@ async function identificarRol(celular, sessionData) {
     };
   }
 
-  // 3. ¿Es jugador registrado?
-  const jugador = await db.getPlayerByCelularGlobal(numero);
-  if (jugador) {
-    return {
-      rol: 'jugador',
-      contexto: {
-        player_id:     jugador.id,
-        nombre:        `${jugador.nombre} ${jugador.apellidos}`.trim(),
-        cedula:        jugador.cedula,
-        portal_token:  jugador.clubs?.slug ? generarTokenPortal(jugador.clubs.slug, jugador.cedula) : null,
-        club_id:       jugador.club_id,
-        club_slug:     jugador.clubs?.slug,
-        club_nombre:   jugador.clubs?.config?.nombre || jugador.clubs?.name,
-        celular_admin:    jugador.clubs?.celular_admin,
-        contacto_admin:   jugador.clubs?.config?.whatsapp || jugador.clubs?.celular_admin,
-        categoria:     jugador.categoria,
-        equipo:        jugador.equipo,
-        foto_url:      jugador.foto_url || null,
-        config:        jugador.clubs?.config || {},
-      },
-    };
+  // 3. ¿Es jugador registrado? (puede estar en más de un club con el mismo celular)
+  const jugadores = await db.getPlayersByCelularGlobal(numero);
+  if (jugadores.length > 1) {
+    return { rol: 'jugador_multiclub', contexto: { jugadores: jugadores.map(candidatoDesdeJugador) } };
+  }
+  if (jugadores.length === 1) {
+    return { rol: 'jugador', contexto: construirContextoJugador(jugadores[0]) };
   }
 
   // 4. Visitante no registrado
@@ -1277,7 +1348,21 @@ async function generateReply(from, text) {
   }
 
   // Identificar quién es (si sesión expiró, re-identificar desde BD ignorando caché)
-  const { rol, contexto } = await identificarRol(from, STALE ? null : session);
+  let { rol, contexto } = await identificarRol(from, STALE ? null : session);
+
+  // El celular es jugador en más de un club: preguntar cuál antes de seguir.
+  // Si el mensaje actual ya es la elección, resolverMulticlub devuelve el
+  // contexto de ese club y la pregunta original que había quedado pendiente;
+  // si no, corta acá con el menú (sin pasar por el LLM ni por el check de
+  // agenteActivoParaClub — no vale la pena resolver "¿está activo el bot?"
+  // para clubes que el usuario ni siquiera eligió todavía).
+  if (rol === 'jugador_multiclub') {
+    const resultado = await resolverMulticlub(from, text, contexto, history);
+    if (resultado.reply) return { reply: resultado.reply, pdfUrl: null };
+    rol      = 'jugador';
+    contexto = resultado.contexto;
+    text     = resultado.text;
+  }
 
   // Verificar si el agente está habilitado para este club
   if (!agenteActivoParaClub(contexto)) {
@@ -1546,6 +1631,113 @@ async function procesarPagoComprobante(from, contexto, analisis, mediaUrl, buffe
   }
 }
 
+// ── Comprobante de un jugador registrado en más de un club ───────────────────
+// No sabemos a qué club ni a qué concepto aplica el pago, así que en vez de
+// procesarlo directo (como con un jugador normal) guardamos el comprobante ya
+// descargado (no la URL de WAHA, que expira en minutos) y preguntamos club y
+// concepto en dos pasos de texto — ver el bloque que intercepta la respuesta
+// en el webhook de WAHA, antes de generateReply.
+async function iniciarComprobantePendienteMulticlub(from, jugadoresCandidatos, analisis, buffer, mediaType) {
+  const sesionActual = await db.getWaSession(from);
+  await db.upsertWaSession(from, {
+    rol: 'jugador_multiclub',
+    contexto: {
+      jugadores: jugadoresCandidatos,
+      _comprobantePendiente: {
+        analisis:   { monto: analisis.monto, banco: analisis.banco, referencia: analisis.referencia },
+        buffer_b64: buffer.toString('base64'),
+        mediaType,
+        expiresAt:  Date.now() + 10 * 60 * 1000,
+      },
+    },
+    messages: sesionActual?.messages || [],
+    last_interaction: new Date().toISOString(),
+  });
+
+  const montoFmt = '$' + Math.round(analisis.monto).toLocaleString('es-CO');
+  await sendWAHA(from,
+    `📸 Recibí tu comprobante de *${montoFmt}* — pero estás registrado en más de un club, así que antes decime:\n\n` +
+    `¿De cuál club es este pago?\n${menuMulticlub(jugadoresCandidatos)}`
+  );
+}
+
+const CONCEPTO_POR_INDICE = { 1: 'mensualidad_wa', 2: 'torneo_wa', 3: 'uniformes_wa' };
+const MENU_CONCEPTOS = '1) Mensualidad\n2) Torneo\n3) Uniforme';
+
+function resolverConcepto(text) {
+  const t = String(text || '').trim().toLowerCase();
+  const idx = parseInt(t, 10);
+  if (CONCEPTO_POR_INDICE[idx]) return CONCEPTO_POR_INDICE[idx];
+  if (t.includes('mensual')) return 'mensualidad_wa';
+  if (t.includes('torneo'))  return 'torneo_wa';
+  if (t.includes('uniform')) return 'uniformes_wa';
+  return null;
+}
+
+// Intercepta la respuesta de texto mientras hay un comprobante multi-club
+// pendiente (club aún sin elegir, o club elegido y falta el concepto).
+// Devuelve true si ya se encargó de la respuesta (el caller no debe seguir
+// con generateReply).
+async function manejarComprobantePendienteMulticlub(res, from, text, sesionPrevia) {
+  const pendiente = sesionPrevia?.contexto?._comprobantePendiente;
+  if (!pendiente || sesionPrevia.rol !== 'jugador_multiclub') return false;
+
+  const jugadores = sesionPrevia.contexto.jugadores || [];
+
+  if (pendiente.expiresAt <= Date.now()) {
+    const { _comprobantePendiente, ...contextoLimpio } = sesionPrevia.contexto;
+    await db.upsertWaSession(from, {
+      rol: sesionPrevia.rol, contexto: contextoLimpio,
+      messages: sesionPrevia.messages || [], last_interaction: sesionPrevia.last_interaction,
+    });
+    await sendWAHA(from, 'Pasó un rato desde que mandaste el comprobante — reenvialo, así lo procesamos de nuevo 🙏');
+    res.status(200).json({ status: 'ok' });
+    return true;
+  }
+
+  if (!pendiente.club_elegido) {
+    const elegido = resolverSeleccionClub(text, jugadores);
+    if (!elegido) {
+      await sendWAHA(from, `No entendí cuál club elegiste 🤔 Respondé con el número:\n\n${menuMulticlub(jugadores)}`);
+      res.status(200).json({ status: 'ok' });
+      return true;
+    }
+    await db.upsertWaSession(from, {
+      rol: 'jugador_multiclub',
+      // `elegido` ya viene con la forma "candidato" (contexto.jugadores se arma
+      // así en identificarRol) — se guarda tal cual, sin volver a envolverlo.
+      contexto: { jugadores, _comprobantePendiente: { ...pendiente, club_elegido: elegido } },
+      messages: sesionPrevia.messages || [], last_interaction: new Date().toISOString(),
+    });
+    const nombreClub = elegido.clubs?.config?.nombre || elegido.clubs?.name;
+    await sendWAHA(from, `Perfecto, *${nombreClub}* ✅\n\n¿Y para qué es este pago?\n${MENU_CONCEPTOS}`);
+    res.status(200).json({ status: 'ok' });
+    return true;
+  }
+
+  const concepto = resolverConcepto(text);
+  if (!concepto) {
+    await sendWAHA(from, `No entendí el concepto 🤔 Respondé:\n${MENU_CONCEPTOS}`);
+    res.status(200).json({ status: 'ok' });
+    return true;
+  }
+
+  const contextoJugador = construirContextoJugador(pendiente.club_elegido);
+  const buffer = Buffer.from(pendiente.buffer_b64, 'base64');
+  try {
+    await procesarPagoComprobante(from, contextoJugador, pendiente.analisis, null, buffer, pendiente.mediaType, concepto);
+  } catch (e) {
+    console.error('[comprobante] error procesando comprobante multiclub:', e.message);
+    await sendWAHA(from, 'Tuve un problema procesando tu comprobante. ¿Podés reenviarlo? 🙏');
+  }
+  await db.upsertWaSession(from, {
+    rol: 'jugador', contexto: contextoJugador,
+    messages: [], last_interaction: new Date().toISOString(),
+  });
+  res.status(200).json({ status: 'ok' });
+  return true;
+}
+
 // ── Resolver @lid al número real de teléfono via WAHA ────────────────────────
 async function resolverLid(lidId) {
   const wahaUrl = process.env.WAHA_URL;
@@ -1722,6 +1914,21 @@ router.post('/waha', webhookLimiter, async (req, res) => {
           if (!esComprobante) {
             await sendWAHA(from, mensajeImagenNoComprobante(contexto));
           }
+        } else if (rol === 'jugador_multiclub') {
+          // Jugador registrado en más de un club → analizar igual, pero antes
+          // de crear el pago hay que preguntar a cuál club y a qué concepto.
+          try {
+            const { buffer, mediaType: tipoReal } = await descargarMediaWaha(mediaUrl);
+            const analisis = await analizarComprobanteConClaude(buffer, tipoReal);
+            if (analisis.es_comprobante && analisis.monto > 0) {
+              await iniciarComprobantePendienteMulticlub(from, contexto.jugadores, analisis, buffer, tipoReal);
+            } else {
+              await sendWAHA(from, mensajeImagenNoComprobante(contexto));
+            }
+          } catch (visionErr) {
+            console.error('[wa-agent] Vision error (multiclub):', visionErr.message);
+            await sendWAHA(from, mensajeImagenNoComprobante(contexto));
+          }
         } else {
           // Imagen real de alguien que no es jugador — se recibió, solo no
           // corresponde procesarla como comprobante acá (ver función).
@@ -1740,9 +1947,16 @@ router.post('/waha', webhookLimiter, async (req, res) => {
     const text = payload.body;
     console.log(`[wa-agent] WAHA mensaje de ${from}: ${text}`);
 
-    // ¿Está respondiendo a "¿en qué se aplica el excedente?" de un comprobante reciente?
-    // Se intercepta antes del agente para no depender de que la IA lo interprete bien.
+    // Ambos chequeos siguientes se hacen antes del agente para no depender de
+    // que la IA interprete bien una respuesta corta tipo "1" o "torneo".
     const sesionPrevia = await db.getWaSession(from);
+
+    // ¿Está en medio de elegir club/concepto para un comprobante que mandó
+    // mientras estaba en más de un club? Mientras esto no se resuelva no
+    // tiene sentido pasarle nada al LLM.
+    if (await manejarComprobantePendienteMulticlub(res, from, text, sesionPrevia)) return;
+
+    // ¿Está respondiendo a "¿en qué se aplica el excedente?" de un comprobante reciente?
     const pendiente = sesionPrevia?.contexto?._preguntaConceptoPago;
     if (pendiente) {
       const { _preguntaConceptoPago, ...contextoLimpio } = sesionPrevia.contexto;
