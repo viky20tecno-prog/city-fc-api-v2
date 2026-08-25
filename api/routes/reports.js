@@ -47,15 +47,21 @@ router.get('/summary', async (req, res) => {
       'morosos_cédulas': [],
     };
 
-    currentMonthInvoices.forEach(inv => {
-      const suspendido = isSuspendido(inv.cedula, parseInt(inv.numero_mes), anio);
-      invoiceStats.valor_oficial_mes += parseFloat(inv.valor_oficial) || 0;
-      invoiceStats.valor_pagado_mes  += parseFloat(inv.valor_pagado)  || 0;
-      if (!suspendido) invoiceStats.valor_pendiente_mes += parseFloat(inv.saldo_pendiente) || 0;
-      // Si ya pasó el día de gracia, PENDIENTE se cuenta como MORA — un mes suspendido no cuenta en ningún estado de deuda
-      const estadoReal = suspendido ? 'SUSPENDIDO' : (inv.estado === 'PENDIENTE' && pastGracePeriod) ? 'MORA' : inv.estado;
-      invoiceStats.por_estado[estadoReal] = (invoiceStats.por_estado[estadoReal] || 0) + 1;
-    });
+    // Si el club no tiene valor_mensualidad configurado, no hay deuda real que
+    // reportar — no debe salir nadie como PENDIENTE ni MORA hasta que lo configuren.
+    const mensualidadConfigurada = (club.config?.valor_mensualidad ?? 0) > 0;
+
+    if (mensualidadConfigurada) {
+      currentMonthInvoices.forEach(inv => {
+        const suspendido = isSuspendido(inv.cedula, parseInt(inv.numero_mes), anio);
+        invoiceStats.valor_oficial_mes += parseFloat(inv.valor_oficial) || 0;
+        invoiceStats.valor_pagado_mes  += parseFloat(inv.valor_pagado)  || 0;
+        if (!suspendido) invoiceStats.valor_pendiente_mes += parseFloat(inv.saldo_pendiente) || 0;
+        // Si ya pasó el día de gracia, PENDIENTE se cuenta como MORA — un mes suspendido no cuenta en ningún estado de deuda
+        const estadoReal = suspendido ? 'SUSPENDIDO' : (inv.estado === 'PENDIENTE' && pastGracePeriod) ? 'MORA' : inv.estado;
+        invoiceStats.por_estado[estadoReal] = (invoiceStats.por_estado[estadoReal] || 0) + 1;
+      });
+    }
 
     if (invoiceStats.valor_oficial_mes > 0) {
       invoiceStats.porcentaje_recaudacion = Math.round(
@@ -64,27 +70,29 @@ router.get('/summary', async (req, res) => {
     }
 
     // Lógica morosos — solo jugadores activos
-    const cedulasActivas = new Set(jugadores.map(j => String(j.cedula)));
     const morososMap = {};
-    invoicesAnio.forEach(inv => {
-      if (!cedulasActivas.has(String(inv.cedula))) return;
-      const mesNum = parseInt(inv.numero_mes);
-      const saldo  = parseFloat(inv.saldo_pendiente) || 0;
-      if (inv.estado === 'AL_DIA' || saldo <= 0) return;
-      if (isSuspendido(inv.cedula, mesNum, anio)) return;
-      // Abono parcial en el mes actual → no es mora, se muestra como PARCIAL en el dashboard
-      if (inv.estado === 'PARCIAL' && mesNum === currentMonth) return;
+    if (mensualidadConfigurada) {
+      const cedulasActivas = new Set(jugadores.map(j => String(j.cedula)));
+      invoicesAnio.forEach(inv => {
+        if (!cedulasActivas.has(String(inv.cedula))) return;
+        const mesNum = parseInt(inv.numero_mes);
+        const saldo  = parseFloat(inv.saldo_pendiente) || 0;
+        if (inv.estado === 'AL_DIA' || saldo <= 0) return;
+        if (isSuspendido(inv.cedula, mesNum, anio)) return;
+        // Abono parcial en el mes actual → no es mora, se muestra como PARCIAL en el dashboard
+        if (inv.estado === 'PARCIAL' && mesNum === currentMonth) return;
 
-      const esMesAnterior = mesNum < currentMonth;
-      const esMesActual   = mesNum === currentMonth;
-      if (!esMesAnterior && !(esMesActual && pastGracePeriod)) return;
+        const esMesAnterior = mesNum < currentMonth;
+        const esMesActual   = mesNum === currentMonth;
+        if (!esMesAnterior && !(esMesActual && pastGracePeriod)) return;
 
-      if (!morososMap[inv.cedula]) {
-        morososMap[inv.cedula] = { cedula: inv.cedula, saldo_pendiente: 0, meses_en_mora: [] };
-      }
-      morososMap[inv.cedula].saldo_pendiente += saldo;
-      morososMap[inv.cedula].meses_en_mora.push({ mes: inv.mes, numero_mes: mesNum, estado: inv.estado, saldo });
-    });
+        if (!morososMap[inv.cedula]) {
+          morososMap[inv.cedula] = { cedula: inv.cedula, saldo_pendiente: 0, meses_en_mora: [] };
+        }
+        morososMap[inv.cedula].saldo_pendiente += saldo;
+        morososMap[inv.cedula].meses_en_mora.push({ mes: inv.mes, numero_mes: mesNum, estado: inv.estado, saldo });
+      });
+    }
     invoiceStats['morosos_cédulas'] = Object.values(morososMap);
 
     // Stats uniformes

@@ -114,9 +114,12 @@ router.all('/emails', async (req, res) => {
       }
     }
 
-    // Marcar mensualidades vencidas de todos los clubs
+    // Marcar mensualidades vencidas de todos los clubs.
+    // Si el club no tiene valor_mensualidad configurado no hay deuda real que
+    // vencer — se omite para no generar MORA falsos hasta que lo configuren.
     let vencidosTotal = 0;
     for (const club of clubs) {
+      if (!((club.config?.valor_mensualidad ?? 0) > 0)) continue;
       try {
         const diasGracia = club.config?.dias_gracia_mora ?? 0;
         vencidosTotal += await db.marcarMensualidadesVencidas(club.id, diasGracia);

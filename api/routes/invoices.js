@@ -12,8 +12,12 @@ router.get('/', async (req, res) => {
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
 
-    // Auto-marcar vencidos antes de devolver datos (fire-and-forget)
-    db.marcarMensualidadesVencidas(club.id, club.config?.dias_gracia_mora ?? 0).catch(e => console.error('[invoices] marcarVencidos:', e.message));
+    // Auto-marcar vencidos antes de devolver datos (fire-and-forget).
+    // Si el club no tiene mensualidad configurada (valor_mensualidad = 0), no hay
+    // deuda real que vencer — no marcar nada como MORA hasta que la configuren.
+    if ((club.config?.valor_mensualidad ?? 0) > 0) {
+      db.marcarMensualidadesVencidas(club.id, club.config?.dias_gracia_mora ?? 0).catch(e => console.error('[invoices] marcarVencidos:', e.message));
+    }
 
     let invoices = await db.getMensualidades(club.id);
     invoices = invoices.filter(inv => String(inv.anio) === String(anio));
@@ -465,6 +469,10 @@ router.post('/marcar-vencidos', async (req, res) => {
   try {
     const club = await db.getClubBySlug(req.club_id);
     if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    if (!((club.config?.valor_mensualidad ?? 0) > 0)) {
+      return res.json({ success: true, actualizados: 0, message: 'El club no tiene mensualidad configurada — nada que marcar como MORA' });
+    }
 
     const actualizados = await db.marcarMensualidadesVencidas(club.id, club.config?.dias_gracia_mora ?? 0);
     res.json({ success: true, actualizados, message: `${actualizados} mensualidades marcadas como MORA` });
