@@ -173,7 +173,9 @@ router.patch('/mensualidad/:id', async (req, res) => {
     // sin esto, cualquier usuario autenticado de cualquier club podía leer y editar
     // mensualidades de otro club con solo cambiar el :id en la URL (IDOR).
     const { data: actual } = await db.supabase
-      .from('mensualidades').select('valor_oficial,valor_pagado,penalidad,club_id').eq('id', req.params.id).single();
+      .from('mensualidades')
+      .select('valor_oficial,valor_pagado,penalidad,club_id,player_id,cedula,mes,numero_mes,anio')
+      .eq('id', req.params.id).single();
     if (!actual || actual.club_id !== club.id)
       return res.status(404).json({ success: false, error: 'Mensualidad no encontrada' });
 
@@ -199,6 +201,36 @@ router.patch('/mensualidad/:id', async (req, res) => {
     if (estado) updates.estado = estado;
 
     const updated = await db.updateMensualidad(req.params.id, updates);
+
+    // Dejar rastro con fecha del abono/pago aplicado a mano en esta edición —
+    // sin esto, un abono registrado editando la mensualidad directamente no
+    // queda en la tabla `pagos` y desaparece del historial de transacciones
+    // (a diferencia de los registrados vía "Registrar pago", que sí crean fila).
+    // Solo se registra cuando el pagado SUBE — bajarlo es una corrección, no un pago.
+    const pagadoAnterior = parseFloat(actual.valor_pagado) || 0;
+    const pagadoNuevo    = pagado !== undefined ? pagado : pagadoAnterior;
+    const delta          = pagadoNuevo - pagadoAnterior;
+    if (delta > 0) {
+      try {
+        await db.createPago({
+          club_id:         club.id,
+          player_id:       actual.player_id,
+          cedula:          actual.cedula,
+          monto:           delta,
+          banco:           'Ajuste manual',
+          concepto:        'mensualidad',
+          referencia:       `${actual.mes || ''} ${actual.anio || ''}`.trim(),
+          estado_revision: 'aprobado_manual',
+          url_comprobante: '',
+          tipo_origen:     'MANUAL',
+        });
+      } catch (e) {
+        // No bloquear la edición de la mensualidad (ya se guardó) si falla el
+        // registro del historial — se loguea para poder investigar después.
+        console.error('[invoices] no se pudo registrar el pago en historial:', e.message);
+      }
+    }
+
     res.json({ success: true, data: updated });
   } catch (err) {
     console.error('PATCH /invoices/mensualidad/:id', err.message);
