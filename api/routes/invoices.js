@@ -16,7 +16,13 @@ router.get('/', async (req, res) => {
     // Si el club no tiene mensualidad configurada (valor_mensualidad = 0), no hay
     // deuda real que vencer — no marcar nada como MORA hasta que la configuren.
     if ((club.config?.valor_mensualidad ?? 0) > 0) {
-      db.marcarMensualidadesVencidas(club.id, club.config?.dias_gracia_mora ?? 0).catch(e => console.error('[invoices] marcarVencidos:', e.message));
+      db.marcarMensualidadesVencidas(club.id, club.config?.dias_gracia_mora ?? 0)
+        .then(() => {
+          if (club.config?.penalidad_habilitada === true) {
+            return db.aplicarPenalidadMora(club.id, club.config?.penalidad_mora ?? 0);
+          }
+        })
+        .catch(e => console.error('[invoices] marcarVencidos:', e.message));
     }
 
     let invoices = await db.getMensualidades(club.id);
@@ -507,7 +513,16 @@ router.post('/marcar-vencidos', async (req, res) => {
     }
 
     const actualizados = await db.marcarMensualidadesVencidas(club.id, club.config?.dias_gracia_mora ?? 0);
-    res.json({ success: true, actualizados, message: `${actualizados} mensualidades marcadas como MORA` });
+
+    let penalidadesAplicadas = 0;
+    if (club.config?.penalidad_habilitada === true) {
+      penalidadesAplicadas = await db.aplicarPenalidadMora(club.id, club.config?.penalidad_mora ?? 0);
+    }
+
+    res.json({
+      success: true, actualizados, penalidades_aplicadas: penalidadesAplicadas,
+      message: `${actualizados} mensualidades marcadas como MORA${penalidadesAplicadas ? `, ${penalidadesAplicadas} con penalidad aplicada` : ''}`,
+    });
   } catch (err) {
     console.error('POST /invoices/marcar-vencidos', err.message);
     res.status(500).json({ success: false, error: err.message });

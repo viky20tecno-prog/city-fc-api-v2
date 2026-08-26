@@ -1008,39 +1008,6 @@ async function deletePlayer(club_id, cedula) {
   if (error) throw error;
 }
 
-/**
- * Marcar mensualidad en MORA y aplicar penalidad (solo una vez por mes)
- */
-async function aplicarMoraConPenalidad(mensualidad_id, penalidad = 0) {
-  const { data: mens, error: fetchErr } = await supabase
-    .from('mensualidades')
-    .select('valor_oficial, valor_pagado, penalidad')
-    .eq('id', mensualidad_id)
-    .single();
-  if (fetchErr) throw fetchErr;
-
-  // Guard: no aplicar penalidad dos veces
-  if (parseFloat(mens.penalidad) > 0) return null;
-
-  const oficial    = parseFloat(mens.valor_oficial) || 0;
-  const yaPageado  = parseFloat(mens.valor_pagado)  || 0;
-  const nuevoSaldo = Math.max(0, oficial + penalidad - yaPageado);
-
-  const { data, error } = await supabase
-    .from('mensualidades')
-    .update({
-      estado:                    'MORA',
-      penalidad,
-      saldo_pendiente:           nuevoSaldo,
-      fecha_ultima_actualizacion: new Date().toISOString(),
-    })
-    .eq('id', mensualidad_id)
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
-}
-
 /* ─── Finanzas (ingresos y gastos) ─────────────────────────── */
 
 async function getFinanzas(club_id, { desde, hasta } = {}) {
@@ -1679,6 +1646,39 @@ async function marcarMensualidadesVencidas(club_id, diasGracia = 0) {
   return data?.length || 0;
 }
 
+/**
+ * Aplica el monto de penalidad configurado a las mensualidades que ya están
+ * en MORA y todavía no la tienen (penalidad nula o en 0) — solo se llama si
+ * el club tiene penalidad_habilitada=true. No duplica: una vez que a una
+ * mensualidad se le puso penalidad, deja de calzar el filtro y no se vuelve
+ * a tocar. Apagar el interruptor no quita lo ya aplicado — eso es manual.
+ */
+async function aplicarPenalidadMora(club_id, penalidadMonto) {
+  const monto = parseFloat(penalidadMonto) || 0;
+  if (monto <= 0) return 0;
+
+  const { data: pendientes, error: fetchErr } = await supabase
+    .from('mensualidades')
+    .select('id, saldo_pendiente')
+    .eq('club_id', club_id)
+    .eq('estado', 'MORA')
+    .or('penalidad.is.null,penalidad.eq.0');
+  if (fetchErr) throw fetchErr;
+  if (!pendientes || pendientes.length === 0) return 0;
+
+  const now = new Date().toISOString();
+  let aplicadas = 0;
+  for (const m of pendientes) {
+    const nuevoSaldo = (parseFloat(m.saldo_pendiente) || 0) + monto;
+    const { error } = await supabase
+      .from('mensualidades')
+      .update({ penalidad: monto, saldo_pendiente: nuevoSaldo, fecha_ultima_actualizacion: now })
+      .eq('id', m.id);
+    if (!error) aplicadas++;
+  }
+  return aplicadas;
+}
+
 function getDeportesClub(club) {
   const config = club?.config || {};
   if (Array.isArray(config.deportes) && config.deportes.length > 0) return config.deportes;
@@ -1770,7 +1770,7 @@ module.exports = {
   getSuspensionesJugador,
   createSuspension,
   deactivateSuspension,
-  aplicarMoraConPenalidad,
+  aplicarPenalidadMora,
   getFinanzas,
   createFinanza,
   deleteFinanza,

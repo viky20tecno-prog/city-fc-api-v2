@@ -45,6 +45,7 @@ router.get('/', async (req, res) => {
       whatsapp:                   club.config?.whatsapp                   || '',
       dias_gracia_mora:           club.config?.dias_gracia_mora           ?? 0,
       penalidad_mora:             club.config?.penalidad_mora             ?? 0,
+      penalidad_habilitada:       club.config?.penalidad_habilitada       === true,
       torneos_iniciales:          club.config?.torneos_iniciales          || [],
       categorias_jugadores:       club.config?.categorias_jugadores       || [],
       categorias_finanzas_ingreso: club.config?.categorias_finanzas_ingreso || [],

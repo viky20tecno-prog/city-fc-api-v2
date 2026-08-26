@@ -118,18 +118,26 @@ router.all('/emails', async (req, res) => {
     // Si el club no tiene valor_mensualidad configurado no hay deuda real que
     // vencer — se omite para no generar MORA falsos hasta que lo configuren.
     let vencidosTotal = 0;
+    let penalidadesTotal = 0;
     for (const club of clubs) {
       if (!((club.config?.valor_mensualidad ?? 0) > 0)) continue;
       try {
         const diasGracia = club.config?.dias_gracia_mora ?? 0;
         vencidosTotal += await db.marcarMensualidadesVencidas(club.id, diasGracia);
+
+        // Penalidad por mora — solo si el club la tiene prendida explícitamente.
+        // El interruptor se puede prender/apagar en cualquier momento: lo que
+        // valga en el momento en que corre este cron es lo que se aplica.
+        if (club.config?.penalidad_habilitada === true) {
+          penalidadesTotal += await db.aplicarPenalidadMora(club.id, club.config?.penalidad_mora ?? 0);
+        }
       } catch (e) {
         console.error(`[cron] marcarVencidos ${club.slug}:`, e.message);
       }
     }
 
-    console.log(`[cron] Ejecutado: ${resultados.enviados.length} enviados, ${resultados.omitidos.length} omitidos, ${resultados.errores.length} errores, ${vencidosTotal} mensualidades marcadas vencidas`);
-    res.json({ success: true, timestamp: ahora.toISOString(), vencidos_marcados: vencidosTotal, ...resultados });
+    console.log(`[cron] Ejecutado: ${resultados.enviados.length} enviados, ${resultados.omitidos.length} omitidos, ${resultados.errores.length} errores, ${vencidosTotal} mensualidades marcadas vencidas, ${penalidadesTotal} penalidades aplicadas`);
+    res.json({ success: true, timestamp: ahora.toISOString(), vencidos_marcados: vencidosTotal, penalidades_aplicadas: penalidadesTotal, ...resultados });
 
   } catch (err) {
     console.error('[cron] Error fatal:', err.message);
