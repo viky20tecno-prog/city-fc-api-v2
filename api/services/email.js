@@ -184,7 +184,7 @@ function sendWelcomeClub({ nombre_club, nombre_admin, email, club_slug }) {
       rows: [
         ['👥', 'Agrega tus jugadores', 'Importa desde Excel o uno por uno en segundos'],
         ['💬', 'Activa el cobro automático por WhatsApp', 'Los pagos llegan solos — olvídate de perseguir a los padres'],
-        ['🔗', 'Comparte tu link de inscripción', `zensports.zenpra.ai/inscripcion/${club_slug}`],
+        ['🔗', 'Comparte tu link de inscripción', `zensports.zenpra.ai/inscripcion?club_id=${club_slug}`],
       ],
     })}
     ${spacer(12)}
