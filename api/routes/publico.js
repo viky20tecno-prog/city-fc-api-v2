@@ -321,6 +321,59 @@ router.get('/atleta/:clubSlug/:token', async (req, res) => {
   }
 });
 
+// GET /api/publico/verificar/:clubSlug/:cedula — verificación pública del carnet.
+// A diferencia de /atleta/:clubSlug/:token (estado de cuenta, que exige token HMAC
+// porque expone finanzas), esto SOLO confirma si la cédula es un miembro del club y
+// devuelve la identidad básica para pintar el carnet: nombre, foto, posición,
+// categoría, número y si está activo. Sin mensualidades, torneos ni uniformes.
+// La cédula va cruda a propósito — ya está impresa en el carnet junto a la foto, y
+// cualquiera (p. ej. un organizador de torneo escaneando el QR) debe poder
+// verificarlo sin credenciales. Rate-limited igual que /atleta.
+router.get('/verificar/:clubSlug/:cedula', portalLimiter, async (req, res) => {
+  try {
+    const { clubSlug, cedula } = req.params;
+
+    const club = await db.getClubBySlug(clubSlug);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const jugador = await db.getPlayerByCedula(club.id, cedula);
+    if (!jugador) return res.status(404).json({ success: false, error: 'Atleta no encontrado' });
+
+    const club_pub = {
+      nombre:    club.config?.nombre || clubSlug,
+      subtitulo: club.config?.subtitulo || '',
+      color:     club.config?.color || '#00AAFF',
+      logo_url:  club.config?.logo_url || null,
+      slug:      clubSlug,
+    };
+
+    // Miembro no activo: no se devuelve su identidad (nombre/foto). El frontend
+    // solo necesita saber que no está verificado; pinta la tarjeta "no verificado"
+    // con la cédula que ya trae en la URL y el branding del club.
+    if (jugador.activo !== true) {
+      return res.json({ success: true, club: club_pub, atleta: { cedula: jugador.cedula, activo: false } });
+    }
+
+    res.json({
+      success: true,
+      club: club_pub,
+      atleta: {
+        nombre:    jugador.nombre,
+        apellidos: jugador.apellidos || '',
+        cedula:    jugador.cedula,
+        categoria: jugador.categoria || '',
+        posicion:  jugador.posicion || '',
+        numero:    jugador.numero_camiseta || jugador.numero || '',
+        foto_url:  jugador.foto_url || null,
+        activo:    true,
+      },
+    });
+  } catch (error) {
+    console.error('Error en GET /publico/verificar:', error);
+    res.status(500).json({ success: false, error: 'Error al verificar la membresía' });
+  }
+});
+
 // POST /api/publico/atleta-por-celular — ELIMINADO (12 ago 2026). Ese endpoint hacía que el
 // SISTEMA le escribiera primero por WhatsApp a cualquier número tecleado en un formulario
 // público sin autenticar — un mensaje "iniciado por el negocio", no una respuesta a algo que
