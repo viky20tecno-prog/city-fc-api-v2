@@ -7,6 +7,37 @@ const { limiteDe } = require('../services/plan-limits');
 const { generarTokenPortal } = require('./publico');
 const router = express.Router();
 
+// ── Helpers para corrección de cédula ───────────────────────────────────────
+// La foto vive en storage con path determinístico player-photos/{slug}/{cedula}.jpg
+// (ver TabPerfil.jsx). Al cambiar la cédula hay que mover el archivo. Best-effort:
+// si falla, la foto solo hay que re-subirla, los datos ya quedaron correctos.
+async function moverFotoJugador(slug, cedOld, cedNew, esSwap) {
+  const bucket = db.supabase.storage.from('player-photos');
+  const p = (c) => `${slug}/${c}.jpg`;
+  try {
+    if (esSwap) {
+      const tmp = `${slug}/__swap_${Date.now()}.jpg`;
+      await bucket.move(p(cedOld), tmp);
+      await bucket.move(p(cedNew), p(cedOld));
+      await bucket.move(tmp, p(cedNew));
+    } else {
+      await bucket.move(p(cedOld), p(cedNew));
+    }
+  } catch (e) {
+    console.error('[cedula] no se pudo mover la foto:', e.message);
+  }
+}
+
+// Si players.foto_url guarda la URL pública con la cédula vieja en el path, la
+// reescribe. El jugador ya quedó con la cédula nueva en la BD (cedNew).
+async function sincronizarFotoUrl(clubId, jugador, cedOld, cedNew) {
+  const url = jugador?.foto_url;
+  if (!url || !String(url).includes(`/${cedOld}.jpg`)) return;
+  const nueva = String(url).replace(`/${cedOld}.jpg`, `/${cedNew}.jpg`);
+  await db.supabase.from('players').update({ foto_url: nueva })
+    .eq('club_id', clubId).eq('cedula', cedNew);
+}
+
 // GET /api/players?club_id=city-fc
 router.get('/', async (req, res) => {
   try {
@@ -358,21 +389,16 @@ router.patch('/:cedula/completar', async (req, res) => {
       .select().single();
     if (ep) throw ep;
 
-    // 2. Cascade: mensualidades
+    // 2. Cascade completo: mensualidades, pagos, suspensiones, torneos,
+    //    asistencia, uniformes, wa_log_envios y la foto en storage.
+    //    (players.cedula ya se movió arriba; la RPC lo detecta como no-op.)
     if (cedulaNueva !== cedulaAnterior) {
-      await db.supabase.from('mensualidades')
-        .update({ cedula: cedulaNueva })
-        .eq('club_id', club.id).eq('cedula', cedulaAnterior);
-
-      // 3. Cascade: suspensiones
-      await db.supabase.from('suspensiones')
-        .update({ cedula: cedulaNueva })
-        .eq('club_id', club.id).eq('cedula', cedulaAnterior);
-
-      // 4. Cascade: torneos
-      await db.supabase.from('torneos')
-        .update({ cedula: cedulaNueva })
-        .eq('club_id', club.id).eq('cedula', cedulaAnterior);
+      const { error: eCascade } = await db.supabase.rpc('corregir_cedula_jugador', {
+        p_club: club.id, p_old: cedulaAnterior, p_new: cedulaNueva,
+      });
+      if (eCascade) throw eCascade;
+      await moverFotoJugador(req.club_id, cedulaAnterior, cedulaNueva, false);
+      await sincronizarFotoUrl(club.id, updatedPlayer, cedulaAnterior, cedulaNueva);
     }
 
     db.logClubActivity({
@@ -386,6 +412,93 @@ router.patch('/:cedula/completar', async (req, res) => {
     res.json({ success: true, data: updatedPlayer, cedula_anterior: cedulaAnterior, cedula_nueva: cedulaNueva });
   } catch (error) {
     console.error('PATCH /players/:cedula/completar', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PATCH /api/players/:cedula/corregir-cedula?club_id=...
+// SOLO ADMIN. Corrige una cédula mal ingresada. Dos casos:
+//  - La cédula nueva está libre  -> corrección simple (RPC corregir_cedula_jugador).
+//  - La cédula nueva es de otro jugador del club -> requiere confirmar_swap:true
+//    y hace un intercambio atómico (RPC intercambiar_cedulas_jugadores), para el
+//    caso típico de dos hermanos cuyas cédulas quedaron cruzadas.
+// Arrastra pagos, torneos, asistencia, uniformes y la foto. El carnet impreso y
+// el link del portal que ya tenga el jugador quedan obsoletos — hay que reemitir.
+router.patch('/:cedula/corregir-cedula', async (req, res) => {
+  try {
+    if (req.userRole !== 'ADMIN')
+      return res.status(403).json({ success: false, error: 'Solo el administrador puede corregir la cédula de un jugador.' });
+
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const cedulaActual  = String(req.params.cedula);
+    const nuevaCedula   = String(req.body?.nueva_cedula || '').trim();
+    const confirmarSwap = req.body?.confirmar_swap === true;
+
+    if (!nuevaCedula)
+      return res.status(400).json({ success: false, error: 'nueva_cedula requerida' });
+    if (nuevaCedula === cedulaActual)
+      return res.status(400).json({ success: false, error: 'La cédula nueva es igual a la actual.' });
+    if (/^(PEND_|SWP-)/i.test(nuevaCedula) || !/^[A-Za-z0-9.\- ]{3,20}$/.test(nuevaCedula))
+      return res.status(400).json({ success: false, error: 'La cédula nueva no tiene un formato válido.' });
+
+    const jugador = await db.getPlayerByCedula(club.id, cedulaActual);
+    if (!jugador) return res.status(404).json({ success: false, error: 'Jugador no encontrado' });
+
+    const otro = await db.getPlayerByCedula(club.id, nuevaCedula);
+
+    // ── Colisión: la cédula nueva ya es de otro jugador del club ──────────────
+    if (otro && otro.id !== jugador.id) {
+      if (!confirmarSwap) {
+        return res.json({
+          success: false,
+          needs_swap: true,
+          otro_jugador: { nombre: otro.nombre, apellidos: otro.apellidos || '', cedula: otro.cedula },
+        });
+      }
+
+      const { data: movidos, error } = await db.supabase.rpc('intercambiar_cedulas_jugadores', {
+        p_club: club.id, p_a: cedulaActual, p_b: nuevaCedula,
+      });
+      if (error) throw error;
+
+      await moverFotoJugador(req.club_id, cedulaActual, nuevaCedula, true);
+      await sincronizarFotoUrl(club.id, jugador, cedulaActual, nuevaCedula);
+      await sincronizarFotoUrl(club.id, otro, nuevaCedula, cedulaActual);
+
+      db.logClubActivity({
+        club_id: club.id, club_slug: req.club_id,
+        user_id: req.user?.id, user_email: req.user?.email, user_role: req.userRole, user_name: req.memberName,
+        action: 'JUGADOR_CEDULA_INTERCAMBIADA', entity_type: 'jugador', entity_id: nuevaCedula,
+        entity_label: `${jugador.nombre} ${jugador.apellidos || ''}`.trim() + ' ⇄ ' + `${otro.nombre} ${otro.apellidos || ''}`.trim(),
+        details: { jugador_a: cedulaActual, jugador_b: nuevaCedula, movidos },
+      });
+
+      return res.json({ success: true, swap: true, movidos });
+    }
+
+    // ── Sin colisión: corrección simple ─────────────────────────────────────
+    const { data: movidos, error } = await db.supabase.rpc('corregir_cedula_jugador', {
+      p_club: club.id, p_old: cedulaActual, p_new: nuevaCedula,
+    });
+    if (error) throw error;
+
+    await moverFotoJugador(req.club_id, cedulaActual, nuevaCedula, false);
+    await sincronizarFotoUrl(club.id, jugador, cedulaActual, nuevaCedula);
+
+    db.logClubActivity({
+      club_id: club.id, club_slug: req.club_id,
+      user_id: req.user?.id, user_email: req.user?.email, user_role: req.userRole, user_name: req.memberName,
+      action: 'JUGADOR_CEDULA_CORREGIDA', entity_type: 'jugador', entity_id: nuevaCedula,
+      entity_label: `${jugador.nombre} ${jugador.apellidos || ''}`.trim(),
+      details: { cedula_anterior: cedulaActual, cedula_nueva: nuevaCedula, movidos },
+    });
+
+    const actualizado = await db.getPlayerByCedula(club.id, nuevaCedula);
+    res.json({ success: true, swap: false, movidos, jugador: actualizado });
+  } catch (error) {
+    console.error('PATCH /players/:cedula/corregir-cedula', error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });
