@@ -8,6 +8,45 @@ const { generarTokenPortal } = require('./publico');
 const router = express.Router();
 
 // ── Helpers para corrección de cédula ───────────────────────────────────────
+// La cédula está denormalizada como texto en estas tablas (no por FK). Al
+// cambiarla en `players` hay que arrastrarla en todas. `players` primero.
+// (No se usa una función SQL porque el PostgREST de este proyecto no expone
+//  RPCs — se hace con updates de tabla, que sí funcionan.)
+const TABLAS_CEDULA = [
+  'players', 'mensualidades', 'pagos', 'suspensiones', 'torneos',
+  'asistencia', 'pedido_uniformes', 'wa_log_envios', 'uniformes',
+];
+
+// Mueve todas las filas de club+cedOld a cedNew. Devuelve { tabla: filas }.
+async function moverCedula(clubUuid, cedOld, cedNew) {
+  if (!cedOld || !cedNew || cedOld === cedNew) return {};
+  const movidos = {};
+  for (const t of TABLAS_CEDULA) {
+    const { data, error } = await db.supabase.from(t)
+      .update({ cedula: cedNew })
+      .eq('club_id', clubUuid).eq('cedula', String(cedOld))
+      .select('id');
+    if (error) {
+      // Tabla legacy (ej. `uniformes`) que puede no existir en este club.
+      if (/does not exist|find the table|schema cache/i.test(error.message)) continue;
+      throw new Error(`${t}: ${error.message}`);
+    }
+    if (data && data.length) movidos[t] = data.length;
+  }
+  return movidos;
+}
+
+// Intercambia dos cédulas del mismo club vía sentinela temporal (evita chocar
+// con los UNIQUE). No es transaccional: si un paso falla, el jugador queda con
+// una cédula 'SWP-...' — el endpoint lo reporta y el pre-check lo detecta.
+async function intercambiarCedulas(clubUuid, cedA, cedB) {
+  const tmp = `SWP-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const p1 = await moverCedula(clubUuid, cedA, tmp);
+  const p2 = await moverCedula(clubUuid, cedB, cedA);
+  const p3 = await moverCedula(clubUuid, tmp, cedB);
+  return { pasos: [p1, p2, p3] };
+}
+
 // La foto vive en storage con path determinístico player-photos/{slug}/{cedula}.jpg
 // (ver TabPerfil.jsx). Al cambiar la cédula hay que mover el archivo. Best-effort:
 // si falla, la foto solo hay que re-subirla, los datos ya quedaron correctos.
@@ -389,14 +428,11 @@ router.patch('/:cedula/completar', async (req, res) => {
       .select().single();
     if (ep) throw ep;
 
-    // 2. Cascade completo: mensualidades, pagos, suspensiones, torneos,
-    //    asistencia, uniformes, wa_log_envios y la foto en storage.
-    //    (players.cedula ya se movió arriba; la RPC lo detecta como no-op.)
+    // 2. Cascade completo: pagos, suspensiones, torneos, asistencia, uniformes,
+    //    wa_log_envios y la foto en storage. (players.cedula ya se movió arriba;
+    //    moverCedula lo detecta como 0 filas.)
     if (cedulaNueva !== cedulaAnterior) {
-      const { error: eCascade } = await db.supabase.rpc('corregir_cedula_jugador', {
-        p_club: club.id, p_old: cedulaAnterior, p_new: cedulaNueva,
-      });
-      if (eCascade) throw eCascade;
+      await moverCedula(club.id, cedulaAnterior, cedulaNueva);
       await moverFotoJugador(req.club_id, cedulaAnterior, cedulaNueva, false);
       await sincronizarFotoUrl(club.id, updatedPlayer, cedulaAnterior, cedulaNueva);
     }
@@ -418,10 +454,10 @@ router.patch('/:cedula/completar', async (req, res) => {
 
 // PATCH /api/players/:cedula/corregir-cedula?club_id=...
 // SOLO ADMIN. Corrige una cédula mal ingresada. Dos casos:
-//  - La cédula nueva está libre  -> corrección simple (RPC corregir_cedula_jugador).
+//  - La cédula nueva está libre  -> corrección simple (moverCedula).
 //  - La cédula nueva es de otro jugador del club -> requiere confirmar_swap:true
-//    y hace un intercambio atómico (RPC intercambiar_cedulas_jugadores), para el
-//    caso típico de dos hermanos cuyas cédulas quedaron cruzadas.
+//    y hace un intercambio vía sentinela temporal, para el caso típico de dos
+//    hermanos cuyas cédulas quedaron cruzadas.
 // Arrastra pagos, torneos, asistencia, uniformes y la foto. El carnet impreso y
 // el link del portal que ya tenga el jugador quedan obsoletos — hay que reemitir.
 router.patch('/:cedula/corregir-cedula', async (req, res) => {
@@ -446,6 +482,14 @@ router.patch('/:cedula/corregir-cedula', async (req, res) => {
     const jugador = await db.getPlayerByCedula(club.id, cedulaActual);
     if (!jugador) return res.status(404).json({ success: false, error: 'Jugador no encontrado' });
 
+    // Pre-check: si hay un jugador con cédula 'SWP-...' quedó un intercambio a
+    // medias — no encimar otra corrección encima.
+    const { data: swpPend } = await db.supabase
+      .from('players').select('nombre, apellidos')
+      .eq('club_id', club.id).like('cedula', 'SWP-%').limit(1).maybeSingle();
+    if (swpPend)
+      return res.status(409).json({ success: false, error: 'Hay una corrección de cédula sin terminar en este club. Contacta a soporte antes de hacer otra.' });
+
     const otro = await db.getPlayerByCedula(club.id, nuevaCedula);
 
     // ── Colisión: la cédula nueva ya es de otro jugador del club ──────────────
@@ -458,10 +502,7 @@ router.patch('/:cedula/corregir-cedula', async (req, res) => {
         });
       }
 
-      const { data: movidos, error } = await db.supabase.rpc('intercambiar_cedulas_jugadores', {
-        p_club: club.id, p_a: cedulaActual, p_b: nuevaCedula,
-      });
-      if (error) throw error;
+      const movidos = await intercambiarCedulas(club.id, cedulaActual, nuevaCedula);
 
       await moverFotoJugador(req.club_id, cedulaActual, nuevaCedula, true);
       await sincronizarFotoUrl(club.id, jugador, cedulaActual, nuevaCedula);
@@ -479,10 +520,7 @@ router.patch('/:cedula/corregir-cedula', async (req, res) => {
     }
 
     // ── Sin colisión: corrección simple ─────────────────────────────────────
-    const { data: movidos, error } = await db.supabase.rpc('corregir_cedula_jugador', {
-      p_club: club.id, p_old: cedulaActual, p_new: nuevaCedula,
-    });
-    if (error) throw error;
+    const movidos = await moverCedula(club.id, cedulaActual, nuevaCedula);
 
     await moverFotoJugador(req.club_id, cedulaActual, nuevaCedula, false);
     await sincronizarFotoUrl(club.id, jugador, cedulaActual, nuevaCedula);
