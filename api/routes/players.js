@@ -168,7 +168,7 @@ function construirTextoEstadoCuenta(club, jugador, datos) {
   msg += `Te compartimos tu estado de cuenta con ${clubNombre} hasta ( ${mesActualLower} ) de ${nowCol.getFullYear()}\n`;
   msg += `📅 MENSUALIDADES\n${lineaMens}\n\n`;
   msg += `👕 UNIFORMES\n${lineaUnif}\n\n`;
-  msg += `🏆 Torneos\n\n${lineaTorneos}\n\n`;
+  msg += `🏆 TORNEOS *(SE PAGA A CUENTA PERSONAL)*\n\n${lineaTorneos}\n\n`;
 
   let footerEmpresa = '';
   if (razonSocial) footerEmpresa += `🏪 ${razonSocial}\n`;
