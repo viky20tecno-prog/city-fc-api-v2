@@ -270,11 +270,37 @@ router.all('/waha-health', async (req, res) => {
   const resultados = { revisadas: [], alertas: [] };
 
   try {
-    // 'default' — sin persistencia de "ya alertado": si sigue caído, se avisa en cada corrida
-    // a propósito (es la sesión más crítica, mejor recordatorio repetido que silencio).
-    const statusDefault = await estadoSesion('default');
-    resultados.revisadas.push({ session: 'default', status: statusDefault });
-    if (statusDefault !== 'WORKING' && statusDefault !== 'UNKNOWN') {
+    // 'default' — la sesión más crítica. Ante FAILED/STOPPED intentamos UN restart
+    // automático: si las credenciales del volumen siguen vivas reconecta en ~7s sin
+    // QR (self-heal); si están muertas pasa a SCAN_QR_CODE y desde ahí ya no se
+    // reintenta — la máquina de estados es el guard, no hace falta persistir "ya
+    // intentado" (un restart siempre saca la sesión de FAILED/STOPPED). No choca
+    // con el cron waha-restart, que solo actúa si está WORKING.
+    let statusDefault = await estadoSesion('default');
+    let autoRestart = null;
+
+    if (statusDefault === 'FAILED' || statusDefault === 'STOPPED') {
+      autoRestart = 'intentado';
+      try {
+        const rr = await fetch(`${wahaUrl}/api/sessions/default/restart`, { method: 'POST', headers: waHeaders });
+        if (rr.ok) {
+          for (let i = 0; i < 5; i++) {
+            await new Promise((s) => setTimeout(s, 3000));
+            statusDefault = await estadoSesion('default');
+            if (statusDefault === 'WORKING' || statusDefault === 'SCAN_QR_CODE') break;
+          }
+        }
+        autoRestart = `-> ${statusDefault}`;
+        console.log(`[cron/waha-health] auto-restart 'default': ${autoRestart}`);
+      } catch (e) {
+        autoRestart = `error: ${e.message}`;
+        console.error('[cron/waha-health] auto-restart falló:', e.message);
+      }
+    }
+
+    resultados.revisadas.push({ session: 'default', status: statusDefault, autoRestart });
+    // STARTING es transitorio (típico justo tras un restart) — no es motivo de alerta.
+    if (statusDefault !== 'WORKING' && statusDefault !== 'UNKNOWN' && statusDefault !== 'STARTING') {
       await sendWahaSessionAlert({ sessionName: 'default', status: statusDefault });
       resultados.alertas.push('default');
     }

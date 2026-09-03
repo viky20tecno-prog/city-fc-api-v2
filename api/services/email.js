@@ -365,6 +365,25 @@ async function sendAdminPasswordReset(email, resetUrl) {
 
 const ALERT_EMAIL = process.env.ALERT_EMAIL || 'diego31escobar@gmail.com';
 
+// Notificación push (además del correo). Va contra PUSH_ALERT_URL — pensado para
+// ntfy.sh (https://ntfy.sh/<topic-privado>, sin cuenta ni API key), pero sirve
+// cualquier webhook que acepte un POST de texto plano. Si la env var no está, es
+// un no-op silencioso. El header Title va en ASCII a propósito (los headers HTTP
+// no son UTF-8); el emoji lo pone ntfy desde Tags.
+async function sendPushAlert({ title = 'ZenSports', message, tags = '' }) {
+  const url = process.env.PUSH_ALERT_URL;
+  if (!url) return { ok: false, reason: 'no_push_url' };
+  try {
+    const headers = { 'Content-Type': 'text/plain', 'Title': title, 'Priority': 'high' };
+    if (tags) headers['Tags'] = tags;
+    const r = await fetch(url, { method: 'POST', headers, body: message });
+    return { ok: r.ok };
+  } catch (err) {
+    console.error('[push] error:', err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
 // Alerta interna (no es un correo de marca para clientes) — avisa cuando una sesión de
 // WhatsApp (WAHA) deja de estar WORKING, para no depender de que alguien revise el dashboard.
 async function sendWahaSessionAlert({ sessionName, status, recuperada = false }) {
@@ -391,7 +410,17 @@ async function sendWahaSessionAlert({ sessionName, status, recuperada = false })
     })}`,
   });
 
-  return sendEmail({ to: ALERT_EMAIL, subject, html });
+  const [emailRes] = await Promise.all([
+    sendEmail({ to: ALERT_EMAIL, subject, html }),
+    sendPushAlert({
+      title: 'ZenSports WhatsApp',
+      message: recuperada
+        ? `Sesion "${sessionName}" volvio a WORKING.`
+        : `Sesion "${sessionName}" en ${status}.${status === 'SCAN_QR_CODE' ? ' Necesita re-pairing (escanear QR o codigo).' : ' Revisar antes de reconectar a mano.'}`,
+      tags: recuperada ? 'white_check_mark' : 'warning',
+    }).catch(() => {}),
+  ]);
+  return emailRes;
 }
 
 module.exports = {
@@ -403,4 +432,5 @@ module.exports = {
   sendOnboardingDay3,
   sendAdminPasswordReset,
   sendWahaSessionAlert,
+  sendPushAlert,
 };
