@@ -320,4 +320,68 @@ router.all('/waha-health', async (req, res) => {
   }
 });
 
+// POST /api/cron/waha-restart — reinicio preventivo de la sesión 'default'.
+// El engine WEBJS de WAHA (Puppeteer + Chrome headless) se degrada en sesiones de
+// vida larga: tras 3-4 semanas las reconexiones se vuelven frecuentes y una
+// colisión entre dos ciclos de recuperación termina en LOGOUT, dejando la sesión
+// en FAILED sin auto-recuperación (incidentes 5-ago y 2-sep 2026).
+// Un restart sobre una sesión SANA reconecta desde las credenciales guardadas en
+// el volumen en ~7s SIN pedir QR (verificado 3-sep 2026). Pensado para correr
+// 1x/semana desde cron-job.org en ventana de bajo tráfico (domingo madrugada).
+router.all('/waha-restart', async (req, res) => {
+  if (!verifyCronSecret(req, res)) return;
+
+  const wahaUrl = process.env.WAHA_URL;
+  const apiKey  = process.env.WAHA_API_KEY;
+  if (!wahaUrl) return res.status(500).json({ success: false, error: 'WAHA_URL no configurado' });
+
+  const waHeaders = { 'Content-Type': 'application/json' };
+  if (apiKey) waHeaders['X-Api-Key'] = apiKey;
+
+  const estado = async () => {
+    try {
+      const r = await fetch(`${wahaUrl}/api/sessions/default`, { headers: waHeaders });
+      if (!r.ok) return r.status === 404 ? 'STOPPED' : 'UNKNOWN';
+      return (await r.json()).status || 'UNKNOWN';
+    } catch (_) {
+      return 'UNKNOWN';
+    }
+  };
+
+  try {
+    const antes = await estado();
+
+    // Solo reiniciamos una sesión sana. Si está caída, arrancando o pidiendo QR,
+    // este cron no es quien debe tocarla — de eso se encarga waha-health + Diego.
+    if (antes !== 'WORKING') {
+      console.log(`[cron/waha-restart] omitido — estado actual: ${antes}`);
+      return res.json({ success: true, skipped: true, status: antes });
+    }
+
+    const r = await fetch(`${wahaUrl}/api/sessions/default/restart`, { method: 'POST', headers: waHeaders });
+    if (!r.ok) throw new Error(`restart devolvió HTTP ${r.status}`);
+
+    // Un restart sano vuelve a WORKING en ~5-10s. Damos hasta ~40s de margen.
+    let despues = 'UNKNOWN';
+    for (let i = 0; i < 13; i++) {
+      await new Promise((s) => setTimeout(s, 3000));
+      despues = await estado();
+      if (despues === 'WORKING' || despues === 'SCAN_QR_CODE') break;
+    }
+
+    if (despues !== 'WORKING') {
+      // No volvió sola (SCAN_QR_CODE = perdió credenciales, necesita re-pairing).
+      await sendWahaSessionAlert({ sessionName: 'default', status: despues }).catch(() => {});
+      console.error(`[cron/waha-restart] la sesión NO volvió a WORKING tras el restart preventivo (quedó en ${despues})`);
+      return res.status(500).json({ success: false, status_antes: antes, status_despues: despues });
+    }
+
+    console.log('[cron/waha-restart] OK — sesión de vuelta en WORKING sin QR');
+    res.json({ success: true, status_antes: antes, status_despues: despues });
+  } catch (err) {
+    console.error('[cron/waha-restart] error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
