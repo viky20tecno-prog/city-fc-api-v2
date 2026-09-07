@@ -1,0 +1,336 @@
+{
+  "SYNC": "Copia BYTE-IDÉNTICA en dashboard/src/test/fixtures/mora-vectors.json y api/services/__fixtures__/mora-vectors.json. El criterio de 'mes causado en mora' vive dos veces a propósito (el frontend no puede importar del repo de la API). Si tocás uno, tocá el otro y recalculá 'checksum'. El test de checksum en AMBOS repos falla si el archivo se editó sin rehashear.",
+  "checksum": "sha256:1a986e04856bfc84961397b10a40510b91025b8ed7109042d4ea26f31636372b",
+  "descripcion_esquema": "Cada vector: entradas para api/services/mora.js#mesesEnMora (y su espejo dashboard/src/lib/estadoCuenta.js). 'esperado' = los numero_mes que deben quedar marcados en mora, en orden ascendente.",
+  "vectores": [
+    {
+      "nombre": "mes anterior PENDIENTE es mora",
+      "cedula": "1001",
+      "anio": 2026,
+      "mesActual": 6,
+      "pastGracePeriod": false,
+      "mensualidades": [
+        {
+          "cedula": "1001",
+          "anio": 2026,
+          "numero_mes": 3,
+          "estado": "PENDIENTE"
+        }
+      ],
+      "suspensiones": [],
+      "esperado": [
+        3
+      ]
+    },
+    {
+      "nombre": "mes anterior AL_DIA no es mora",
+      "cedula": "1001",
+      "anio": 2026,
+      "mesActual": 6,
+      "pastGracePeriod": false,
+      "mensualidades": [
+        {
+          "cedula": "1001",
+          "anio": 2026,
+          "numero_mes": 3,
+          "estado": "AL_DIA"
+        }
+      ],
+      "suspensiones": [],
+      "esperado": []
+    },
+    {
+      "nombre": "mes actual PENDIENTE dentro de la gracia no es mora",
+      "cedula": "1001",
+      "anio": 2026,
+      "mesActual": 6,
+      "pastGracePeriod": false,
+      "mensualidades": [
+        {
+          "cedula": "1001",
+          "anio": 2026,
+          "numero_mes": 6,
+          "estado": "PENDIENTE"
+        }
+      ],
+      "suspensiones": [],
+      "esperado": []
+    },
+    {
+      "nombre": "mes actual PENDIENTE pasada la gracia es mora",
+      "cedula": "1001",
+      "anio": 2026,
+      "mesActual": 6,
+      "pastGracePeriod": true,
+      "mensualidades": [
+        {
+          "cedula": "1001",
+          "anio": 2026,
+          "numero_mes": 6,
+          "estado": "PENDIENTE"
+        }
+      ],
+      "suspensiones": [],
+      "esperado": [
+        6
+      ]
+    },
+    {
+      "nombre": "mes actual PARCIAL nunca es mora aunque pase la gracia",
+      "cedula": "1001",
+      "anio": 2026,
+      "mesActual": 6,
+      "pastGracePeriod": true,
+      "mensualidades": [
+        {
+          "cedula": "1001",
+          "anio": 2026,
+          "numero_mes": 6,
+          "estado": "PARCIAL"
+        }
+      ],
+      "suspensiones": [],
+      "esperado": []
+    },
+    {
+      "nombre": "mes anterior PARCIAL si es mora",
+      "cedula": "1001",
+      "anio": 2026,
+      "mesActual": 6,
+      "pastGracePeriod": false,
+      "mensualidades": [
+        {
+          "cedula": "1001",
+          "anio": 2026,
+          "numero_mes": 4,
+          "estado": "PARCIAL"
+        }
+      ],
+      "suspensiones": [],
+      "esperado": [
+        4
+      ]
+    },
+    {
+      "nombre": "mes futuro del ano en curso nunca es mora",
+      "cedula": "1001",
+      "anio": 2026,
+      "mesActual": 6,
+      "pastGracePeriod": true,
+      "mensualidades": [
+        {
+          "cedula": "1001",
+          "anio": 2026,
+          "numero_mes": 9,
+          "estado": "PENDIENTE"
+        }
+      ],
+      "suspensiones": [],
+      "esperado": []
+    },
+    {
+      "nombre": "mensualidad con estado SUSPENDIDO no es mora",
+      "cedula": "1001",
+      "anio": 2026,
+      "mesActual": 6,
+      "pastGracePeriod": false,
+      "mensualidades": [
+        {
+          "cedula": "1001",
+          "anio": 2026,
+          "numero_mes": 3,
+          "estado": "SUSPENDIDO"
+        }
+      ],
+      "suspensiones": [],
+      "esperado": []
+    },
+    {
+      "nombre": "mensualidad con estado NO_APLICA no es mora",
+      "cedula": "1001",
+      "anio": 2026,
+      "mesActual": 6,
+      "pastGracePeriod": false,
+      "mensualidades": [
+        {
+          "cedula": "1001",
+          "anio": 2026,
+          "numero_mes": 2,
+          "estado": "NO_APLICA"
+        }
+      ],
+      "suspensiones": [],
+      "esperado": []
+    },
+    {
+      "nombre": "mensualidad con estado EXENTO no es mora",
+      "cedula": "1001",
+      "anio": 2026,
+      "mesActual": 6,
+      "pastGracePeriod": false,
+      "mensualidades": [
+        {
+          "cedula": "1001",
+          "anio": 2026,
+          "numero_mes": 3,
+          "estado": "EXENTO"
+        }
+      ],
+      "suspensiones": [],
+      "esperado": []
+    },
+    {
+      "nombre": "mes cubierto por una suspension activa no es mora",
+      "cedula": "1001",
+      "anio": 2026,
+      "mesActual": 6,
+      "pastGracePeriod": false,
+      "mensualidades": [
+        {
+          "cedula": "1001",
+          "anio": 2026,
+          "numero_mes": 3,
+          "estado": "PENDIENTE"
+        }
+      ],
+      "suspensiones": [
+        {
+          "cedula": "1001",
+          "activa": true,
+          "anio": 2026,
+          "mes_inicio": 1,
+          "mes_fin": 4
+        }
+      ],
+      "esperado": []
+    },
+    {
+      "nombre": "una suspension no activa no excusa el mes",
+      "cedula": "1001",
+      "anio": 2026,
+      "mesActual": 6,
+      "pastGracePeriod": false,
+      "mensualidades": [
+        {
+          "cedula": "1001",
+          "anio": 2026,
+          "numero_mes": 3,
+          "estado": "PENDIENTE"
+        }
+      ],
+      "suspensiones": [
+        {
+          "cedula": "1001",
+          "activa": false,
+          "anio": 2026,
+          "mes_inicio": 1,
+          "mes_fin": 4
+        }
+      ],
+      "esperado": [
+        3
+      ]
+    },
+    {
+      "nombre": "una suspension de otro ano no excusa el mes del ano en curso",
+      "cedula": "1001",
+      "anio": 2026,
+      "mesActual": 6,
+      "pastGracePeriod": false,
+      "mensualidades": [
+        {
+          "cedula": "1001",
+          "anio": 2026,
+          "numero_mes": 3,
+          "estado": "PENDIENTE"
+        }
+      ],
+      "suspensiones": [
+        {
+          "cedula": "1001",
+          "activa": true,
+          "anio": 2025,
+          "mes_inicio": 1,
+          "mes_fin": 12
+        }
+      ],
+      "esperado": [
+        3
+      ]
+    },
+    {
+      "nombre": "mensualidad de otro ano se ignora",
+      "cedula": "1001",
+      "anio": 2026,
+      "mesActual": 6,
+      "pastGracePeriod": false,
+      "mensualidades": [
+        {
+          "cedula": "1001",
+          "anio": 2025,
+          "numero_mes": 3,
+          "estado": "PENDIENTE"
+        }
+      ],
+      "suspensiones": [],
+      "esperado": []
+    },
+    {
+      "nombre": "mes anterior con estado MORA ya persistido cuenta",
+      "cedula": "1001",
+      "anio": 2026,
+      "mesActual": 6,
+      "pastGracePeriod": false,
+      "mensualidades": [
+        {
+          "cedula": "1001",
+          "anio": 2026,
+          "numero_mes": 3,
+          "estado": "MORA"
+        }
+      ],
+      "suspensiones": [],
+      "esperado": [
+        3
+      ]
+    },
+    {
+      "nombre": "combinado: atrasados + al dia + parcial actual + pendiente actual en gracia",
+      "cedula": "1001",
+      "anio": 2026,
+      "mesActual": 6,
+      "pastGracePeriod": false,
+      "mensualidades": [
+        {
+          "cedula": "1001",
+          "anio": 2026,
+          "numero_mes": 2,
+          "estado": "PENDIENTE"
+        },
+        {
+          "cedula": "1001",
+          "anio": 2026,
+          "numero_mes": 3,
+          "estado": "AL_DIA"
+        },
+        {
+          "cedula": "1001",
+          "anio": 2026,
+          "numero_mes": 4,
+          "estado": "PARCIAL"
+        },
+        {
+          "cedula": "1001",
+          "anio": 2026,
+          "numero_mes": 6,
+          "estado": "PENDIENTE"
+        }
+      ],
+      "suspensiones": [],
+      "esperado": [
+        2,
+        4
+      ]
+    }
+  ]
+}
