@@ -1,6 +1,6 @@
 {
   "SYNC": "Copia BYTE-IDÉNTICA en dashboard/src/test/fixtures/mora-vectors.json y api/services/__fixtures__/mora-vectors.json. El criterio de 'mes causado en mora' vive dos veces a propósito (el frontend no puede importar del repo de la API). Si tocás uno, tocá el otro y recalculá 'checksum'. El test de checksum en AMBOS repos falla si el archivo se editó sin rehashear.",
-  "checksum": "sha256:728fc2b4424d0a1f2da4df0685ba38ecb6ec05769cc9e63b8213992e52fd04ed",
+  "checksum": "sha256:1a986e04856bfc84961397b10a40510b91025b8ed7109042d4ea26f31636372b",
   "descripcion_esquema": "Cada vector: entradas para api/services/mora.js#mesesEnMora (y su espejo dashboard/src/lib/estadoCuenta.js). 'esperado' = los numero_mes que deben quedar marcados en mora, en orden ascendente.",
   "vectores": [
     {
@@ -225,6 +225,33 @@
           "anio": 2026,
           "mes_inicio": 1,
           "mes_fin": 4
+        }
+      ],
+      "esperado": [
+        3
+      ]
+    },
+    {
+      "nombre": "una suspension de otro ano no excusa el mes del ano en curso",
+      "cedula": "1001",
+      "anio": 2026,
+      "mesActual": 6,
+      "pastGracePeriod": false,
+      "mensualidades": [
+        {
+          "cedula": "1001",
+          "anio": 2026,
+          "numero_mes": 3,
+          "estado": "PENDIENTE"
+        }
+      ],
+      "suspensiones": [
+        {
+          "cedula": "1001",
+          "activa": true,
+          "anio": 2025,
+          "mes_inicio": 1,
+          "mes_fin": 12
         }
       ],
       "esperado": [
