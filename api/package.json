@@ -5,7 +5,8 @@
   "main": "api/index.js",
   "scripts": {
     "dev": "node api/index.js",
-    "start": "node api/index.js"
+    "start": "node api/index.js",
+    "test": "node --test \"services/**/*.test.js\""
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.36.3",
