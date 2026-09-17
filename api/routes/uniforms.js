@@ -190,8 +190,11 @@ router.put('/:id', async (req, res) => {
     // Igual restricción que al crear: si se está cambiando el número de un
     // pedido tipo 'Jugador', validar que no choque con otro jugador del
     // mismo equipo/categoría. Necesita el registro completo del jugador
-    // (no solo la cédula) para poder comparar equipo/categoría.
-    if (pedido.tipo === 'Jugador' && numero !== undefined && String(numero) !== String(pedido.numero_estampar)) {
+    // (no solo la cédula) para poder comparar equipo/categoría. Solo aplica
+    // si el número nuevo es un valor real — igual que en el POST, un número
+    // vacío (pedido de una prenda sin numeración) nunca debe chocar contra
+    // otros pedidos igualmente vacíos de otros jugadores del mismo equipo.
+    if (pedido.tipo === 'Jugador' && numero && String(numero) !== String(pedido.numero_estampar)) {
       const jugadorPedido = await db.getPlayerByCedula(club.id, pedido.cedula);
       if (jugadorPedido) {
         const ocupado = await db.numeroJugadorOcupado(club.id, numero, jugadorPedido);
