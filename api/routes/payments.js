@@ -3,6 +3,29 @@ const db = require('../services/db');
 const { generarTokenPortal } = require('./publico');
 const router = express.Router();
 
+// GET /api/payments/pendientes — contador liviano de la cola de conciliación
+// para la alerta del dashboard (se consulta cada minuto; el GET / completo
+// cruza anti-fraude contra todos los pagos y es demasiado pesado para eso).
+router.get('/pendientes', async (req, res) => {
+  try {
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const { data, count, error } = await db.supabase
+      .from('pagos')
+      .select('created_at', { count: 'exact' })
+      .eq('club_id', club.id)
+      .in('estado_revision', ['pendiente', 'excedente_pendiente'])
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (error) throw error;
+
+    res.json({ success: true, count: count || 0, ultimo: data?.[0]?.created_at || null });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 // GET /api/payments?club_id=city-fc&estado=pendiente
 router.get('/', async (req, res) => {
   try {
