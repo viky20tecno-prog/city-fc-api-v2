@@ -267,30 +267,62 @@ router.all('/waha-health', async (req, res) => {
     }
   }
 
+  // Igual que estadoSesion pero con el detalle completo (config del webhook) y
+  // distinguiendo "la sesión no existe" (404) de "WAHA no responde".
+  async function detalleSesion(name) {
+    try {
+      const r = await fetch(`${wahaUrl}/api/sessions/${name}`, { headers: waHeaders, signal: AbortSignal.timeout(10000) });
+      if (r.status === 404) return { status: 'NO_EXISTE' };
+      if (!r.ok) return { status: 'WAHA_NO_RESPONDE', http: r.status };
+      const data = await r.json();
+      return { status: data.status || 'UNKNOWN', data };
+    } catch (e) {
+      return { status: 'WAHA_NO_RESPONDE', error: e.message };
+    }
+  }
+  const esperar = (ms) => new Promise((s) => setTimeout(s, ms));
+
   const resultados = { revisadas: [], alertas: [] };
 
   try {
-    // 'default' — la sesión más crítica. Ante FAILED/STOPPED intentamos UN restart
-    // automático: si las credenciales del volumen siguen vivas reconecta en ~7s sin
-    // QR (self-heal); si están muertas pasa a SCAN_QR_CODE y desde ahí ya no se
-    // reintenta — la máquina de estados es el guard, no hace falta persistir "ya
-    // intentado" (un restart siempre saca la sesión de FAILED/STOPPED). No choca
-    // con el cron waha-restart, que solo actúa si está WORKING.
-    let statusDefault = await estadoSesion('default');
-    let autoRestart = null;
+    // ── 'default' — la sesión del bot central, la más crítica ──────────────────
+    // Incidente 24-sep-2026: WhatsApp desvinculó el dispositivo y WAHA se quedó en
+    // STARTING indefinidamente (no pasó a SCAN_QR_CODE); como STARTING se ignoraba,
+    // no hubo alerta. Tras recrear la sesión faltaba además el webhook. Por eso acá
+    // se revisa: que exista, que WAHA responda, que STARTING no se quede pegado y
+    // que el webhook al bot esté bien configurado.
+    let d = await detalleSesion('default');
+    if (d.status === 'WAHA_NO_RESPONDE') { // un reintento: puede ser un blip de red
+      await esperar(5000);
+      d = await detalleSesion('default');
+    }
 
-    if (statusDefault === 'FAILED' || statusDefault === 'STOPPED') {
+    // STARTING: un arranque sano llega a WORKING en ~7s. Si tras ~25s sigue
+    // arrancando, está pegado (el caso del 24-sep). Sin estado persistido.
+    if (d.status === 'STARTING') {
+      for (let i = 0; i < 5 && d.status === 'STARTING'; i++) {
+        await esperar(5000);
+        d = await detalleSesion('default');
+      }
+    }
+
+    // FAILED/STOPPED → UN restart automático: si las credenciales del volumen
+    // siguen vivas reconecta en ~7s sin QR (self-heal); si están muertas pasa a
+    // SCAN_QR_CODE y desde ahí ya no se reintenta — la máquina de estados es el
+    // guard. No choca con waha-restart, que solo actúa si está WORKING.
+    let autoRestart = null;
+    if (d.status === 'FAILED' || d.status === 'STOPPED') {
       autoRestart = 'intentado';
       try {
         const rr = await fetch(`${wahaUrl}/api/sessions/default/restart`, { method: 'POST', headers: waHeaders });
         if (rr.ok) {
           for (let i = 0; i < 5; i++) {
-            await new Promise((s) => setTimeout(s, 3000));
-            statusDefault = await estadoSesion('default');
-            if (statusDefault === 'WORKING' || statusDefault === 'SCAN_QR_CODE') break;
+            await esperar(3000);
+            d = await detalleSesion('default');
+            if (d.status === 'WORKING' || d.status === 'SCAN_QR_CODE') break;
           }
         }
-        autoRestart = `-> ${statusDefault}`;
+        autoRestart = `-> ${d.status}`;
         console.log(`[cron/waha-health] auto-restart 'default': ${autoRestart}`);
       } catch (e) {
         autoRestart = `error: ${e.message}`;
@@ -298,10 +330,35 @@ router.all('/waha-health', async (req, res) => {
       }
     }
 
-    resultados.revisadas.push({ session: 'default', status: statusDefault, autoRestart });
-    // STARTING es transitorio (típico justo tras un restart) — no es motivo de alerta.
-    if (statusDefault !== 'WORKING' && statusDefault !== 'UNKNOWN' && statusDefault !== 'STARTING') {
-      await sendWahaSessionAlert({ sessionName: 'default', status: statusDefault });
+    // Conectado pero sin webhook (o con otro secreto) = el bot no recibe nada.
+    let problemaWebhook = null;
+    if (d.status === 'WORKING') {
+      const hooks  = d.data?.config?.webhooks || [];
+      const alBot  = hooks.find((h) => (h.url || '').includes('/api/wa-agent/waha'));
+      const secret = process.env.WAHA_WEBHOOK_SECRET;
+      if (!alBot) problemaWebhook = 'la sesión no tiene configurado el webhook al bot (/api/wa-agent/waha)';
+      else if (!(alBot.events || []).includes('message')) problemaWebhook = 'el webhook al bot no escucha el evento "message"';
+      else if (secret && !(alBot.customHeaders || []).some((h) => h.name?.toLowerCase() === 'x-webhook-secret' && h.value === secret)) {
+        problemaWebhook = 'el X-Webhook-Secret del webhook no coincide con WAHA_WEBHOOK_SECRET de la API — el bot rechaza todos los mensajes';
+      }
+    }
+
+    const DETALLES = {
+      STARTING:         'Lleva más de 25s en STARTING (un arranque sano tarda ~7s). Suele ser que WhatsApp desvinculó el dispositivo y WAHA no lo detecta (incidente 24-sep). Revisa el screenshot en el panel de WAHA; si muestra "Scan to log in", actualiza WAHA (Redeploy en Railway) y re-vincula con código.',
+      SCAN_QR_CODE:     'WhatsApp pide volver a vincular. Pide un código con POST /api/default/auth/request-code {"phoneNumber":"573204409015"} y escríbelo en el teléfono del bot → Dispositivos vinculados → Vincular con número de teléfono.',
+      NO_EXISTE:        'La sesión "default" no existe en WAHA (pasa tras un redeploy si no persiste el volumen). Hay que crearla (POST /api/sessions), re-vincular con código y volver a ponerle el webhook con el secreto.',
+      WAHA_NO_RESPONDE: 'El servidor de WAHA (Railway, zensports-waha-v2) no respondió en 2 intentos. Revisa en Railway que el servicio esté Online.',
+      FAILED:           'La sesión falló y el reinicio automático no la recuperó.',
+    };
+
+    const statusDefault = problemaWebhook ? 'WEBHOOK_MAL' : d.status;
+    resultados.revisadas.push({ session: 'default', status: statusDefault, autoRestart, ...(problemaWebhook && { problemaWebhook }) });
+    if (statusDefault !== 'WORKING') {
+      await sendWahaSessionAlert({
+        sessionName: 'default',
+        status: statusDefault,
+        detalle: problemaWebhook ? `WhatsApp está conectado pero ${problemaWebhook}.` : (DETALLES[statusDefault] || null),
+      });
       resultados.alertas.push('default');
     }
 
@@ -339,7 +396,10 @@ router.all('/waha-health', async (req, res) => {
       }
     }
 
-    res.json({ success: true, ...resultados });
+    // Segundo canal, independiente del correo: si el bot central está mal
+    // respondemos 503 y cron-job.org (notificación de fallo activada) avisa por su lado.
+    const botCaido = resultados.alertas.includes('default');
+    res.status(botCaido ? 503 : 200).json({ success: !botCaido, ...resultados });
   } catch (err) {
     console.error('[cron/waha-health] error:', err.message);
     res.status(500).json({ success: false, error: err.message });

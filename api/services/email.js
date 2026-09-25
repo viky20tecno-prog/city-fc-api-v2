@@ -386,7 +386,8 @@ async function sendPushAlert({ title = 'ZenSports', message, tags = '' }) {
 
 // Alerta interna (no es un correo de marca para clientes) — avisa cuando una sesión de
 // WhatsApp (WAHA) deja de estar WORKING, para no depender de que alguien revise el dashboard.
-async function sendWahaSessionAlert({ sessionName, status, recuperada = false }) {
+// `detalle` (opcional): qué significa el estado y qué hacer — va en el correo y en el push.
+async function sendWahaSessionAlert({ sessionName, status, recuperada = false, detalle = null }) {
   const subject = recuperada
     ? `✅ WhatsApp recuperado — sesión "${sessionName}"`
     : `⚠️ WhatsApp desconectado — sesión "${sessionName}" (${status})`;
@@ -406,7 +407,7 @@ async function sendWahaSessionAlert({ sessionName, status, recuperada = false })
         : `La sesión "${sessionName}" no está WORKING`,
       body: recuperada
         ? `Confirmado directo contra la API de WAHA: el estado actual es <strong style="color:#00D084;">WORKING</strong>.`
-        : `Estado actual reportado por WAHA: <strong style="color:#EF4444;">${status}</strong>. Si es "${sessionName === 'default' ? 'default' : sessionName}", revisa antes de reconectar manualmente — reconectar repetidas veces puede empeorar el riesgo de bloqueo.`,
+        : `Estado actual reportado por WAHA: <strong style="color:#EF4444;">${status}</strong>. ${detalle ? `${detalle} ` : ''}Revisa antes de reconectar manualmente — reconectar repetidas veces puede empeorar el riesgo de bloqueo.`,
     })}`,
   });
 
@@ -416,7 +417,7 @@ async function sendWahaSessionAlert({ sessionName, status, recuperada = false })
       title: 'ZenSports WhatsApp',
       message: recuperada
         ? `Sesion "${sessionName}" volvio a WORKING.`
-        : `Sesion "${sessionName}" en ${status}.${status === 'SCAN_QR_CODE' ? ' Necesita re-pairing (escanear QR o codigo).' : ' Revisar antes de reconectar a mano.'}`,
+        : `Sesion "${sessionName}" en ${status}. ${detalle || (status === 'SCAN_QR_CODE' ? 'Necesita re-pairing (escanear QR o codigo).' : 'Revisar antes de reconectar a mano.')}`,
       tags: recuperada ? 'white_check_mark' : 'warning',
     }).catch(() => {}),
   ]);
