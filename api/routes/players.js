@@ -4,7 +4,7 @@ const { MESES } = require('../services/meses');
 const { mesesEnMora } = require('../services/mora');
 const { recalcularMensualidadesPorDescuento } = require('../services/descuentos');
 const { limiteDe } = require('../services/plan-limits');
-const { generarTokenPortal } = require('./publico');
+const { generarTokenPortal, construirRespuestaPortal } = require('./publico');
 const router = express.Router();
 
 // ── Helpers para corrección de cédula ───────────────────────────────────────
@@ -271,6 +271,64 @@ router.get('/estado-cuenta-lista', async (req, res) => {
     res.json({ success: true, mes: mesActualNum, anio: anioAct, total: data.length, data });
   } catch (err) {
     console.error('GET /players/estado-cuenta-lista:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/players/:cedula/estado-cuenta?club_id=city-fc — estado de cuenta de UN jugador
+// para el admin (buscador de la barra superior). Devuelve EXACTAMENTE la misma respuesta
+// que ve el acudiente en el Portal del Atleta (construirRespuestaPortal) — así lo que ve el
+// admin y lo que ve la familia nunca se desalinean — más lo que solo necesita el admin:
+// el mismo mensaje de WhatsApp de la lista de Plantillas, el link del portal y el
+// historial de pagos registrados.
+router.get('/:cedula/estado-cuenta', async (req, res) => {
+  try {
+    if (req.userRole === 'ENTRENADOR') {
+      return res.status(403).json({ success: false, error: 'Acceso restringido al administrador' });
+    }
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+    const jugador = await db.getPlayerByCedula(club.id, req.params.cedula);
+    if (!jugador) return res.status(404).json({ success: false, error: 'Jugador no encontrado' });
+
+    const cedula       = String(jugador.cedula);
+    const anioAct      = new Date().getFullYear();
+    const mesActualNum = new Date().getMonth() + 1;
+    const [portal, mens, torneos, pedidos, suspensiones, pagos, envio] = await Promise.all([
+      construirRespuestaPortal(club, club.slug, jugador),
+      db.getMensualidades(club.id, cedula),
+      db.getTorneos(club.id, cedula),
+      db.getPedidoUniformesByCedula(club.id, cedula),
+      db.getSuspensionesJugador(club.id, cedula),
+      db.getPagos(club.id, { cedula, limit: 200 }),
+      db.supabase.from('wa_log_envios').select('id').eq('club_id', club.id).eq('cedula', cedula)
+        .eq('tipo_mensaje', 'estado_cuenta').eq('mes', mesActualNum).eq('anio', anioAct).limit(1),
+    ]);
+
+    const texto = construirTextoEstadoCuenta(club, jugador, {
+      mensByCedula: { [cedula]: mens }, torneosByCedula: { [cedula]: torneos }, pedidosByCedula: { [cedula]: pedidos || [] },
+      anioAct, mesActualNum, pastGracePeriod: new Date().getDate() > 7, suspensiones: suspensiones || [],
+    });
+    const codigoPais = club.config?.codigo_pais || '57';
+    const digitos    = String(jugador.celular || '').replace(/\D/g, '');
+    const token      = generarTokenPortal(club.slug, cedula);
+
+    res.json({
+      ...portal,
+      atleta: { ...portal.atleta, celular: jugador.celular || '', familiar_emergencia: jugador.familiar_emergencia || '' },
+      portal_url: token ? `https://zensports.zenpra.ai/p/${club.slug}/${token}` : null,
+      wa: {
+        wa_link:    digitos ? `https://wa.me/${digitos.startsWith(codigoPais) ? digitos : codigoPais + digitos}` : null,
+        texto,
+        ya_enviado: (envio.data || []).length > 0,
+      },
+      pagos: (pagos || []).map(p => ({
+        id: p.id, fecha: p.created_at, monto: parseFloat(p.monto) || 0, concepto: p.concepto,
+        banco: p.banco, referencia: p.referencia, estado_revision: p.estado_revision,
+      })),
+    });
+  } catch (err) {
+    console.error('GET /players/:cedula/estado-cuenta:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });

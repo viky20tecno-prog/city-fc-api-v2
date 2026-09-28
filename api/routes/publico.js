@@ -170,13 +170,15 @@ async function construirRespuestaPortal(club, clubSlug, jugador) {
       if (m) {
         const estadoM = mapEstado(m.estado);
 
-        // Mes exento individualmente: saldo $0, sin fallback a cuota del club
-        if (estadoM === 'exento') {
+        // Mes exento individualmente, o NO_APLICA (anterior a la inscripción del jugador):
+        // saldo $0, sin fallback a la cuota del club. Antes NO_APLICA caía al cálculo de abajo
+        // y cada mes previo a la inscripción salía como deuda de una cuota completa.
+        if (estadoM === 'exento' || estadoM === 'no_aplica') {
           return {
             mes:           nombreMes,
             numero_mes:    numMes,
             anio:          anioActual,
-            estado:        'exento',
+            estado:        estadoM,
             valor_oficial: 0,
             valor_pagado:  parseFloat(m.valor_pagado) || 0,
             saldo:         0,
@@ -220,7 +222,7 @@ async function construirRespuestaPortal(club, clubSlug, jugador) {
     });
 
     const mesActual       = new Date().getMonth() + 1;
-    const pendientes      = resumen.filter(m => !['pagado','exento','suspendido'].includes(m.estado) && m.numero_mes <= mesActual);
+    const pendientes      = resumen.filter(m => !['pagado','exento','suspendido','no_aplica'].includes(m.estado) && m.numero_mes <= mesActual);
     const saldo_pendiente = esExento ? 0 : pendientes.reduce((s, m) => s + m.saldo, 0);
     const total_pagado    = esExento ? 0 : resumen.reduce((s, m) => s + m.valor_pagado, 0);
 
@@ -916,3 +918,4 @@ router.post('/asistencia/:slug/:eventoId', async (req, res) => {
 module.exports = router;
 module.exports.generarTokenAsistencia = generarTokenAsistencia;
 module.exports.generarTokenPortal = generarTokenPortal;
+module.exports.construirRespuestaPortal = construirRespuestaPortal;
