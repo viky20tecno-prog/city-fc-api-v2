@@ -32,7 +32,9 @@ router.post('/', async (req, res) => {
       lugar:           lugar       || null,
       equipo:          equipo      || null,
       monto_arbitraje: (tipo === 'PARTIDO' && monto_arbitraje) ? parseInt(monto_arbitraje) : null,
-      convocados:      (tipo === 'PARTIDO' && Array.isArray(convocados) && convocados.length > 0) ? convocados : null,
+      // Partidos: jugadores convocados. Clases de ingreso (CLASE_INGRESO): el jugador nuevo —
+      // así la asistencia de esa clase lo muestra solo a él.
+      convocados:      ((tipo === 'PARTIDO' || tipo === 'CLASE_INGRESO') && Array.isArray(convocados) && convocados.length > 0) ? convocados : null,
       created_by:      req.user?.id || null,
     });
     res.json({ success: true, data: evento });

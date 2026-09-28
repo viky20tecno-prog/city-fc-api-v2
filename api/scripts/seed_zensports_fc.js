@@ -9,6 +9,7 @@
 //   node scripts/seed_zensports_fc.js                       # dry-run: arma todo en memoria e imprime conteos + curva de mora
 //   DEMO_PASSWORD='...' node scripts/seed_zensports_fc.js --apply
 //   DEMO_PASSWORD='...' node scripts/seed_zensports_fc.js --apply --reset   # borra el club demo antes de sembrar
+//   node scripts/seed_zensports_fc.js --solo-nuevos --apply   # solo agrega los 3 inscritos recientes al club existente
 //
 // Todos los datos son inventados. Los datos de contacto son de acudientes ficticios. El
 // borrado total está en scripts/borrar_zensports_fc.js. Datos deterministas (PRNG con semilla).
@@ -24,6 +25,7 @@ const { borrarClubDemo, SLUG, EMAILS_DEMO } = require('./borrar_zensports_fc');
 
 const APLICAR = process.argv.includes('--apply');
 const RESET = process.argv.includes('--reset');
+const SOLO_NUEVOS = process.argv.includes('--solo-nuevos');
 const ASSETS = path.join(__dirname, 'assets_zensports_fc', 'out');
 const HOY = new Date();
 const ANIO = 2026;
@@ -454,7 +456,47 @@ function construir(clubId) {
     ['Calendario de la temporada 2026', 'calendario_temporada.pdf', 'Torneos y fechas clave del año', false],
   ].map(([nombre, archivo, descripcion, enviar], k) => ({ id: uuid(), club_id: clubId, nombre, url: `__STORAGE__/club-assets/${SLUG}/documentos/${archivo}`, descripcion, enviar_al_inscribirse: enviar, activo: true, orden: k + 1, created_at: col(ANIO, 1, 3) }));
 
+  const nuevos = nuevosInscritos(clubId);
+  jugadores.push(...nuevos.jugadores); mensualidades.push(...nuevos.mensualidades); pagos.push(...nuevos.pagos);
+
   return { jugadores, archivados, suspensiones, mensualidades, pagos, actividad, catalogo, pedidos, prendasPedido, torneos, calendario, asistencia, finanzas, empleados, nominaPagos, plantillas, waLog, documentos, equipos };
+}
+
+// 3 jugadores inscritos en los últimos días (sin PRNG, para no alterar el resto del seed):
+// son los que aparecen en Calendario → "Ingresos" para agendar sus 2 primeras clases.
+// Pagaron la mensualidad de septiembre al inscribirse; los meses previos son NO_APLICA.
+function nuevosInscritos(clubId) {
+  const NUEVOS = [
+    { cedula: '1042310551', nombre: 'Antonella', apellidos: 'Zapata Villa', nina: true, categoria: 'SUB-9', equipo: 'SUB-9 A', deporte: 'futbol', posicion: 'Mediocampista', nac: '2017-05-14', dias: 6,
+      acudiente: 'Paola Andrea Villa Rojas (Mamá)', cel: '3017845120', cel2: '3124459087', correo: 'paola.villa84@gmail.com', municipio: 'Medellín', barrio: 'Belén', dir: 'Carrera 76 # 30-45' },
+    { cedula: '1042310552', nombre: 'Simón', apellidos: 'Rendón Mesa', nina: false, categoria: 'MINIBASKET', equipo: 'MINIBASKET', deporte: 'baloncesto', posicion: 'Base', nac: '2016-02-03', dias: 4,
+      acudiente: 'Jorge Iván Rendón Toro (Papá)', cel: '3158820417', cel2: '3006631295', correo: 'jorge.rendon71@hotmail.com', municipio: 'Envigado', barrio: 'La Magnolia', dir: 'Calle 38 Sur # 42-18 Apto 402' },
+    { cedula: '1042310553', nombre: 'Luciana', apellidos: 'Ospina Cardona', nina: true, categoria: 'VOLEIBOL INFANTIL', equipo: 'VOLEIBOL INFANTIL', deporte: 'voleibol', posicion: 'Receptor', nac: '2015-09-22', dias: 2,
+      acudiente: 'Diana Patricia Cardona Gil (Mamá)', cel: '3206674031', cel2: '3113380952', correo: 'diana.cardona77@gmail.com', municipio: 'Itagüí', barrio: 'Santa María', dir: 'Calle 45 # 52-10' },
+  ];
+  const jugadores = []; const mensualidades = []; const pagos = [];
+  NUEVOS.forEach(n => {
+    const creado = new Date(HOY.getTime() - n.dias * 86400000);
+    const j = {
+      id: uuid(), club_id: clubId, cedula: n.cedula, nombre: n.nombre, apellidos: n.apellidos, tipo_id: 'TI',
+      celular: n.cel, correo_electronico: n.correo, instagram: '', lugar_de_nacimiento: 'Medellín, Antioquia', fecha_nacimiento: n.nac,
+      tipo_sangre: 'O+', eps: 'Sura', estatura: 1.32, peso: 29.5, municipio: n.municipio, barrio: n.barrio, direccion: n.dir,
+      familiar_emergencia: n.acudiente, celular_contacto: n.cel2, notas: `Inscripción nueva. Acudiente principal: ${n.acudiente}.`,
+      categoria: n.categoria, equipo: n.equipo, categorias: [{ categoria: n.categoria, equipo: n.equipo }], deporte: n.deporte,
+      posicion: n.posicion, numero_camiseta: null, activo: true, descuento_pct: 0, tipo_descuento: 'NA', created_at: creado.toISOString(), _nina: n.nina,
+    };
+    jugadores.push(j);
+    const pagoSep = { id: uuid(), club_id: clubId, player_id: j.id, cedula: j.cedula, monto: CUOTA, banco: 'Nequi', concepto: 'mensualidad',
+      referencia: `N${n.cedula.slice(-8)}`, estado_revision: 'aprobado_manual', url_comprobante: null, tipo_origen: 'MANUAL', created_at: creado.toISOString() };
+    pagos.push(pagoSep);
+    for (let m = 1; m <= 12; m++) {
+      const antes = m < MES_ACTUAL, actual = m === MES_ACTUAL;
+      mensualidades.push({ id: uuid(), club_id: clubId, player_id: j.id, cedula: j.cedula, anio: ANIO, mes: MESES[m - 1], numero_mes: m,
+        valor_oficial: antes ? 0 : CUOTA, valor_pagado: actual ? CUOTA : 0, saldo_pendiente: antes || actual ? 0 : CUOTA,
+        estado: antes ? 'NO_APLICA' : actual ? 'AL_DIA' : 'PENDIENTE', penalidad: 0, fecha_ultima_actualizacion: creado.toISOString() });
+    }
+  });
+  return { jugadores, mensualidades, pagos };
 }
 
 function configClub(logoUrl, qrUrl, catalogo, equipos) {
@@ -524,6 +566,7 @@ async function main() {
   console.log(`Supabase: ${url} — ${APLICAR ? 'MODO APLICAR (va a escribir)' : 'dry-run (no escribe nada)'}`);
 
   const { data: existente } = await sb.from('clubs').select('id').eq('slug', SLUG).maybeSingle();
+  if (SOLO_NUEVOS) { await agregarNuevos(sb, existente); return; }
   if (existente && !RESET) { console.error(`El club ${SLUG} ya existe. Usá --reset para borrarlo y volver a sembrar.`); process.exit(1); }
 
   const clubId = uuid();
@@ -598,6 +641,24 @@ async function main() {
   await insertar(sb, 'club_documents', d.documentos);
 
   console.log(`\nListo. Entrá a https://zensports.zenpra.ai/login con ${OWNER_EMAIL}.`);
+}
+
+// --solo-nuevos: agrega a un club demo YA sembrado los 3 inscritos recientes (idempotente:
+// salta las cédulas que ya existan), sin borrar ni resembrar nada más.
+async function agregarNuevos(sb, club) {
+  if (!club) { console.error(`El club ${SLUG} no existe: sembralo primero.`); process.exit(1); }
+  const n = nuevosInscritos(club.id);
+  const { data: ya } = await sb.from('players').select('cedula').eq('club_id', club.id).in('cedula', n.jugadores.map(j => j.cedula));
+  const existentes = new Set((ya || []).map(x => x.cedula));
+  const jugadores = n.jugadores.filter(j => !existentes.has(j.cedula));
+  console.log(`Nuevos inscritos por agregar: ${jugadores.length} (${existentes.size} ya estaban)`);
+  if (!APLICAR || jugadores.length === 0) { if (!APLICAR) console.log('Dry-run: agregá --apply.'); return; }
+  const ced = new Set(jugadores.map(j => j.cedula));
+  for (const j of jugadores) j.foto_url = await subir(sb, 'player-photos', `${SLUG}/${j.cedula}.png`, await avatar(j), 'image/png');
+  const limpio = (o) => Object.fromEntries(Object.entries(o).filter(([k]) => !k.startsWith('_')));
+  await insertar(sb, 'players', jugadores.map(limpio));
+  await insertar(sb, 'mensualidades', n.mensualidades.filter(m => ced.has(m.cedula)));
+  await insertar(sb, 'pagos', n.pagos.filter(p => ced.has(p.cedula)));
 }
 
 if (require.main === module) {
