@@ -222,6 +222,15 @@ async function construirRespuestaPortal(club, clubSlug, jugador) {
     });
 
     const mesActual       = new Date().getMonth() + 1;
+    // Meses del año que todavía no llegan y no tienen pagos: no son deuda ni "pendiente",
+    // todavía no se causan — estado neutro 'proximo' y saldo $0. Si alguien pagó por
+    // adelantado, el mes conserva su estado real (pagado / parcial).
+    resumen.forEach(m => {
+      if (m.numero_mes > mesActual && m.valor_pagado === 0 && (m.estado === 'pendiente' || m.estado === 'vencido')) {
+        m.estado = 'proximo';
+        m.saldo  = 0;
+      }
+    });
     const pendientes      = resumen.filter(m => !['pagado','exento','suspendido','no_aplica'].includes(m.estado) && m.numero_mes <= mesActual);
     const saldo_pendiente = esExento ? 0 : pendientes.reduce((s, m) => s + m.saldo, 0);
     const total_pagado    = esExento ? 0 : resumen.reduce((s, m) => s + m.valor_pagado, 0);
