@@ -4,3 +4,4 @@
 !.env.example
 node_modules
 .codegraph/
+api/scripts/assets_zensports_fc/out/

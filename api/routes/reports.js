@@ -1,5 +1,6 @@
 const express = require('express');
 const db = require('../services/db');
+const { evolucionMora } = require('../services/mora');
 const router = express.Router();
 
 router.get('/summary', async (req, res) => {
@@ -245,5 +246,29 @@ function evaluarSalud(pct) {
   if (pct >= 40) return 'REGULAR';
   return 'CRITICA';
 }
+
+// GET /api/reports/evolucion-mora?anio=2026 — % de jugadores en mora al cierre de cada
+// mes (ver services/mora.js#evolucionMora). Si los pagos no cuadran con las mensualidades
+// responde confiable:false y el dashboard no muestra la gráfica.
+router.get('/evolucion-mora', async (req, res) => {
+  try {
+    const anio = parseInt(req.query.anio) || new Date().getFullYear();
+    const club = await db.getClubBySlug(req.club_id);
+    if (!club) return res.status(404).json({ success: false, error: 'Club no encontrado' });
+
+    const [jugadores, mensualidades, pagos, suspensiones] = await Promise.all([
+      db.getPlayers(club.id),
+      db.getMensualidades(club.id),
+      db.getPagosMensualidadAprobados(club.id),
+      db.getSuspensiones(club.id),
+    ]);
+    const diasGracia = Number(club.config?.dias_gracia_mora) || 7;
+    const data = evolucionMora({ mensualidades, pagos, jugadores, suspensiones, anio, diasGracia });
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error('[reports/evolucion-mora]', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 module.exports = router;

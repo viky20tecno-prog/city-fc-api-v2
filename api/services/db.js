@@ -555,6 +555,27 @@ async function createArbitrajePago(pagoData) {
 /**
  * Mensualidades pendientes de un jugador (para procesar pagos)
  */
+// Todos los pagos aprobados de mensualidad del club (paginado — getPagos corta en 500).
+// Columnas mínimas: los usa la reconstrucción de "evolución de la mora" por fecha de pago.
+async function getPagosMensualidadAprobados(club_id) {
+  const PAGE = 1000;
+  let all = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from('pagos')
+      .select('cedula, monto, concepto, estado_revision, created_at')
+      .eq('club_id', club_id)
+      .eq('estado_revision', 'aprobado_manual')
+      .like('concepto', 'mensualidad%')
+      .order('created_at', { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    all = all.concat(data || []);
+    if (!data || data.length < PAGE) break;
+  }
+  return all;
+}
+
 async function getMensualidadesPendientes(club_id, cedula) {
   const [{ data, error }, { data: susp }] = await Promise.all([
     supabase
@@ -1737,6 +1758,7 @@ module.exports = {
   updateTorneo,
   createPago,
   getPagos,
+  getPagosMensualidadAprobados,
   getReferenciasDuplicadas,
   getHashesDuplicados,
   getPagoById,
