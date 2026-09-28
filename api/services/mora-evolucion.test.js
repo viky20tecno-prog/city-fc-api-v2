@@ -72,3 +72,19 @@ test('confiable = false cuando los pagos no cuadran con valor_pagado (estados im
   assert.equal(evolucionMora({ ...args, pagos: [] }).confiable, false);
   assert.equal(evolucionMora({ ...args, pagos: [pago('A', 100, '2026-01-03T15:00:00Z')] }).confiable, true);
 });
+
+test('pago a tiempo: lo pagado dentro del mismo mes, aplicando pagos al mes más antiguo', () => {
+  const r = evolucionMora({
+    ...base,
+    jugadores: [{ cedula: 'A' }, { cedula: 'B' }],
+    mensualidades: [mens('A', 1), mens('A', 2), mens('A', 3), mens('B', 1), mens('B', 2), mens('B', 3)],
+    pagos: [
+      // A paga enero tarde (en febrero) → febrero lo cubre el mismo pago de 200
+      pago('A', 200, '2026-02-10T15:00:00Z'),
+      pago('A', 100, '2026-03-02T15:00:00Z'),
+      // B paga todo a tiempo, un abono parcial en marzo
+      pago('B', 100, '2026-01-05T15:00:00Z'), pago('B', 100, '2026-02-05T15:00:00Z'), pago('B', 50, '2026-03-05T15:00:00Z'),
+    ],
+  });
+  assert.deepEqual(r.meses.map(m => [m.causado, m.a_tiempo, m.pct_a_tiempo]), [[200, 100, 50], [200, 200, 100], [200, 150, 75]]);
+});

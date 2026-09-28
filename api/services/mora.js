@@ -23,7 +23,8 @@ const MESES_NOMBRE = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
 const ESTADOS_NO_CAUSADOS = new Set(['EXENTO', 'SUSPENDIDO', 'NO_APLICA']);
 const OFFSET_COL_MS = 5 * 3600 * 1000; // Colombia = UTC-5, sin horario de verano
 
-// % de jugadores activos que estaban en mora AL CIERRE de cada mes del año, desde
+// % de jugadores activos que estaban en mora AL CIERRE de cada mes del año (y cuánto de lo
+// causado en cada mes se pagó dentro del mismo mes — "pago a tiempo"), desde
 // enero hasta el mes en curso. Reconstruye la historia cruzando lo causado (valor_oficial
 // de los meses ≤ m) contra lo pagado hasta esa fecha (pagos aprobados de mensualidad por
 // created_at): un jugador que pagó enero en febrero cuenta como moroso al cierre de enero
@@ -76,16 +77,25 @@ function evolucionMora({ mensualidades, pagos, jugadores, suspensiones = [], ani
     const esActual = m === mesActual && hoyCol.getUTCFullYear() === anioNum;
     const corte = esActual ? hoy.getTime() : Date.UTC(anioNum, m, 1) + OFFSET_COL_MS;
     const ultimoMesCausado = esActual && !pasoGracia ? m - 1 : m;
-    let total = 0, morosos = 0;
+    let total = 0, morosos = 0, causadoMes = 0, aTiempo = 0;
     Object.entries(causadoPorJugador).forEach(([cedula, filas]) => {
+      const pagado = (pagosPorJugador[cedula] || []).filter(p => p.t < corte).reduce((s, p) => s + p.monto, 0);
+      // Pago a tiempo del mes m: lo que alcanzó a cubrir el mes m con los pagos hechos hasta
+      // su cierre, aplicando primero a los meses anteriores (igual que al aprobar un pago).
+      const valorMes = filas.filter(f => f.mesNum === m).reduce((s, f) => s + f.valor, 0);
+      const anteriores = filas.filter(f => f.mesNum < m).reduce((s, f) => s + f.valor, 0);
+      causadoMes += valorMes;
+      aTiempo += Math.min(valorMes, Math.max(0, pagado - anteriores));
+
       const causado = filas.filter(f => f.mesNum <= ultimoMesCausado).reduce((s, f) => s + f.valor, 0);
       if (causado <= 0) return;
       total++;
-      const pagado = (pagosPorJugador[cedula] || []).filter(p => p.t < corte).reduce((s, p) => s + p.monto, 0);
       if (causado - pagado > 1) morosos++;
     });
     meses.push({ numero_mes: m, mes: MESES_NOMBRE[m - 1], total, morosos,
-      porcentaje: total ? Math.round((morosos / total) * 100) : 0 });
+      porcentaje: total ? Math.round((morosos / total) * 100) : 0,
+      causado: causadoMes, a_tiempo: aTiempo,
+      pct_a_tiempo: causadoMes ? Math.round((aTiempo / causadoMes) * 100) : 0 });
   }
 
   const confiable = totalValorPagado > 0 && Math.abs(totalPagos - totalValorPagado) <= totalValorPagado * 0.1;
