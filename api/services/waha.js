@@ -16,9 +16,33 @@ function wahaHeaders() {
   return h;
 }
 
+// Chat por el que escribió cada número en este request (ej. "134479737798743@lid"). Con el
+// motor NOWEB, si el mensaje llegó por el @lid y la respuesta sale al @c.us, el celular del
+// usuario no refresca la conversación abierta (hay que salir y volver a entrar para verla) —
+// verificado 29 sep 2026. Responder por el mismo chat de origen lo evita.
+const chatOrigenPorNumero = new Map();
+function recordarChatOrigen(numero, chatId) {
+  if (!numero || !chatId || !String(chatId).includes('@')) return;
+  if (chatOrigenPorNumero.size > 500) chatOrigenPorNumero.clear();
+  chatOrigenPorNumero.set(String(numero).replace(/\D/g, ''), chatId);
+}
+
 function wahaChatId(to) {
+  if (to.includes('@')) return to;
   const numOnly = to.replace(/\D/g, '');
-  return to.includes('@') ? to : `${numOnly.startsWith('57') ? numOnly : '57' + numOnly}@c.us`;
+  return chatOrigenPorNumero.get(numOnly)
+    || `${numOnly.startsWith('57') ? numOnly : '57' + numOnly}@c.us`;
+}
+
+// Marca el mensaje como leído (chulitos azules) y muestra "escribiendo…" mientras el agente
+// arma la respuesta — sin esto pasan varios segundos sin ninguna señal y se siente trabado.
+// Nunca bloquea ni rompe el flujo: tope de 2.5s y errores ignorados.
+async function avisarRecibido(chatId, session) {
+  const wahaUrl = process.env.WAHA_URL;
+  if (!wahaUrl || !chatId) return;
+  const body = JSON.stringify({ chatId, session: session || process.env.WAHA_SESSION || 'default' });
+  const llamar = (ruta) => fetch(`${wahaUrl}/api/${ruta}`, { method: 'POST', headers: wahaHeaders(), body, signal: AbortSignal.timeout(2500) }).catch(() => {});
+  await Promise.all([llamar('sendSeen'), llamar('startTyping')]);
 }
 
 async function sendWAHA(to, text, session) {
@@ -42,4 +66,4 @@ async function sendWAHA(to, text, session) {
   return data;
 }
 
-module.exports = { sendWAHA, wahaChatId, wahaHeaders };
+module.exports = { sendWAHA, wahaChatId, wahaHeaders, recordarChatOrigen, avisarRecibido };

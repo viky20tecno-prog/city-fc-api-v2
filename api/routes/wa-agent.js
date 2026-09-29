@@ -5,7 +5,7 @@ const Anthropic = require('@anthropic-ai/sdk');
 const db = require('../services/db');
 const { mesesEnMora } = require('../services/mora');
 const { generarTokenAsistencia, generarTokenPortal } = require('./publico');
-const { sendWAHA } = require('../services/waha');
+const { sendWAHA, recordarChatOrigen, avisarRecibido } = require('../services/waha');
 const { tipoMedia, esTexto, esMensajeVacio } = require('../services/wahaMensaje');
 
 const DIAS_ES  = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
@@ -1835,6 +1835,8 @@ router.post('/waha', webhookLimiter, async (req, res) => {
       const resolved = await resolverLid(rawFrom);
       if (resolved) from = resolved;
     }
+    // Responder por el mismo chat por el que escribió (ver services/waha.js#recordarChatOrigen)
+    recordarChatOrigen(from, rawFrom);
 
     // Capa 2: Supabase dedup — atómico para usuarios nuevos y existentes
     if (msgId) {
@@ -1878,6 +1880,9 @@ router.post('/waha', webhookLimiter, async (req, res) => {
         console.warn('[wa-agent] dedup error (ignorado):', dedupErr.message);
       }
     }
+
+    // Ya pasó el dedup: es un mensaje real por procesar → leído + "escribiendo…"
+    await avisarRecibido(rawFrom);
 
     // ── Mensajes no-texto (imagen, audio, video, documento) ──────────────────
     if (!isText) {
