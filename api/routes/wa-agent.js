@@ -6,6 +6,7 @@ const db = require('../services/db');
 const { mesesEnMora } = require('../services/mora');
 const { generarTokenAsistencia, generarTokenPortal } = require('./publico');
 const { sendWAHA } = require('../services/waha');
+const { tipoMedia, esTexto, esMensajeVacio } = require('../services/wahaMensaje');
 
 const DIAS_ES  = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
 const MESES_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -1747,12 +1748,24 @@ async function resolverLid(lidId) {
   try {
     const headers = { 'Content-Type': 'application/json' };
     if (apiKey) headers['X-Api-Key'] = apiKey;
+    // 1) Endpoint de LIDs: devuelve el número real en `pn` ("573123310283@c.us"). Es el único
+    //    que funciona con el motor NOWEB — ahí /api/contacts devuelve el mismo LID en `id`
+    //    (verificado 29 sep 2026).
+    try {
+      const rl = await fetch(`${wahaUrl}/api/${session}/lids/${encodeURIComponent(lidId)}`, { headers });
+      if (rl.ok) {
+        const dl = await rl.json();
+        const pn = String(dl?.pn || '').replace(/\D/g, '');
+        if (pn) return pn;
+      }
+    } catch { /* seguir con /api/contacts */ }
+    // 2) Respaldo (WEBJS): /api/contacts — solo sirve si `id` ya es un número real (@c.us).
     const res  = await fetch(`${wahaUrl}/api/contacts?contactId=${encodeURIComponent(lidId)}&session=${session}`, { headers });
     if (!res.ok) return null;
     const data = await res.json();
     // OJO: data.number NO es el teléfono real — es el id numérico del propio LID
     // (ej. "134479737798743"). El número real viene en data.id ("573123310283@c.us").
-    if (data?.id) {
+    if (data?.id && String(data.id).endsWith('@c.us')) {
       const numero = String(data.id).replace(/\D/g, '');
       if (numero) return numero;
     }
@@ -1788,6 +1801,11 @@ router.post('/waha', webhookLimiter, async (req, res) => {
     if (SYSTEM_NOTIFICATION_TYPES.has(payload?._data?.type)) {
       return res.status(200).json({ status: 'ignored_system_notification' });
     }
+    // Ni texto ni archivo: avisos internos que el motor NOWEB entrega como 'message' sin tipo
+    // (protocolo, cifrado, reacciones). Nadie escribió nada — no se contesta.
+    if (esMensajeVacio(payload)) {
+      return res.status(200).json({ status: 'ignored_empty' });
+    }
 
     // Mensajes viejos que WAHA reenvía como si fueran nuevos — típico al reconectar una sesión
     // (backlog acumulado offline, o sync de historial inicial). Contestarlos todos de golpe es
@@ -1801,9 +1819,9 @@ router.post('/waha', webhookLimiter, async (req, res) => {
     }
 
     const msgId   = payload.id;
-    const msgType = payload.type || 'chat';
-    // WAHA CORE usa 'chat' para texto; otros tipos: 'image', 'audio', 'video', 'document', 'ptt'
-    const isText  = (msgType === 'chat' || msgType === 'text') && !!payload?.body;
+    // Texto = trae cuerpo y NO trae archivo (una foto con descripción no es texto). Ver
+    // services/wahaMensaje.js: sirve para WEBJS y NOWEB.
+    const isText  = esTexto(payload);
 
     // Capa 1: in-memory dedup (misma instancia Vercel, sincrónico)
     if (isDuplicate(msgId)) {
@@ -1867,7 +1885,7 @@ router.post('/waha', webhookLimiter, async (req, res) => {
       // WAHA CORE no siempre manda payload.type en la raíz — el tipo real vive en
       // payload._data.type. Sin este fallback, mediaType queda vacío y las imágenes
       // nunca se reconocen como comprobante.
-      const mediaType    = payload?.type || payload?._data?.type || '';
+      const mediaType    = tipoMedia(payload);
       let mediaUrl        = payload?.media?.url || payload?.fileUrl || null;
 
       // WAHA a veces devuelve la URL del archivo apuntando a su propio localhost
