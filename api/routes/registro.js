@@ -44,7 +44,7 @@ function withTimeout(promise, ms, label) {
 }
 
 router.post('/', async (req, res) => {
-  const { nombre_club, ciudad, email, password, nombre_admin, celular_admin, color, codigo_pais, deporte, deportes, plan } = req.body || {};
+  const { nombre_club, ciudad, email, password, nombre_admin, celular_admin, color, codigo_pais, deporte, deportes, plan, recomendado_por } = req.body || {};
 
   // Normalizar deportes: acepta array nuevo o string legacy
   const deportesArray = Array.isArray(deportes) && deportes.length > 0
@@ -139,6 +139,10 @@ router.post('/', async (req, res) => {
             trial_ends_at:     esFree ? null : new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
             deporte:           deportesArray[0],
             deportes:          deportesArray,
+            // Plan de referidos: texto libre del registro. ZenSports lo enlaza al
+            // club real desde el admin (referido_por_slug) — el premio depende de eso.
+            ...(typeof recomendado_por === 'string' && recomendado_por.trim()
+              ? { recomendado_por: recomendado_por.trim().slice(0, 80) } : {}),
             // Debe coincidir con PLAN_MODULES en admin/lib/plan-modules.ts —
             // ese archivo es la fuente de verdad de qué trae cada plan
             // (repos separados, sin import compartido, así que se replica a

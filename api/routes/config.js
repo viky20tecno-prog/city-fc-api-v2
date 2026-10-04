@@ -93,7 +93,14 @@ router.patch('/', async (req, res) => {
         return { nombre: String(p), precio: typeof found === 'object' ? (found.precio || 0) : 0 };
       });
     }
-    const updatedConfig = { ...club.config, ...req.body };
+    // Campos que solo cambia ZenSports (admin / webhook de Bold), nunca el club:
+    // sin esto, un admin de club podía mandar { plan: 'scale', modulos: {...} }
+    // y activarse un plan sin pagar, o darse meses gratis / cupo de fundador.
+    const PROTEGIDOS = ['plan', 'modulos', 'trial_ends_at', 'fundador', 'concurso', 'meses_gratis',
+                        'recomendado_por', 'referido_por_slug', 'referidos_premiados', 'waha_session', 'emails_enviados'];
+    const body = { ...req.body };
+    for (const k of PROTEGIDOS) delete body[k];
+    const updatedConfig = { ...club.config, ...body };
 
     const { error: updateErr } = await supabase
       .from('clubs').update({ config: updatedConfig }).eq('slug', club_id);
