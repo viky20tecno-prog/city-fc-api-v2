@@ -27,4 +27,16 @@ router.post('/send-reset-email', checkSecret, async (req, res) => {
   }
 });
 
+// POST /api/internal/send-email — envío genérico para el panel admin (cuenta de
+// cobro, recordatorios de trial, reset de contraseña de clubes). Las credenciales
+// de Zoho viven solo acá, el admin no las tiene.
+router.post('/send-email', checkSecret, async (req, res) => {
+  const { to, subject, html } = req.body || {};
+  if (!to || !subject || !html) return res.status(400).json({ error: 'to, subject y html requeridos' });
+
+  const result = await emailService.sendEmail({ to, subject, html });
+  if (!result.ok) return res.status(502).json({ error: result.error || result.reason || 'No se pudo enviar el correo' });
+  res.json({ ok: true });
+});
+
 module.exports = router;
