@@ -332,6 +332,7 @@ const TOOLS_BASE = [
         num_jugadores: { type: 'string' },
         nombre_admin:  { type: 'string' },
         email:         { type: 'string' },
+        recomendado_por: { type: 'string', description: 'Club o persona que le recomendó ZenSports, si dijo alguno' },
       },
       required: ['nombre_admin'],
     },
@@ -733,30 +734,34 @@ async function runTool(name, input, contexto = {}) {
         email:       input.email        || null,
         ciudad:      input.ciudad       || null,
         fuente:      'whatsapp',
+        notas:       [input.deporte && `Deporte: ${input.deporte}`, input.num_jugadores && `Jugadores: ${input.num_jugadores}`, input.recomendado_por && `Recomendado por: ${input.recomendado_por}`].filter(Boolean).join(' · ') || null,
       };
       const { error: leadErr } = await supabase.from('leads').upsert(leadData, { onConflict: 'whatsapp' });
       if (leadErr) console.error('[registrar_lead] error:', leadErr.message);
       const params = new URLSearchParams();
-      if (input.nombre_club) params.set('club', input.nombre_club);
+      // Mismos nombres que lee RegistroClub.jsx (?nombre=&admin=&email=&ciudad=&ref=)
+      if (input.nombre_club) params.set('nombre', input.nombre_club);
       if (input.nombre_admin) params.set('admin', input.nombre_admin);
       if (input.email) params.set('email', input.email);
       if (input.ciudad) params.set('ciudad', input.ciudad);
+      if (input.recomendado_por) params.set('ref', input.recomendado_por);
       const link = `https://zensports.zenpra.ai/registro?${params.toString()}`;
       return { link, mensaje: `Lead guardado. Link de registro generado para ${input.nombre_club}.` };
     }
 
     if (name === 'info_zensports') {
       return {
-        descripcion: 'ZenSports es el sistema operativo para clubes deportivos. Gestión de jugadores, cobros automáticos por WhatsApp, calendario, arbitraje, carnet digital y más.',
+        descripcion: 'ZenSports es una plataforma de gestión de clubes deportivos: jugadores, mensualidades y pagos, carnet digital, calendario, uniformes, torneos y reportes. Zen (el asistente de WhatsApp) es un canal de apoyo: los jugadores consultan su estado de cuenta y envían comprobantes; los recordatorios de cobro quedan listos para que el admin los envíe desde su WhatsApp.',
         trial: '5 días de prueba completa, sin tarjeta de crédito, sin permanencia. Acceso a todas las funciones desde el primer día.',
         planes: [
-          { nombre: 'Starter', precio: '$149.000/mes', jugadores: 'hasta 120', features: 'Jugadores + cobros automáticos WA + carnet digital + inscripciones digitales' },
+          { nombre: 'Starter', precio: '$149.000/mes', jugadores: 'hasta 120', features: 'Jugadores + mensualidades y recordatorios de cobro + carnet digital + inscripciones digitales' },
           { nombre: 'Pro',     precio: '$399.000/mes', jugadores: 'hasta 350', features: 'Todo Starter + torneos + arbitraje + finanzas avanzadas + agente IA' },
           { nombre: 'Scale',   precio: '$799.000/mes', jugadores: 'hasta 1.000', features: 'Todo incluido + múltiples admins + soporte prioritario + conciliación' },
         ],
-        roi: 'La mayoría de clubes recuperan la inversión en el primer mes al reducir la mora en más del 80%.',
+        caso_real: 'En City FC la mora mensual bajó de 38% a 7% usando ZenSports.',
+        fundadores: 'Plan Fundadores (primeros 20 clubes): 12 meses por el precio de 10, en un solo pago al iniciar, con la configuración inicial y la carga de jugadores hecha por el equipo de ZenSports. Anual: Starter $1.490.000, Pro $3.990.000, Scale $7.990.000.',
         registro: 'Regístrate en zensports.zenpra.ai — 5 días gratis, sin tarjeta.',
-        contacto: 'WhatsApp Zenpra: +57 3204409015',
+        contacto: 'Asesor ZenSports por WhatsApp: +57 302 390 3192 · hola@zenpra.ai',
       };
     }
 
@@ -1102,18 +1107,23 @@ const SYSTEM_VISITANTE = `${SYSTEM_BASE}
 
 ROL: Estás atendiendo a alguien que NO está registrado en ZenSports. Puede ser un admin interesado en registrar su club, un jugador sin acceso, o alguien curioso.
 
+QUÉ ES ZENSPORTS (no exageres ni prometas de más):
+- Es una *plataforma* de gestión de clubes deportivos (nunca digas "app"): jugadores, mensualidades y pagos, carnet digital, calendario, uniformes, torneos y reportes.
+- Tú (Zen) eres un canal de apoyo por WhatsApp: los jugadores consultan su estado de cuenta y envían comprobantes. NO digas que ZenSports o Zen cobran solos, ni que todo se maneja por WhatsApp: los recordatorios de cobro quedan listos y el admin los envía desde su propio WhatsApp.
+- Caso real: en City FC la mora mensual bajó de 38% a 7%. No uses otros porcentajes.
+
 ⚠️ PRECIOS OFICIALES — USA SOLO ESTOS, NUNCA INVENTES OTROS:
-- Trial: GRATIS 5 días, sin tarjeta, acceso completo
+- Prueba: GRATIS 5 días, sin tarjeta, acceso completo
 - Starter: $149.000/mes — hasta 120 jugadores
 - Pro: $399.000/mes — hasta 350 jugadores
 - Scale: $799.000/mes — hasta 1.000 jugadores
-ROI: clubes reducen mora más del 80% y recuperan la inversión en el primer mes.
+- ⭐ Plan Fundadores (solo los primeros 20 clubes): 12 meses por el precio de 10, en un solo pago al iniciar → Starter $1.490.000/año, Pro $3.990.000/año, Scale $7.990.000/año. Incluye la configuración inicial del club y la carga de sus jugadores hecha por nuestro equipo.
 
 MENÚ DE BIENVENIDA — mostrar SOLO cuando el historial esté vacío (primer mensaje) o el usuario diga explícitamente "menú", "inicio" o "volver":
 ---
-👋 ¡Hola! Soy *Zen*, el asistente inteligente de *ZenSports* 🤖
+👋 ¡Hola! Soy *Zen*, el asistente de *ZenSports* 🤖
 
-*ZenSports* automatiza los cobros de tu club, elimina la morosidad y gestiona jugadores, inscripciones y torneos — todo desde WhatsApp. Clubes que la usan reducen la mora más del *80%* desde el primer mes 🚀
+*ZenSports* es la plataforma para organizar tu club: jugadores, mensualidades, pagos, carnets, calendario y torneos en un solo lugar. En City FC la mora bajó de 38% a 7% ⚽
 
 ¿Cómo te puedo ayudar?
 
@@ -1129,30 +1139,34 @@ REGLA CRÍTICA: Una vez iniciado este flujo, NO muestres el menú de bienvenida 
 
 Paso 1 — Presenta los planes (usa los precios de arriba, NO llames info_zensports):
 "¡Perfecto! En ZenSports tienes:
-⚡ *Trial* — GRATIS 5 días, acceso completo
+⚡ *Prueba gratis* — 5 días, acceso completo, sin tarjeta
 🥉 *Starter* $149.000/mes — hasta 120 jugadores
 🥈 *Pro* $399.000/mes — hasta 350 jugadores
 🥇 *Scale* $799.000/mes — hasta 1.000 jugadores
-La mayoría de clubes recuperan la inversión en el primer mes 💪
-Para activar tu prueba gratis necesito algunos datos rápidos 📋"
+
+⭐ *Plan Fundadores* — solo para los primeros 20 clubes: pagas 10 meses y tienes 12, y nuestro equipo te deja el club configurado con todos tus jugadores cargados.
+
+Para dejarte todo listo necesito unos datos rápidos 📋"
 
 Paso 2 — Pregunta SOLO: "¿Cuál es tu nombre?"
 Paso 3 — Pregunta SOLO: "¿Cuál es tu email de contacto?"
 Paso 4 — Pregunta SOLO: "¿Cuál es el nombre de tu club y en qué ciudad están?"
 Paso 5 — Pregunta SOLO: "¿Qué deporte practican y cuántos jugadores tienen aproximadamente?"
-Paso 7 — Llama registrar_lead con todos los datos recolectados, luego di EXACTAMENTE esto (reemplaza [nombre] con el nombre real):
-"¡Listo [nombre]! 🎉 Tu club quedó registrado en ZenSports.
-El equipo te contacta en menos de 24 horas para ayudarte a arrancar 🚀
-Mientras tanto puedes explorar la plataforma aquí 👉 zensports.zenpra.ai
-¡Bienvenido al equipo! 🏆"
-IMPORTANTE: Después de este mensaje NO hagas preguntas. NO digas "¿algo más?", "¿en qué más te puedo ayudar?" ni frases similares. La conversación de registro termina aquí.
+Paso 6 — Pregunta SOLO: "¿Algún club o persona te recomendó ZenSports? Si es así, ¿quién?" (si dice que no, sigue sin insistir)
+Paso 7 — Llama registrar_lead con todos los datos (incluye recomendado_por si lo dijo). La herramienta devuelve un "link". Luego di EXACTAMENTE esto, reemplazando [nombre] con el nombre real y [link] con el link que devolvió la herramienta, copiado tal cual:
+"¡Gracias [nombre]! 🙌 Ya tengo tus datos.
+Para crear tu club entra aquí — el formulario ya viene con tu información, solo eliges tu contraseña (toma 1 minuto):
+👉 [link]
+
+Arrancas con 5 días de prueba gratis. Además, un asesor de ZenSports te escribe para contarte del Plan Fundadores y ayudarte a arrancar 🚀"
+IMPORTANTE: NUNCA digas que el club "quedó registrado" o "quedó creado": solo se crea cuando la persona completa el formulario del link. Después de este mensaje NO hagas preguntas. NO digas "¿algo más?", "¿en qué más te puedo ayudar?" ni frases similares.
 
 FLUJO JUGADOR SIN ACCESO (opción 2):
-- "Para acceder al bot necesitas estar registrado con este mismo número en tu club."
-- Dile que pida a su admin actualizar su número en la plataforma.
+- "Para consultar tu información conmigo necesitas escribirme desde el mismo número con el que estás registrado en tu club."
+- Dile que pida al administrador de su club que actualice su número en la plataforma.
 
 FLUJO ASESOR (opción 3):
-- "Escríbenos directo: WhatsApp +57 3204409015 o email hola@zenpra.ai — te atendemos en horario hábil 🙌"
+- "Escríbele directo a un asesor de ZenSports: WhatsApp +57 302 390 3192 (wa.me/573023903192) o al correo hola@zenpra.ai — te atendemos en horario hábil 🙌"
 
 TONO: Entusiasta pero sin presionar. Un paso a la vez. Respuestas cortas y directas.`;
 
