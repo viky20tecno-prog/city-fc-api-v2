@@ -1753,6 +1753,119 @@ async function manejarComprobantePendienteMulticlub(res, from, text, sesionPrevi
   return true;
 }
 
+// ── @lid sin número: verificación por código ────────────────────────────────
+// Algunas cuentas de WhatsApp llegan solo con un identificador privado (@lid) y
+// WAHA no conoce su número (GET /lids/<lid> → pn: null; caso David Ochoa, City FC,
+// 5 oct 2026). Sin número el bot no puede reconocer al jugador/admin. Flujo:
+//   1. Se le pide el celular con el que está registrado.
+//   2. Si ese número existe en algún club, se envía un código de 4 dígitos A ESE
+//      NÚMERO (@c.us), no al chat que preguntó: si alguien escribe un número
+//      ajeno, el código le llega al dueño real.
+//   3. Con el código correcto se guarda lid → número en clubs.config.wa_lids del
+//      club del usuario (persistente; wa_sessions se borra a los 20 min) y desde
+//      ahí se le reconoce directo.
+// wa_lids es campo protegido en PATCH /api/config (el club no puede escribirlo).
+const LID_MAX_INTENTOS = 3;
+const LID_CODIGO_MIN   = 10;
+
+async function buscarLidVerificado(lidChat) {
+  const key = String(lidChat).replace(/\D/g, '');
+  const { data } = await db.supabase.from('clubs').select('config');
+  for (const c of data || []) {
+    const tel = c.config?.wa_lids?.[key];
+    if (tel) return String(tel);
+  }
+  return null;
+}
+
+async function guardarLidVerificado(lidChat, telefono, contexto) {
+  const key = String(lidChat).replace(/\D/g, '');
+  const clubIds = new Set();
+  if (contexto?.club_id) clubIds.add(contexto.club_id);
+  for (const j of contexto?.jugadores || []) if (j.club_id) clubIds.add(j.club_id);
+  for (const id of clubIds) {
+    const { data: club } = await db.supabase.from('clubs').select('config').eq('id', id).maybeSingle();
+    if (!club) continue;
+    const config = { ...(club.config || {}), wa_lids: { ...(club.config?.wa_lids || {}), [key]: telefono } };
+    await db.supabase.from('clubs').update({ config }).eq('id', id);
+  }
+}
+
+// Devuelve true si el mensaje quedó atendido por este flujo; false si debe
+// seguir el flujo normal (visitante que no es de ningún club).
+async function verificarLid(lidChat, texto) {
+  const { data: sesion } = await db.supabase.from('wa_sessions').select('contexto, messages').eq('phone', lidChat).maybeSingle();
+  const v = { ...(sesion?.contexto?.lid_verif || {}) };
+  if (v.omitido) return false;
+  if ((sesion?.messages || []).length > 0 && !v.avisado && !v.codigo) return false;
+
+  const guardar = (estado) => db.supabase.from('wa_sessions')
+    .update({ contexto: { ...(sesion?.contexto || {}), lid_verif: estado }, updated_at: new Date().toISOString() })
+    .eq('phone', lidChat);
+  const t = String(texto || '').trim();
+  const digitos = t.replace(/\D/g, '');
+
+  // Código de verificación
+  if (v.codigo && /^\d{4}$/.test(t)) {
+    if (Date.now() > v.expira) {
+      await guardar({ avisado: true });
+      await sendWAHA(lidChat, 'Ese código ya venció ⏱️ Escríbeme de nuevo el celular con el que estás registrado y te envío uno nuevo.');
+      return true;
+    }
+    if (t !== v.codigo) {
+      const intentos = (v.intentos || 0) + 1;
+      if (intentos >= LID_MAX_INTENTOS) {
+        await guardar({ avisado: true });
+        await sendWAHA(lidChat, 'El código no coincide y se agotaron los intentos. Escríbeme de nuevo tu celular registrado para enviarte uno nuevo.');
+      } else {
+        await guardar({ ...v, intentos });
+        await sendWAHA(lidChat, `Ese código no coincide 🤔 Revisa el mensaje que te llegó e inténtalo de nuevo (te quedan ${LID_MAX_INTENTOS - intentos}).`);
+      }
+      return true;
+    }
+    const { rol, contexto } = await identificarRol(v.telefono, null);
+    await guardarLidVerificado(lidChat, v.telefono, contexto);
+    await db.supabase.from('wa_sessions').delete().eq('phone', lidChat);
+    const primerNombre = String(contexto?.nombre || '').split(' ')[0].toLowerCase();
+    const nombre = primerNombre ? `, ${primerNombre.charAt(0).toUpperCase()}${primerNombre.slice(1)}` : '';
+    await sendWAHA(lidChat, `✅ ¡Listo${nombre}! Ya confirmé que eres tú. Desde ahora te reconozco cada vez que me escribas.\n\n¿En qué te ayudo? Por ejemplo: "quiero ver mi estado de cuenta".`);
+    console.log('[wa-agent] lid verificado:', lidChat, '→ rol', rol);
+    return true;
+  }
+
+  // Celular registrado (10 dígitos o con 57)
+  if (/^(57)?3\d{9}$/.test(digitos) && t.replace(/[\d\s+()-]/g, '').length === 0) {
+    const telefono = digitos.length === 10 ? `57${digitos}` : digitos;
+    const envios = v.envios || 0;
+    if (envios >= LID_MAX_INTENTOS) {
+      await sendWAHA(lidChat, 'Ya intentamos varias veces 🙏 Pídele al administrador de tu club que te envíe tu estado de cuenta desde la plataforma, o escríbeme más tarde.');
+      return true;
+    }
+    const { rol } = await identificarRol(telefono, null);
+    if (rol === 'visitante') {
+      await guardar({ ...v, avisado: true, envios: envios + 1 });
+      await sendWAHA(lidChat, 'No encuentro ese número registrado en ningún club 🤔 Revisa que sea el mismo que tiene tu club en la plataforma, o pídele al administrador que lo actualice.\n\nSi no eres de un club y quieres conocer ZenSports, escribe *menú*.');
+      return true;
+    }
+    const codigo = String(crypto.randomInt(0, 10000)).padStart(4, '0');
+    await guardar({ avisado: true, telefono, codigo, expira: Date.now() + LID_CODIGO_MIN * 60 * 1000, intentos: 0, envios: envios + 1 });
+    await sendWAHA(`${telefono}@c.us`, `🔐 Tu código de ZenSports es *${codigo}*\n\nEscríbelo en el chat con Zen para confirmar que este número es tuyo. Vence en ${LID_CODIGO_MIN} minutos. Si no lo pediste, ignora este mensaje.`);
+    await sendWAHA(lidChat, `Te envié un código de 4 dígitos al WhatsApp terminado en ••${telefono.slice(-2)} 📲 Escríbelo aquí para confirmar.`);
+    return true;
+  }
+
+  // Primer mensaje: explicar y pedir el número
+  if (!v.avisado) {
+    await guardar({ avisado: true });
+    await sendWAHA(lidChat, '👋 ¡Hola! Soy *Zen*, el asistente de *ZenSports*.\n\nPor la privacidad de tu cuenta de WhatsApp no puedo ver tu número, así que no sé de qué club eres 🔒\n\nSi eres jugador o directivo de un club, escríbeme el *celular con el que estás registrado* (ej: 3001234567) y te envío un código para confirmar que eres tú.\n\nSi quieres conocer ZenSports, escribe *menú*.');
+    return true;
+  }
+
+  // Ya avisado y no mandó número ni código → sigue como visitante normal
+  await guardar({ ...v, omitido: true });
+  return false;
+}
+
 // ── Resolver @lid al número real de teléfono via WAHA ────────────────────────
 async function resolverLid(lidId) {
   const wahaUrl = process.env.WAHA_URL;
@@ -1849,6 +1962,14 @@ router.post('/waha', webhookLimiter, async (req, res) => {
       const resolved = await resolverLid(rawFrom);
       if (resolved) from = resolved;
     }
+    // @lid sin número en WAHA: usar el mapeo verificado si existe; si no, pasa
+    // por la verificación por código (ver verificarLid) antes del flujo normal.
+    let lidSinNumero = null;
+    if (rawFrom.includes('@lid') && from.includes('@lid')) {
+      const verificado = await buscarLidVerificado(rawFrom);
+      if (verificado) from = verificado;
+      else lidSinNumero = rawFrom;
+    }
     // Responder por el mismo chat por el que escribió (ver services/waha.js#recordarChatOrigen)
     recordarChatOrigen(from, rawFrom);
 
@@ -1897,6 +2018,15 @@ router.post('/waha', webhookLimiter, async (req, res) => {
 
     // Ya pasó el dedup: es un mensaje real por procesar → leído + "escribiendo…"
     await avisarRecibido(rawFrom);
+
+    if (lidSinNumero) {
+      try {
+        const atendido = await verificarLid(lidSinNumero, isText ? payload.body : '');
+        if (atendido) return res.status(200).json({ status: 'lid_verificacion' });
+      } catch (lidErr) {
+        console.error('[wa-agent] verificarLid error:', lidErr.message);
+      }
+    }
 
     // ── Mensajes no-texto (imagen, audio, video, documento) ──────────────────
     if (!isText) {
