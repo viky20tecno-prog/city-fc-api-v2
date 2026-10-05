@@ -1794,13 +1794,23 @@ async function guardarLidVerificado(lidChat, telefono, contexto) {
 // Devuelve true si el mensaje quedó atendido por este flujo; false si debe
 // seguir el flujo normal (visitante que no es de ningún club).
 async function verificarLid(lidChat, texto) {
-  const { data: sesion } = await db.supabase.from('wa_sessions').select('contexto, messages').eq('phone', lidChat).maybeSingle();
-  const v = { ...(sesion?.contexto?.lid_verif || {}) };
+  const { data: sesion } = await db.supabase.from('wa_sessions').select('contexto, messages, last_interaction').eq('phone', lidChat).maybeSingle();
+  // Sesión vencida (o vieja sin last_interaction) = conversación nueva: el cron de
+  // limpieza no siempre corre, así que no se puede confiar en que la fila ya no exista.
+  const limiteMin = sesion?.contexto?.lid_verif?.codigo ? LID_CODIGO_MIN : SESSION_TIMEOUT_MIN;
+  const vencida = !sesion?.last_interaction ||
+    Date.now() - new Date(sesion.last_interaction).getTime() > limiteMin * 60 * 1000;
+  const v = vencida ? {} : { ...(sesion?.contexto?.lid_verif || {}) };
   if (v.omitido) return false;
-  if ((sesion?.messages || []).length > 0 && !v.avisado && !v.codigo) return false;
+  if (!vencida && (sesion?.messages || []).length > 0 && !v.avisado && !v.codigo) return false;
 
   const guardar = (estado) => db.supabase.from('wa_sessions')
-    .update({ contexto: { ...(sesion?.contexto || {}), lid_verif: estado }, updated_at: new Date().toISOString() })
+    .update({
+      contexto: { ...(vencida ? {} : sesion?.contexto || {}), lid_verif: estado },
+      ...(vencida ? { messages: [] } : {}),
+      updated_at: new Date().toISOString(),
+      last_interaction: new Date().toISOString(),
+    })
     .eq('phone', lidChat);
   const t = String(texto || '').trim();
   const digitos = t.replace(/\D/g, '');
