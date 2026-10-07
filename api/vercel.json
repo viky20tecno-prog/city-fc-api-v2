@@ -5,7 +5,11 @@
       "src": "index.js",
       "use": "@vercel/node",
       "config": {
-        "includeFiles": ["routes/**", "services/**", "middleware/**"],
+        "includeFiles": [
+          "routes/**",
+          "services/**",
+          "middleware/**"
+        ],
         "maxDuration": 60
       }
     }
@@ -20,6 +24,14 @@
     {
       "path": "/api/cron/emails",
       "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/cron/cleanup-sessions",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/health-report",
+      "schedule": "0 13 * * 1"
     }
   ]
 }

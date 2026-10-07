@@ -159,7 +159,8 @@ async function descargarMediaWaha(mediaUrl) {
 // URL pública — reemplaza la URL de WAHA que expira en minutos.
 async function subirComprobanteAStorage(buffer, mediaType, clubSlug, cedula) {
   const ext  = mediaType.split('/')[1] || 'jpg';
-  const path = `${clubSlug}/comprobantes/${cedula}-${Date.now()}.${ext}`;
+  // Sufijo aleatorio: el nombre no se puede adivinar a partir de la cédula y la hora.
+  const path = `${clubSlug}/comprobantes/${cedula}-${Date.now()}-${crypto.randomBytes(8).toString('hex')}.${ext}`;
   const { error } = await db.supabase.storage.from('club-assets').upload(path, buffer, {
     contentType: mediaType,
     upsert: true,

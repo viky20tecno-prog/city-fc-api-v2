@@ -470,4 +470,24 @@ router.all('/waha-restart', async (req, res) => {
   }
 });
 
+// GET /api/cron/health-report — informe semanal de salud por correo (lunes 8:00 COL).
+// Solo lectura. ?dry=1 devuelve el informe en JSON sin enviar el correo.
+router.all('/health-report', async (req, res) => {
+  if (!verifyCronSecret(req, res)) return;
+  try {
+    const { generarInforme, htmlInforme } = require('../services/healthReport');
+    const { sendEmail } = require('../services/email');
+    const informe = await generarInforme();
+    if (req.query.dry) return res.json({ success: true, ...informe });
+    const asunto = informe.malos
+      ? `⚠️ ZenSports: ${informe.malos} punto(s) por atender — informe semanal`
+      : informe.avisos ? `🩺 ZenSports: ${informe.avisos} aviso(s) — informe semanal` : '✅ ZenSports: todo en orden — informe semanal';
+    const envio = await sendEmail({ to: process.env.ALERT_EMAIL || 'diego31escobar@gmail.com', subject: asunto, html: htmlInforme(informe) });
+    res.json({ success: true, enviado: envio?.ok ?? false, malos: informe.malos, avisos: informe.avisos });
+  } catch (err) {
+    console.error('[cron/health-report] error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
