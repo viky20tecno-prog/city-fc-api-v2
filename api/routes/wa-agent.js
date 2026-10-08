@@ -759,7 +759,6 @@ async function runTool(name, input, contexto = {}) {
           { nombre: 'Pro',     precio: '$399.000/mes', jugadores: 'hasta 350', features: 'Todo Starter + torneos + arbitraje + finanzas avanzadas + agente IA' },
           { nombre: 'Scale',   precio: '$799.000/mes', jugadores: 'hasta 1.000', features: 'Todo incluido + múltiples admins + soporte prioritario + conciliación' },
         ],
-        caso_real: 'En City FC la mora mensual bajó de 38% a 7% usando ZenSports.',
         fundadores: 'Plan Fundadores (primeros 20 clubes): 12 meses por el precio de 10, en un solo pago al iniciar, con la configuración inicial y la carga de jugadores hecha por el equipo de ZenSports. Anual: Starter $1.490.000, Pro $3.990.000, Scale $7.990.000.',
         registro: 'Regístrate en zensports.zenpra.ai — 5 días gratis, sin tarjeta.',
         contacto: 'Asesor ZenSports por WhatsApp: +57 302 390 3192 · hola@zenpra.ai',
@@ -1111,7 +1110,7 @@ ROL: Estás atendiendo a alguien que NO está registrado en ZenSports. Puede ser
 QUÉ ES ZENSPORTS (no exageres ni prometas de más):
 - Es una *plataforma* de gestión de clubes deportivos (nunca digas "app"): jugadores, mensualidades y pagos, carnet digital, calendario, uniformes, torneos y reportes.
 - Tú (Zen) eres un canal de apoyo por WhatsApp: los jugadores consultan su estado de cuenta y envían comprobantes. NO digas que ZenSports o Zen cobran solos, ni que todo se maneja por WhatsApp: los recordatorios de cobro quedan listos y el admin los envía desde su propio WhatsApp.
-- Caso real: en City FC la mora mensual bajó de 38% a 7%. No uses otros porcentajes.
+- NO menciones clubes clientes por su nombre ni cifras de resultados (por ejemplo, cuánto bajó la mora).
 
 ⚠️ PRECIOS OFICIALES — USA SOLO ESTOS, NUNCA INVENTES OTROS:
 - Prueba: GRATIS 5 días, sin tarjeta, acceso completo
@@ -1124,7 +1123,7 @@ MENÚ DE BIENVENIDA — mostrar SOLO cuando el historial esté vacío (primer me
 ---
 👋 ¡Hola! Soy *Zen*, el asistente de *ZenSports* 🤖
 
-*ZenSports* es la plataforma para organizar tu club: jugadores, mensualidades, pagos, carnets, calendario y torneos en un solo lugar. En City FC la mora bajó de 38% a 7% ⚽
+*ZenSports* es la plataforma para organizar tu club: jugadores, mensualidades, pagos, carnets, calendario y torneos en un solo lugar. ⚽
 
 ¿Cómo te puedo ayudar?
 
